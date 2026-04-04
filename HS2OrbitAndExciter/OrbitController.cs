@@ -1,10 +1,10 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using AIChara;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace HS2OrbitAndExciter
 {
@@ -22,13 +22,8 @@ namespace HS2OrbitAndExciter
 
         private static readonly float[] AnglePresets = { 0f, 45f, 90f, 135f, 180f };
 
-        /// <summary>When true, game gives camera to player; when false, orbit keeps control. Use mouse only — Q/W/E use GetKeyDown in vanilla and must not hold NoCtrl true across frames (breaks focus hotkeys + camera proc ordering).</summary>
-        private static bool IsUserControllingCamera()
-        {
-            return Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButton(2);
-        }
-
-        private static readonly BaseCameraControl_Ver2.NoCtrlFunc NoCtrlOrbit = () => IsUserControllingCamera();
+        /// <summary>While orbit is on, return true so vanilla treats the player as able to interact (H UI action lists receive LMB). Yaw is still written in this LateUpdate before <see cref="CameraControl_Ver2.LateUpdate"/>.</summary>
+        private static readonly BaseCameraControl_Ver2.NoCtrlFunc NoCtrlOrbit = () => true;
 
         private const float HotkeyCooldownSeconds = 0.25f;
         /// <summary>When choosing orbit focus option, prefer the game's default camera (option==maxFocus) to reduce distance surprises.</summary>
@@ -37,44 +32,7 @@ namespace HS2OrbitAndExciter
         private bool _orbitActive;
         /// <summary>Mirror of _orbitActive for Harmony patches (static read).</summary>
         private static bool _orbitActiveForPatches;
-        private BaseCameraControl_Ver2.NoCtrlFunc? _savedNoCtrlCondition;
         private float _lastHotkeyTime = -999f;
-
-        // #region agent log
-        private static void DebugLog(string location, string message, string dataJson, string hypothesisId)
-        {
-            var logPath = Path.Combine(@"d:\HS4", "debug-9961ad.log");
-            var ts = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var line = $"{{\"sessionId\":\"9961ad\",\"location\":\"{location}\",\"message\":\"{message}\",\"data\":{dataJson},\"hypothesisId\":\"{hypothesisId}\",\"timestamp\":{ts}}}\n";
-            try { File.AppendAllText(logPath, line); } catch { }
-        }
-        private static void Debug341efeLog(string location, string message, string dataJson, string hypothesisId)
-        {
-            var logPath = Path.Combine(@"d:\HS4", "debug-341efe.log");
-            var ts = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            // Keep escaping minimal; these strings are controlled by code (no user input).
-            string escLoc = (location ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-            string escMsg = (message ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-            string escHyp = (hypothesisId ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-            var line =
-                $"{{\"sessionId\":\"341efe\",\"runId\":\"run1\",\"hypothesisId\":\"{escHyp}\",\"location\":\"{escLoc}\",\"message\":\"{escMsg}\",\"data\":{dataJson},\"timestamp\":{ts}}}\n";
-            try { File.AppendAllText(logPath, line); } catch { }
-        }
-        private static void DebugSessionLog(string location, string message, string dataJson, string hypothesisId)
-        {
-            var logPath = Path.Combine(@"d:\HS4", "debug-b1efc0.log");
-            var ts = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var line = $"{{\"sessionId\":\"b1efc0\",\"runId\":\"run1\",\"hypothesisId\":\"{hypothesisId}\",\"location\":\"{location}\",\"message\":\"{message}\",\"data\":{dataJson},\"timestamp\":{ts}}}\n";
-            try { File.AppendAllText(logPath, line); Debug341efeLog(location, message, dataJson, hypothesisId); } catch { }
-        }
-        private static void DebugAutoAdvance(string location, string message, string dataJson, string hypothesisId)
-        {
-            var logPath = Path.Combine(@"d:\HS4", "debug-11c59c.log");
-            var ts = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var line = $"{{\"sessionId\":\"11c59c\",\"runId\":\"run1\",\"hypothesisId\":\"{hypothesisId}\",\"location\":\"{location}\",\"message\":\"{message}\",\"data\":{dataJson},\"timestamp\":{ts}}}\n";
-            try { File.AppendAllText(logPath, line); Debug341efeLog(location, message, dataJson, hypothesisId); } catch { }
-        }
-        // #endregion
 
         private float _startOrbitY;
         private int _orbitPhase;
@@ -88,6 +46,12 @@ namespace HS2OrbitAndExciter
         private object? _lastNowAnimationInfoRef;
         /// <summary>When true, next LateUpdate will call ApplyCurrentViewOption once (e.g. after faintness toggle).</summary>
         private static bool _requestViewReapplyNextFrame;
+        private static float _manualSelectionSuppressUntilUnscaled = -1f;
+        private const float ManualSelectionSuppressSeconds = 3.0f;
+        private static float _orbitAutoActionGraceUntilUnscaled = -1f;
+        private const float OrbitAutoActionGraceSeconds = 2.5f;
+        private static float _autoActionNullSelectionSinceUnscaled = -1f;
+        private const float AutoActionNullSelectionMinSeconds = 1.5f;
 
         private static FieldInfo _feelFField;
         /// <summary>Seconds spent at checkpoint (Idle, no selection) while orbit is on; reset when we advance or leave checkpoint.</summary>
@@ -111,17 +75,6 @@ namespace HS2OrbitAndExciter
         {
             "WLoop", "SLoop", "OLoop", "D_WLoop", "D_SLoop", "D_OLoop",
             "MLoop",
-            "WIdle", "SIdle", "WAction", "SAction", "D_Action"
-        };
-
-        private static readonly string[] OrbitDebugStateMatchNames = new[]
-        {
-            // Entry/loop states we care about for orbit auto-pass
-            "Idle", "D_Idle",
-            "WLoop", "SLoop", "OLoop", "D_WLoop", "D_SLoop", "D_OLoop",
-            "Orgasm", "Orgasm_A", "D_Orgasm", "D_Orgasm_A",
-            "Orgasm_OUT", "Orgasm_IN", "OrgasmF_IN", "OrgasmM_IN", "OrgasmS_IN",
-            // Also include action-loop whitelist names (e.g. WIdle/SIdle/WAction/SAction)
             "WIdle", "SIdle", "WAction", "SAction", "D_Action"
         };
 
@@ -153,33 +106,6 @@ namespace HS2OrbitAndExciter
 
         /// <summary>Whether orbit is currently active (for Harmony patches).</summary>
         public static bool IsOrbitActive() => _orbitActiveForPatches;
-
-        private static string GetFirstFemaleAnimatorStateLabel(HScene hScene)
-        {
-            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
-            if (chaFemales == null || chaFemales.Length == 0) return "unknown";
-            var cha = chaFemales[0];
-            if (cha == null) return "unknown";
-            var animBody = Traverse.Create(cha).Field("animBody").GetValue();
-            if (animBody == null) return "unknown";
-            var animType = animBody.GetType();
-            var getState = animType.GetMethod("GetCurrentAnimatorStateInfo", new[] { typeof(int) });
-            if (getState == null) return "unknown";
-            var state = getState.Invoke(animBody, new object[] { 0 });
-            if (state == null) return "unknown";
-            var isName = state.GetType().GetMethod("IsName", new[] { typeof(string) });
-            if (isName == null) return "unknown";
-            foreach (var name in OrbitDebugStateMatchNames)
-            {
-                try
-                {
-                    if ((bool)isName.Invoke(state, new object[] { name }))
-                        return name;
-                }
-                catch { }
-            }
-            return "unknown";
-        }
 
         /// <summary>True when in preparation state: Idle/D_Idle and speed &lt;= 0.</summary>
         private static bool IsInPreparationState(HScene hScene)
@@ -234,16 +160,32 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>When orbit is on and OrbitAutoActionEnabled: set isAutoActionChange and initiative so game auto-picks next action.</summary>
-        private static int _autoActionLogCounter;
         private void ApplyOrbitAutoAction(HScene hScene)
         {
-            // #region agent log
-            bool enabled = HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value == true;
-            if (!enabled) { DebugAutoAdvance("OrbitController.ApplyOrbitAutoAction", "skip", "{\"reason\":\"OrbitAutoActionEnabled false\"}", "H1"); return; }
+            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
+                return;
             var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null) { DebugAutoAdvance("OrbitController.ApplyOrbitAutoAction", "skip", "{\"reason\":\"ctrlFlag null\"}", "H1"); return; }
-            _autoActionLogCounter++;
-            // #endregion
+            if (ctrlFlag == null)
+                return;
+            if (ShouldSuppressAutoAction(ctrlFlag, out _))
+            {
+                ctrlFlag.isAutoActionChange = false;
+                ctrlFlag.initiative = 0;
+                _autoActionNullSelectionSinceUnscaled = -1f;
+                return;
+            }
+            bool hasSelectionNow = ctrlFlag.selectAnimationListInfo != null;
+            if (hasSelectionNow)
+            {
+                _autoActionNullSelectionSinceUnscaled = -1f;
+                return;
+            }
+            if (_autoActionNullSelectionSinceUnscaled < 0f)
+                _autoActionNullSelectionSinceUnscaled = Time.unscaledTime;
+            float nullSelectionElapsed = Time.unscaledTime - _autoActionNullSelectionSinceUnscaled;
+            if (nullSelectionElapsed < AutoActionNullSelectionMinSeconds)
+                return;
+
             var flagType = ctrlFlag.GetType();
             if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
             {
@@ -260,83 +202,28 @@ namespace HS2OrbitAndExciter
             }
             catch { }
             Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            // #region agent log
-            bool readBack = ctrlFlag.isAutoActionChange;
-            if (_autoActionLogCounter % 120 == 1)
-                DebugAutoAdvance("OrbitController.ApplyOrbitAutoAction", "set",
-                    "{\"isAutoActionChange\":true,\"initiative\":1,\"readBackAutoChange\":" + (readBack ? "true" : "false") + "}", "H2");
-            // #endregion
         }
 
         /// <summary>When orbit is on and stuck at checkpoint (Idle, no selection) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation to advance.</summary>
-        private static int _checkpointLogTicks;
-        private static float _orbitDebugLastLogTime = -999f;
-        private static string? _orbitDebugLastStateLabel;
-        private static bool _orbitDebugLastSelectIsNull = true;
-        private static bool _orbitDebugLastAutoActionChange;
-        private static int _orbitDebugLastInitiative;
-        private const float OrbitDebugLogIntervalSeconds = 0.5f;
-        private void DebugOrbitIdlePass(HScene hScene)
-        {
-            if (!IsOrbitActive()) return;
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null) return;
-            string stateLabel = GetFirstFemaleAnimatorStateLabel(hScene);
-
-            bool selectIsNull = ctrlFlag.selectAnimationListInfo == null;
-            bool autoChange = ctrlFlag.isAutoActionChange;
-            int initiative = ctrlFlag.initiative;
-            float speed = ctrlFlag.speed;
-
-            float feelF = 0f;
-            try
-            {
-                feelF = (float)(Traverse.Create(ctrlFlag).Field("feel_f").GetValue() ?? 0f);
-            }
-            catch { }
-
-            float now = Time.unscaledTime;
-            bool stateChanged = !string.Equals(stateLabel, _orbitDebugLastStateLabel, System.StringComparison.Ordinal);
-            bool selectionChanged = selectIsNull != _orbitDebugLastSelectIsNull;
-            bool autoChanged = autoChange != _orbitDebugLastAutoActionChange;
-            bool initiativeChanged = initiative != _orbitDebugLastInitiative;
-            bool intervalElapsed = now - _orbitDebugLastLogTime >= OrbitDebugLogIntervalSeconds;
-
-            if (!intervalElapsed && !stateChanged && !selectionChanged && !autoChanged && !initiativeChanged)
-                return;
-
-            _orbitDebugLastLogTime = now;
-            _orbitDebugLastStateLabel = stateLabel;
-            _orbitDebugLastSelectIsNull = selectIsNull;
-            _orbitDebugLastAutoActionChange = autoChange;
-            _orbitDebugLastInitiative = initiative;
-
-            string data = "{"
-                + "\"state\":\"" + stateLabel + "\""
-                + ",\"selectNull\":" + (selectIsNull ? "true" : "false")
-                + ",\"autoActionChange\":" + (autoChange ? "true" : "false")
-                + ",\"initiative\":" + initiative
-                + ",\"speed\":" + speed.ToString("F2")
-                + ",\"feel_f\":" + feelF.ToString("F2")
-                + ",\"waitingForPrepStart\":" + (_waitingForPrepStart ? "true" : "false")
-                + ",\"checkpointIdleTime\":" + _checkpointIdleTime.ToString("F2")
-                + "}";
-            DebugSessionLog("OrbitController.DebugOrbitIdlePass", "orbitStatus", data, "O0");
-        }
-
         private void TryAutoAdvancePastCheckpoint(HScene hScene)
         {
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f) return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
+            if (ShouldSuppressAutoAction(ctrlFlag, out _))
+            {
+                _checkpointIdleTime = 0f;
+                return;
+            }
             var sel = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue();
             bool hasSelection = sel != null;
-            // #region agent log
-            _checkpointLogTicks++;
-            if (_checkpointLogTicks % 60 == 0) DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "tick", "{\"timeout\":" + timeout.ToString("F1") + ",\"hasSelection\":" + (hasSelection ? "true" : "false") + ",\"idleTime\":" + _checkpointIdleTime.ToString("F2") + "}", "H3");
-            // #endregion
             if (hasSelection) { _checkpointIdleTime = 0f; return; }
+            if (Input.GetMouseButton(0))
+            {
+                _checkpointIdleTime = 0f;
+                return;
+            }
             // Runtime evidence: animator state label can stay "unknown" while game still has no selection — do not gate on Idle/D_Idle only.
             _checkpointIdleTime += Time.deltaTime;
             if (_checkpointIdleTime < timeout) return;
@@ -344,31 +231,25 @@ namespace HS2OrbitAndExciter
             if (_getAutoAnimationMethod == null)
             {
                 _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_getAutoAnimationMethod == null) { DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "noMethod", "{}", "H4"); return; }
+                if (_getAutoAnimationMethod == null)
+                    return;
             }
-            // #region agent log
-            DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "invokeGetAutoAnimation", "{\"before\":true}", "H4");
-            // #endregion
             try
             {
                 _getAutoAnimationMethod.Invoke(hScene, new object[] { false });
                 if (Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() == null)
                     _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
             }
-            catch (System.Exception e) { DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "invokeException", "{\"msg\":\"" + (e.Message ?? "").Replace("\"", "'") + "\"}", "H4"); }
-            // #region agent log
-            bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
-            DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "afterInvoke", "{\"selectAnimationListInfoSet\":" + (hasSelAfter ? "true" : "false") + "}", "H4");
-            // #endregion
+            catch { }
 
             // Fallback: if we still can't pick next action, try to bump speed once (no feel_f change).
+            bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
             if (!hasSelAfter)
             {
                 try
                 {
                     const float FallbackSpeedBump = 1.2f;
                     Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
-                    DebugAutoAdvance("OrbitController.TryAutoAdvancePastCheckpoint", "fallbackSpeedBump", "{\"speed\":" + FallbackSpeedBump.ToString("F2") + "}", "H6");
                 }
                 catch { }
             }
@@ -376,38 +257,30 @@ namespace HS2OrbitAndExciter
 
         private void Update()
         {
+            var hProbe = TryGetHScene();
+            if (hProbe != null && Input.GetMouseButtonDown(0))
+            {
+                bool overUi = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+                if (overUi)
+                    MarkManualUiClick();
+            }
+            else if (_orbitActive && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                // Keep suppress window alive while cursor stays on UI, so auto-action can't race hover->click.
+                float hoverUntil = Time.unscaledTime + 0.25f;
+                if (hoverUntil > _manualSelectionSuppressUntilUnscaled)
+                    _manualSelectionSuppressUntilUnscaled = hoverUntil;
+            }
             bool mod2 = Input.GetKey(Modifier2);
             bool mod = Input.GetKey(Modifier);
-            bool mod2R = Input.GetKey(KeyCode.RightControl);
-            bool modR = Input.GetKey(KeyCode.RightShift);
             bool oDown = Input.GetKeyDown(OrbitHotkey);
-            bool oKey = Input.GetKey(OrbitHotkey);
-            float cooldownLeft = HotkeyCooldownSeconds - (Time.unscaledTime - _lastHotkeyTime);
-            // #region agent log
-            if (oDown && (mod2 || mod2R || mod || modR))
-            {
-                bool leftCombo = mod2 && mod && oDown;
-                bool rightUsed = mod2R || modR;
-                DebugSessionLog("OrbitController.cs:Update", "O+modifiers",
-                    "{\"oDown\":true,\"leftCtrl\":" + (mod2 ? "true" : "false") + ",\"leftShift\":" + (mod ? "true" : "false") + ",\"rightCtrl\":" + (mod2R ? "true" : "false") + ",\"rightShift\":" + (modR ? "true" : "false") + ",\"leftComboSatisfied\":" + (leftCombo ? "true" : "false") + ",\"rightUsed\":" + (rightUsed ? "true" : "false") + "}",
-                    leftCombo ? "H4" : "H1");
-            }
-            // #endregion
             if (mod2 && mod && oDown)
             {
                 if (Time.unscaledTime - _lastHotkeyTime < HotkeyCooldownSeconds)
-                {
-                    // #region agent log
-                    DebugSessionLog("OrbitController.cs:Update", "Cooldown skip", "{\"cooldownLeft\":" + cooldownLeft.ToString("F2") + ",\"_orbitActive\":" + (_orbitActive ? "true" : "false") + "}", "H2");
-                    // #endregion
                     return;
-                }
                 _lastHotkeyTime = Time.unscaledTime;
                 _orbitActive = !_orbitActive;
                 _orbitActiveForPatches = _orbitActive;
-                // #region agent log
-                DebugSessionLog("OrbitController.cs:Update", "Toggle orbit", "{\"_orbitActive\":" + (_orbitActive ? "true" : "false") + "}", "H4");
-                // #endregion
                 OnOrbitToggled(_orbitActive);
             }
         }
@@ -425,9 +298,6 @@ namespace HS2OrbitAndExciter
 
             var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
             if (ctrl == null) return;
-
-            ApplyOrbitScrollZoom(ctrl);
-
             ApplyOrbitFocusHotkeys(hScene, ctrl);
 
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
@@ -446,7 +316,7 @@ namespace HS2OrbitAndExciter
             // Excitement gauge auto-accumulates while orbit is active (skipped during prep countdown)
             AccumulateFeelWhenOrbit(hScene);
 
-            // ApplyOrbitAutoAction / DebugOrbitIdlePass / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
+            // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
             // Re-apply camera takeover every frame (e.g. after ChangeAnimation sets camera flag)
             ctrl.NoCtrlCondition = NoCtrlOrbit;
@@ -565,23 +435,6 @@ namespace HS2OrbitAndExciter
 
             SetDistanceForFocus(ctrl, chaFemales, newOpt);
             _currentViewOption = newOpt;
-            // #region agent log
-            Debug341efeLog("OrbitController.ApplyOrbitFocusHotkeys", "focusHotkey",
-                "{\"newOpt\":" + newOpt + ",\"shift\":" + (shift ? "true" : "false") + "}", "QWE");
-            // #endregion
-        }
-
-        /// <summary>H-scene camera sets ZoomCondition to always false, so wheel never runs; mirror InputMouseWheelZoomProc while orbit is on.</summary>
-        private static void ApplyOrbitScrollZoom(CameraControl_Ver2 ctrl)
-        {
-            float num = Input.GetAxis("Mouse ScrollWheel") * ctrl.zoomSpeed;
-            if (Mathf.Approximately(num, 0f)) return;
-            var dir = ctrl.CameraDir;
-            dir.z += num;
-            dir.z = Mathf.Min(0f, dir.z);
-            if (ctrl.isLimitDir)
-                dir.z = Mathf.Clamp(dir.z, -ctrl.limitDir, 0f);
-            ctrl.CameraDir = dir;
         }
 
         /// <summary>Apply current view option: body focus (GetFocusPosition + SetDistanceForFocus) or pose default camera (setCameraLoad).</summary>
@@ -621,6 +474,7 @@ namespace HS2OrbitAndExciter
             int nPose = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
             bool changePose = HS2OrbitAndExciter.ChangePoseOnCycle?.Value ?? false;
             bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
+            bool suppressCycleActions = ShouldSuppressAutoAction(hScene.ctrlFlag, out _);
 
             if (nRandom > 0 && _orbitCycleCount % nRandom == 0)
             {
@@ -645,7 +499,7 @@ namespace HS2OrbitAndExciter
                 _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
             }
 
-            if (clothesEnabled)
+            if (clothesEnabled && !suppressCycleActions)
             {
                 _currentClothesSequenceIndex = (_currentClothesSequenceIndex + 1) % 6;
                 int stage = OrbitHelpers.ClothesSequenceStage(_currentClothesSequenceIndex);
@@ -653,7 +507,7 @@ namespace HS2OrbitAndExciter
                 OrbitHelpers.SetClothesStage(chaFemales, chaMales, stage);
             }
 
-            if (changePose && nPose > 0 && _orbitCycleCount % nPose == 0)
+            if (changePose && !suppressCycleActions && nPose > 0 && _orbitCycleCount % nPose == 0)
             {
                 var all = OrbitHelpers.GetAllPoseList();
                 if (all.Count > 0)
@@ -668,10 +522,7 @@ namespace HS2OrbitAndExciter
 
         private void OnOrbitToggled(bool active)
         {
-            // #region agent log
             var hScene = GetHScene();
-            DebugSessionLog("OrbitController.cs:OnOrbitToggled", "entry", "{\"active\":" + (active ? "true" : "false") + ",\"hSceneNotNull\":" + (hScene != null ? "true" : "false") + "}", "H5");
-            // #endregion
             if (hScene == null)
             {
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: No H scene; orbit will start when entering H.");
@@ -679,17 +530,12 @@ namespace HS2OrbitAndExciter
             }
 
             var ctrl = hScene.ctrlFlag?.cameraCtrl;
-            // #region agent log
-            DebugSessionLog("OrbitController.cs:OnOrbitToggled", "ctrl check", "{\"ctrlNotNull\":" + (ctrl != null ? "true" : "false") + "}", "H5");
-            // #endregion
             if (ctrl == null) return;
 
             if (active)
             {
                 _orbitActiveForPatches = true;
-                // Only save game's delegate; never save our own or we restore it on stop and camera stays locked
-                if (ctrl.NoCtrlCondition != NoCtrlOrbit)
-                    _savedNoCtrlCondition = ctrl.NoCtrlCondition;
+                _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
                 _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
                 _orbitPhase = 0;
@@ -716,14 +562,11 @@ namespace HS2OrbitAndExciter
             else
             {
                 _orbitActiveForPatches = false;
+                _orbitAutoActionGraceUntilUnscaled = -1f;
+                _autoActionNullSelectionSinceUnscaled = -1f;
                 _waitingForPrepStart = false;
-                // #region agent log
-                DebugLog("OrbitController.cs:OnOrbitToggled", "Stopping orbit, restoring NoCtrlCondition", "{\"hasSaved\":" + (_savedNoCtrlCondition != null ? "true" : "false") + "}", "H5");
-                // #endregion
-                if (_savedNoCtrlCondition != null && _savedNoCtrlCondition != NoCtrlOrbit)
-                    ctrl.NoCtrlCondition = _savedNoCtrlCondition;
-                else
-                    ctrl.NoCtrlCondition = () => true; // ensure player gets control back if we had no valid saved
+                // Restoring saved delegate can evaluate false after orbit stop and keep UI unclickable; keep permissive after orbit off.
+                ctrl.NoCtrlCondition = () => true;
             }
         }
 
@@ -742,7 +585,6 @@ namespace HS2OrbitAndExciter
         {
             if (!_orbitActive || hScene == null) return;
             ApplyOrbitAutoAction(hScene);
-            DebugOrbitIdlePass(hScene);
             TryAutoAdvancePastCheckpoint(hScene);
         }
 
@@ -750,6 +592,42 @@ namespace HS2OrbitAndExciter
         public static void RequestViewReapply()
         {
             _requestViewReapplyNextFrame = true;
+        }
+
+        internal static void MarkManualUiClick()
+        {
+            _manualSelectionSuppressUntilUnscaled = Time.unscaledTime + ManualSelectionSuppressSeconds;
+        }
+
+        internal static bool ShouldSuppressAutoAction(HSceneFlagCtrl? ctrlFlag, out string reason)
+        {
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                reason = "pointerOverUi";
+                return true;
+            }
+            if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
+            {
+                reason = "orbitStartGrace";
+                return true;
+            }
+            if (ctrlFlag != null && ctrlFlag.selectAnimationListInfo != null)
+            {
+                reason = "selectionListPresent";
+                return true;
+            }
+            if (Input.GetMouseButton(0))
+            {
+                reason = "mouseHolding";
+                return true;
+            }
+            if (Time.unscaledTime < _manualSelectionSuppressUntilUnscaled)
+            {
+                reason = "recentUiClick";
+                return true;
+            }
+            reason = "none";
+            return false;
         }
     }
 }

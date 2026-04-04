@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
+    <!-- Directory.Build.targets：建置後複製為 HS2.PhotoToCard_<git>_<date>[_dirty].dll -->
+    <HS2DeployThisPlugin>true</HS2DeployThisPlugin>
     <AssemblyName>HS2.PhotoToCard</AssemblyName>
     <RootNamespace>HS2.PhotoToCard.Plugin</RootNamespace>
     <LangVersion>latest</LangVersion>
@@ -65,9 +67,5 @@
   <Target Name="CheckGameRefs" BeforeTargets="CoreCompile">
     <Error Condition="!Exists('$(HS2Managed)\Assembly-CSharp.dll') and !Exists('refs\Assembly-CSharp.dll')"
            Text="HS2 game refs missing. Set HS2Managed to your game's HoneySelect2_Data\Managed (e.g. dotnet build -p:HS2Managed=D:\HS2\HoneySelect2_Data\Managed) or copy Assembly-CSharp.dll, UnityEngine.dll, UnityEngine.CoreModule.dll, UnityEngine.IMGUIModule.dll into BepInEx_HS2_PhotoToCard\refs\" />
-  </Target>
-  <Target Name="CopyToHS2" AfterTargets="Build" Condition="Exists('$(HS2BepInEx)\plugins') and '$(CopyToHS2Plugins)' == 'true'">
-    <Copy SourceFiles="$(OutputPath)HS2.PhotoToCard.dll" DestinationFolder="$(HS2BepInEx)\plugins" SkipUnchangedFiles="true" />
-    <Message Importance="high" Text="Copied HS2.PhotoToCard.dll to $(HS2BepInEx)\plugins" />
   </Target>
 </Project>

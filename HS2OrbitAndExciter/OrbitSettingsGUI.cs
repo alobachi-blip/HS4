@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using UnityEngine;
 
 namespace HS2OrbitAndExciter
@@ -12,16 +10,11 @@ namespace HS2OrbitAndExciter
         private const KeyCode MenuHotkey = KeyCode.P;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private static readonly string DebugLogPath = System.IO.Path.Combine(@"d:\HS4", "debug-069a45.log");
-        private static readonly string DebugLogPathFallback = System.IO.Path.Combine(@"D:\hs2", "BepInEx", "debug-069a45.log");
-
         private bool _visible;
         private bool _needSyncFromConfig; // 每次打開視窗時從 config 同步顯示，確保看到的是已保存的值
-        private Rect _windowRect = new Rect(100, 100, 420, 380);
+        private Rect _windowRect = new Rect(100, 100, 420, 460);
         private GUIStyle? _labelStyle;
         private bool _stylesInitialized;
-        private int _onGuiCallCount;
-
         // Per-field strings so TextField isn't reset from config every frame (which hides typing)
         private string _orbitTimeStr = "";
         private string _orbitCountRandomStr = "";
@@ -34,21 +27,6 @@ namespace HS2OrbitAndExciter
         private string _orbitDistPelvisStr = "";
 
         private bool _lastOverrideFaintness;
-
-        // #region agent log
-        private static void DebugLog(string location, string message, object data, string hypothesisId)
-        {
-            try
-            {
-                var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                var dataStr = data != null ? data.ToString() : "null";
-                var line = $"{{\"sessionId\":\"069a45\",\"runId\":\"run1\",\"hypothesisId\":\"{hypothesisId}\",\"location\":\"{Escape(location)}\",\"message\":\"{Escape(message)}\",\"data\":\"{Escape(dataStr)}\",\"timestamp\":{ts}}}\n";
-                try { File.AppendAllText(DebugLogPath, line); } catch { File.AppendAllText(DebugLogPathFallback, line); }
-            }
-            catch { }
-        }
-        private static string Escape(string s) { return s?.Replace("\\", "\\\\").Replace("\"", "\\\"") ?? ""; }
-        // #endregion
 
         private void Update()
         {
@@ -90,11 +68,6 @@ namespace HS2OrbitAndExciter
                 _needSyncFromConfig = false;
             }
 
-            // #region agent log
-            _onGuiCallCount++;
-            if (_onGuiCallCount <= 3)
-                DebugLog("OrbitSettingsGUI.cs:OnGUI", "Drawing window", new { _onGuiCallCount, rect = _windowRect.ToString(), screenW = Screen.width, screenH = Screen.height }, "B");
-            // #endregion
             InitStyles();
             _windowRect = GUILayout.Window(9001, _windowRect, DrawWindow, "HS2 Orbit and Exciter — 設定");
         }
@@ -102,6 +75,11 @@ namespace HS2OrbitAndExciter
         private void DrawWindow(int id)
         {
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+
+            GUILayout.BeginVertical(GUI.skin.box);
+            foreach (var line in PluginBuildIdentity.GetGuiLines())
+                GUILayout.Label(line, _labelStyle ?? GUI.skin.label);
+            GUILayout.EndVertical();
 
             GUILayout.Label("環視 POV (Orbit)", GUI.skin.box);
             if (HS2OrbitAndExciter.OrbitTimePer360 != null)
@@ -235,7 +213,7 @@ namespace HS2OrbitAndExciter
 
             GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);
-            GUILayout.Label("熱鍵：Ctrl+Shift+O 環視開關，Ctrl+Shift+P 本視窗", _labelStyle);
+            GUILayout.Label("熱鍵：Ctrl+Shift+O 環視開關，Ctrl+Shift+P 本視窗；頂部為建置識別。", _labelStyle);
             if (GUILayout.Button("關閉"))
                 _visible = false;
 

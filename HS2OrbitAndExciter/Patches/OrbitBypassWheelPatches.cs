@@ -1,12 +1,11 @@
-using System;
-using System.IO;
 using HarmonyLib;
 using UnityEngine;
 
 namespace HS2OrbitAndExciter.Patches
 {
     /// <summary>
-    /// When orbit is active, bypass wheel checkpoints: after a short delay inject a small wheel value so the game advances from Idle/orgasm without user input.
+    /// When orbit is active, bypass wheel checkpoints: after a short delay inject a small wheel value so the game advances from Idle (and related gates) without user input.
+    /// Injection only runs when the first female's animator is in an allowed state (Idle, D_Idle, WIdle, SIdle, Insert, D_Insert) — not WLoop/OLoop, so scroll speed/Finish are not hijacked.
     /// </summary>
     internal static class OrbitBypassWheelState
     {
@@ -14,54 +13,22 @@ namespace HS2OrbitAndExciter.Patches
         public const float DelaySeconds = 2f;
         private static float _bypassStartTimeUnscaled = -1f;
 
-        // Avoid log spam: only log when we "start waiting" and when we "inject".
-        private static float _lastStartLogTime;
-        private static float _lastInjectLogTime;
-
-    private static string EscapeJson(string s)
-    {
-        if (s == null) return "";
-        return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
-
-    private static void Debug341efeLog(string location, string message, string dataJson, string hypothesisId)
-    {
-        var logPath = Path.Combine(@"d:\HS4", "debug-341efe.log");
-        var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var line =
-            $"{{\"sessionId\":\"341efe\",\"runId\":\"run1\",\"hypothesisId\":\"{EscapeJson(hypothesisId)}\",\"location\":\"{EscapeJson(location)}\",\"message\":\"{EscapeJson(message)}\",\"data\":{dataJson},\"timestamp\":{ts}}}\n";
-        try { File.AppendAllText(logPath, line); } catch { }
-    }
-
-        public static bool TryBypass(string patchName, ref float wheel)
+        public static bool TryBypass(string _, ref float wheel)
         {
-            bool orbitActive = OrbitController.IsOrbitActive();
-            float wheelIn = wheel;
-
-            if (!orbitActive || wheel != 0f)
+            if (!OrbitController.IsOrbitActive() || wheel != 0f)
             {
                 _bypassStartTimeUnscaled = -1f;
                 return false;
             }
 
-            // wheel==0 && orbitActive
-            if (_bypassStartTimeUnscaled < 0f)
+            if (!OrbitBypassAnimatorGate.IsBypassAllowedForCurrentHScene())
             {
-                _bypassStartTimeUnscaled = Time.unscaledTime;
-
-                // Log "waiting start"
-                if (Time.unscaledTime - _lastStartLogTime >= 0.5f)
-                {
-                    _lastStartLogTime = Time.unscaledTime;
-                    var logger = HS2OrbitAndExciter.Log;
-                    logger?.LogInfo($"[OrbitBypassWheel] start patch={patchName} wheelIn={wheelIn:F2} delay={DelaySeconds:F1}");
-                    Debug341efeLog(
-                        "OrbitBypassWheelState.TryBypass",
-                        "wheelBypassStart",
-                        "{\"patchName\":\"" + EscapeJson(patchName) + "\",\"wheelIn\":" + wheelIn.ToString("F2") + ",\"delay\":" + DelaySeconds.ToString("F1") + "}",
-                        "WB1");
-                }
+                _bypassStartTimeUnscaled = -1f;
+                return false;
             }
+
+            if (_bypassStartTimeUnscaled < 0f)
+                _bypassStartTimeUnscaled = Time.unscaledTime;
 
             float elapsed = Time.unscaledTime - _bypassStartTimeUnscaled;
             if (elapsed < DelaySeconds)
@@ -69,20 +36,6 @@ namespace HS2OrbitAndExciter.Patches
 
             _bypassStartTimeUnscaled = -1f;
             wheel = BypassWheelValue;
-
-            // Log "injected"
-            if (Time.unscaledTime - _lastInjectLogTime >= 0.2f)
-            {
-                _lastInjectLogTime = Time.unscaledTime;
-                var logger = HS2OrbitAndExciter.Log;
-                logger?.LogInfo($"[OrbitBypassWheel] inject patch={patchName} wheelIn={wheelIn:F2} wheelOut={wheel:F2} elapsed={elapsed:F2}");
-                Debug341efeLog(
-                    "OrbitBypassWheelState.TryBypass",
-                    "wheelBypassInject",
-                    "{\"patchName\":\"" + EscapeJson(patchName) + "\",\"wheelIn\":" + wheelIn.ToString("F2") + ",\"wheelOut\":" + wheel.ToString("F2") + ",\"elapsed\":" + elapsed.ToString("F2") + "}",
-                    "WB2");
-            }
-
             return true;
         }
     }

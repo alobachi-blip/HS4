@@ -1,0 +1,60 @@
+<Project>
+  <!-- HS2 BepInEx 外掛：建置後複製為「基名_git短SHA_日期[_dirty].dll」，便於對照原始碼版本。
+       各專案 PropertyGroup 需設 HS2DeployThisPlugin=true（見 HS2OrbitAndExciter / PhotoToCard csproj）。 -->
+  <PropertyGroup>
+    <HS2PluginUtcDate>$([System.DateTime]::UtcNow.ToString("yyyyMMdd"))</HS2PluginUtcDate>
+  </PropertyGroup>
+
+  <Target Name="HS2_ComputePluginVersionedDllName" BeforeTargets="BeforeBuild" Condition="'$(HS2DeployThisPlugin)' == 'true'">
+    <Exec Command="git rev-parse --short=8 HEAD"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          ConsoleToMsBuild="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_HS2GitRevRaw" />
+    </Exec>
+    <Exec Command="git status --porcelain"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          ConsoleToMsBuild="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_HS2GitPorcelainRaw" />
+    </Exec>
+    <PropertyGroup>
+      <_HS2GitRevTrim>$([System.String]::Copy('$(_HS2GitRevRaw)').Trim())</_HS2GitRevTrim>
+      <HS2PluginGitRev Condition="'$(_HS2GitRevTrim)' != ''">$(_HS2GitRevTrim)</HS2PluginGitRev>
+      <HS2PluginGitRev Condition="'$(_HS2GitRevTrim)' == ''">nogit</HS2PluginGitRev>
+      <_HS2PorcelainTrim>$([System.String]::Copy('$(_HS2GitPorcelainRaw)').Trim())</_HS2PorcelainTrim>
+      <HS2PluginDirtySuffix Condition="'$(_HS2PorcelainTrim)' != ''">_dirty</HS2PluginDirtySuffix>
+      <HS2PluginDirtySuffix Condition="'$(_HS2PorcelainTrim)' == ''"></HS2PluginDirtySuffix>
+      <HS2PluginVersionedDllFileName>$(AssemblyName)_$(HS2PluginGitRev)_$(HS2PluginUtcDate)$(HS2PluginDirtySuffix).dll</HS2PluginVersionedDllFileName>
+    </PropertyGroup>
+    <Message Importance="low" Text="[HS2 deploy] $(MSBuildProjectName) → $(HS2PluginVersionedDllFileName)" />
+  </Target>
+
+  <Target Name="HS2_CopyVersionedPluginDllToOutput" AfterTargets="Build" Condition="'$(HS2DeployThisPlugin)' == 'true'">
+    <PropertyGroup>
+      <_HS2BuiltDll>$(OutputPath)$(AssemblyName).dll</_HS2BuiltDll>
+      <_HS2VersionedDll>$(OutputPath)$(HS2PluginVersionedDllFileName)</_HS2VersionedDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_HS2BuiltDll)')" Text="Expected built DLL missing: $(_HS2BuiltDll)" />
+    <Copy SourceFiles="$(_HS2BuiltDll)" DestinationFiles="$(_HS2VersionedDll)" SkipUnchangedFiles="false" />
+    <Message Importance="high" Text="Versioned plugin DLL: $(OutputPath)$(HS2PluginVersionedDllFileName)" />
+  </Target>
+
+  <Target Name="HS2_DeployVersionedPluginToBepInEx"
+          AfterTargets="HS2_CopyVersionedPluginDllToOutput"
+          Condition="'$(HS2DeployThisPlugin)' == 'true' and '$(CopyToHS2Plugins)' == 'true' and Exists('$(HS2BepInEx)\plugins')">
+    <PropertyGroup>
+      <_HS2VersionedDll>$(OutputPath)$(HS2PluginVersionedDllFileName)</_HS2VersionedDll>
+    </PropertyGroup>
+    <!-- 避免 plugins 內同 GUID 多份 DLL 被 BepInEx 重複載入 -->
+    <ItemGroup>
+      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName).dll" />
+      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName)_*.dll" />
+    </ItemGroup>
+    <Delete Files="@(_HS2OldPluginDlls)" ContinueOnError="true" />
+    <Copy SourceFiles="$(_HS2VersionedDll)" DestinationFolder="$(HS2BepInEx)\plugins" SkipUnchangedFiles="false" />
+    <Message Importance="high" Text="Deployed to $(HS2BepInEx)\plugins: $(HS2PluginVersionedDllFileName)" />
+  </Target>
+</Project>

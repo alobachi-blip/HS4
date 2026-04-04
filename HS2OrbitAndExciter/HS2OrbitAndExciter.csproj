@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
+    <!-- Directory.Build.targets：建置後複製為 HS2OrbitAndExciter_<git>_<date>[_dirty].dll -->
+    <HS2DeployThisPlugin>true</HS2DeployThisPlugin>
     <AssemblyName>HS2OrbitAndExciter</AssemblyName>
     <RootNamespace>HS2OrbitAndExciter</RootNamespace>
     <LangVersion>latest</LangVersion>
@@ -11,6 +13,10 @@
     <HS2Managed Condition="'$(HS2Managed)' == ''">D:\HS2\HoneySelect2_Data\Managed</HS2Managed>
     <HS2BepInEx Condition="'$(HS2BepInEx)' == ''">D:\HS2\BepInEx</HS2BepInEx>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- ilspycmd 反組譯產物在同目錄下時勿納入編譯 -->
+    <Compile Remove="decompiled_from_BepInEx_plugins\**\*.cs" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="BepInEx.Core" Version="5.4.21" />
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" />
@@ -27,6 +33,9 @@
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(HS2Managed)\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(HS2Managed)\UnityEngine.UI.dll</HintPath>
     </Reference>
     <Reference Include="IL">
       <HintPath>$(HS2Managed)\IL.dll</HintPath>
@@ -48,6 +57,9 @@
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>refs\UnityEngine.IMGUIModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.UI" Condition="Exists('refs\UnityEngine.UI.dll')">
+      <HintPath>refs\UnityEngine.UI.dll</HintPath>
+    </Reference>
     <Reference Include="IL">
       <HintPath>refs\IL.dll</HintPath>
     </Reference>
@@ -55,10 +67,5 @@
   <Target Name="CheckGameRefs" BeforeTargets="CoreCompile">
     <Error Condition="!Exists('$(HS2Managed)\Assembly-CSharp.dll') and !Exists('refs\Assembly-CSharp.dll')"
            Text="HS2 game refs missing. Set HS2Managed to your game's HS2_Data\Managed or copy DLLs into refs\" />
-  </Target>
-  <!-- Build 後複製到 BepInEx\plugins（CopyToHS2Plugins 預設 true，見 repo 根 Directory.Build.props） -->
-  <Target Name="CopyToHS2" AfterTargets="Build" Condition="Exists('$(HS2BepInEx)\plugins') and '$(CopyToHS2Plugins)' == 'true'">
-    <Copy SourceFiles="$(OutputPath)HS2OrbitAndExciter.dll" DestinationFolder="$(HS2BepInEx)\plugins" SkipUnchangedFiles="true" />
-    <Message Importance="high" Text="Copied HS2OrbitAndExciter.dll to $(HS2BepInEx)\plugins" />
   </Target>
 </Project>

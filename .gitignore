@@ -28,6 +28,8 @@ BepInEx_HS2_PhotoToCard/bin/
 BepInEx_HS2_PhotoToCard/obj/
 HS2OrbitAndExciter/bin/
 HS2OrbitAndExciter/obj/
+# ilspycmd 自 BepInEx\plugins 反組譯之產物（僅供對照，勿提交）
+HS2OrbitAndExciter/decompiled_from_BepInEx_plugins/
 
 # IDE
 .idea/
@@ -43,3 +45,6 @@ Desktop.ini
 Face2Parameter/
 HS2CharEdit/
 HS2CharEdit - Copy/
+
+# Cursor / Claude 本機 worktree（勿提交）
+.claude/

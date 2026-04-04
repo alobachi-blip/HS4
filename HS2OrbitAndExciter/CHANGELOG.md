@@ -1,11 +1,15 @@
 # HS2OrbitAndExciter 變更紀錄
 
+## 已知問題
+
+- **環視開啟時，畫面右上角 H 場景選單（例如「愛撫」等動作列表）無法點選**：此現象在部署「移除環視滾輪縮放、bypass 動畫狀態閘門、Ctrl+Shift+P 建置識別」等變更**之前**即已存在，**並非**該次建置才引入。後續若要修復，需另查 `NoCtrlCondition`、滑鼠事件是否被相機／全螢幕層吃掉、或遊戲 UI 射線與 `inputForcus` 等路徑。
+
 ## 2026-03-25
 
 ### 相機與環視
 
 - **執行順序**：`OrbitController` 使用 `[DefaultExecutionOrder(-100)]`，在 `CameraControl_Ver2.LateUpdate` 之前寫入 `CamDat.Rot`；環視時**不要**指派 `CameraAngle`（其 setter 未乘 `transBase`，會與 `CameraUpdate` 衝突）。
-- **滾輪**：H 場景相機 `ZoomCondition` 恒為 false，外掛在環視開啟時鏡像 `InputMouseWheelZoomZoomProc` 邏輯調整 `CameraDir.z`。
+- **滾輪（2026-03-25 當時行為）**：H 場景相機 `ZoomCondition` 恒為 false，外掛曾在環視開啟時鏡像滾輪縮放改 `CameraDir.z`；**後已移除**（改由遊戲讀滾輪；見較新變更與 `OrbitBypassAnimatorGate`）。
 - **距離**：`SetDistanceForFocus` 依身高與設定倍率（預設約 1.4）限制距離，避免過近。
 
 ### Q / W / E 焦點
