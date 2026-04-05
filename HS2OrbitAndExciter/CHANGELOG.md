@@ -2,12 +2,15 @@
 
 ## 2026-04-05
 
+### 清理除錯／對照用程式碼
+
+- 移除 `CursorSessionDebugLog`、`OrbitAgentDebugLog` 與所有寫入工作區 NDJSON 的路徑；`OrbitController`／`OrbitBehaviorHub` 內僅供 Cursor 對照與假設驗證的記錄一併刪除（含 `BuildCursorAssistGateJsonFields`、SNAP/GATE/CYC、checkpoint 取樣等）。量產外掛不再寫 `debug-*.log` 或 `orbit-compare`。
+
 ### 滾輪繞過：1v1 與 Animator 閘門修正
 
 - **1v1**：新增 `Patches/OrbitBypassWheelPatches1v1.cs`，對 `Sonyu` / `Aibu` / `Houshi` 的 `Start*` / `AutoStart*` / `AfterTheInsideWaiting*` 等與 `MultiPlay_F2M1` 簽名不同的方法獨立 Prefix（避免與雙人 patch 混掛）。
 - **閘門**：`ChaInfo.animBody` 為 **屬性**，`Traverse.Field("animBody")` 會永遠為 null，導致誤判「無動畫」而擋繞過；改經 `OrbitHelpers.TryGetFemaleAnimBody`（`animBody`，必要時 `objAnim` 上取 `Animator`），閘門與 `OrbitController` 內讀取 layer0 狀態的邏輯一併改用 `AnimatorStateInfo`。
 - **建置**：`HS2OrbitAndExciter.csproj` 條件引用 `UnityEngine.AnimationModule.dll`（編譯期）。
-- **除錯**：曾用 NDJSON 驗證後已移除專用寫檔類別，避免量產外掛持續寫磁碟。
 
 ### Orbit assist 架構重整
 

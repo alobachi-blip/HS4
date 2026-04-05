@@ -45,9 +45,6 @@ namespace HS2OrbitAndExciter
         private void Awake()
         {
             Log = Logger;
-            // #region agent log
-            OrbitAgentDebugLog.EnsureInit();
-            // #endregion
 
             OrbitTimePer360 = Config.Bind("Orbit", "OrbitTimePer360", 10f,
                 "Seconds for one full 360° rotation (one direction).");

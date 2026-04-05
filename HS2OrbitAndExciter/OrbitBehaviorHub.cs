@@ -35,25 +35,6 @@ namespace HS2OrbitAndExciter
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
 
-        private static float _dbgLastPushLogUnscaled = -999f;
-        private static float _dbgCkptSampleUnscaled = -999f;
-
-        // #region agent log
-        private static void DbgPushOutcome(string code, bool pushed, string? suppressDetail = null)
-        {
-            string det = suppressDetail == null ? "null" : "\"" + OrbitAgentDebugLog.JsonEscape(suppressDetail) + "\"";
-            string data = "{\"code\":\"" + OrbitAgentDebugLog.JsonEscape(code) + "\",\"detail\":" + det + "}";
-            if (pushed)
-                OrbitAgentDebugLog.Write("H2", "TryPushOrbitAutoActionAssist", "pushed", data);
-            else
-            {
-                if (Time.unscaledTime - _dbgLastPushLogUnscaled < 3f) return;
-                _dbgLastPushLogUnscaled = Time.unscaledTime;
-                OrbitAgentDebugLog.Write("H2", "TryPushOrbitAutoActionAssist", "not_pushed", data);
-            }
-        }
-        // #endregion
-
         internal static void NotifyManualUiClick()
         {
             _manualSelectionSuppressUntilUnscaled = Time.unscaledTime + ManualSelectionSuppressSeconds;
@@ -71,9 +52,6 @@ namespace HS2OrbitAndExciter
             _orbitAssistActive = active;
             _checkpointIdleTime = 0f;
             _wheelBypassStartUnscaled = -1f;
-            // #region agent log
-            OrbitAgentDebugLog.Write("H4", "NotifyOrbitToggled", active ? "orbit_on" : "orbit_off", "{}");
-            // #endregion
             if (active)
             {
                 _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
@@ -214,39 +192,25 @@ namespace HS2OrbitAndExciter
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-            {
-                DbgPushOutcome("cfg_off", false);
                 return false;
-            }
             if (ctrlFlag == null)
-            {
-                DbgPushOutcome("no_ctrl", false);
                 return false;
-            }
-            if (ShouldSuppressAssist(ctrlFlag, out var supReason))
+            if (ShouldSuppressAssist(ctrlFlag, out _))
             {
                 ctrlFlag.isAutoActionChange = false;
                 ctrlFlag.initiative = 0;
                 ResetNullSelectionTracking();
-                DbgPushOutcome("suppress", false, supReason);
                 return false;
             }
             if (ctrlFlag.selectAnimationListInfo != null)
             {
                 ResetNullSelectionTracking();
-                DbgPushOutcome("has_selection", false);
                 return false;
             }
             if (!IsNullSelectionReadyForAssist())
-            {
-                DbgPushOutcome("null_wait", false);
                 return false;
-            }
             if (!TryConsumeAssistFlagPush(out _))
-            {
-                DbgPushOutcome("interval", false);
                 return false;
-            }
 
             var flagType = ctrlFlag.GetType();
             if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
@@ -264,7 +228,6 @@ namespace HS2OrbitAndExciter
             }
             catch { }
             Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            DbgPushOutcome("ok", true);
             return true;
         }
 
@@ -275,26 +238,6 @@ namespace HS2OrbitAndExciter
             if (timeout <= 0f || hScene == null) return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
-
-            // #region agent log
-            if (Time.unscaledTime - _dbgCkptSampleUnscaled >= 2f)
-            {
-                _dbgCkptSampleUnscaled = Time.unscaledTime;
-                bool inLoop = OrbitHelpers.IsFirstFemaleInActionLoop(hScene);
-                ShouldSuppressAssist(ctrlFlag, out var ckSup);
-                var selCk = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue();
-                bool legacyCd = IsCheckpointInvokeOnLegacyCooldown();
-                bool mouse = Input.GetMouseButton(0);
-                OrbitAgentDebugLog.Write("H3", "TickOrbitCheckpointAssist", "state_sample",
-                    "{\"checkpointIdle\":" + _checkpointIdleTime.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    + ",\"timeout\":" + timeout.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    + ",\"inActionLoop\":" + (inLoop ? "true" : "false")
-                    + ",\"suppress\":\"" + OrbitAgentDebugLog.JsonEscape(ckSup) + "\""
-                    + ",\"hasSelection\":" + (selCk != null ? "true" : "false")
-                    + ",\"legacyCooldown\":" + (legacyCd ? "true" : "false")
-                    + ",\"mouseLmb\":" + (mouse ? "true" : "false") + "}");
-            }
-            // #endregion
 
             if (OrbitHelpers.IsFirstFemaleInActionLoop(hScene))
             {
@@ -341,9 +284,6 @@ namespace HS2OrbitAndExciter
             }
             catch { }
             MarkCheckpointInvokeLegacyCooldown(timeout);
-            // #region agent log
-            OrbitAgentDebugLog.Write("H3", "TickOrbitCheckpointAssist", "invoke_get_auto", "{}");
-            // #endregion
 
             bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
             if (!hasSelAfter)
@@ -377,9 +317,6 @@ namespace HS2OrbitAndExciter
                 return false;
             _wheelBypassStartUnscaled = -1f;
             wheel = WheelBypassValue;
-            // #region agent log
-            OrbitAgentDebugLog.Write("H5", "TryInjectOrbitWheelBypass", "wheel_injected", "{}");
-            // #endregion
             return true;
         }
     }

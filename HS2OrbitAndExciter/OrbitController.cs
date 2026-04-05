@@ -1,7 +1,5 @@
 using System.Collections.Generic;
-using System.Globalization;
 using System.Reflection;
-using System.Text;
 using AIChara;
 using HarmonyLib;
 using Manager;
@@ -51,11 +49,6 @@ namespace HS2OrbitAndExciter
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
         private const float PrepWaitSeconds = 3f;
-
-        private static int _dbgLateAssistSample;
-
-        private static float _dbgLastGameplaySnapUnscaled = -999f;
-        private static float _dbgLastFeelFTracked = -1f;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -151,10 +144,13 @@ namespace HS2OrbitAndExciter
             }
 
             var hScene = GetHScene();
-            if (hScene == null) return;
+            if (hScene == null)
+                return;
 
             var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
-            if (ctrl == null) return;
+            if (ctrl == null)
+                return;
+
             ApplyOrbitFocusHotkeys(hScene, ctrl);
 
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
@@ -172,10 +168,6 @@ namespace HS2OrbitAndExciter
 
             // Excitement gauge auto-accumulates while orbit is active (skipped during prep countdown)
             AccumulateFeelWhenOrbit(hScene);
-
-            // #region agent log
-            DbgMaybeLogFeelMilestone(hScene.ctrlFlag);
-            // #endregion
 
             // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
@@ -202,10 +194,6 @@ namespace HS2OrbitAndExciter
             if (orbitTime <= 0f) orbitTime = 10f;
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
-
-            // #region agent log
-            int dbgPhaseBefore = _orbitPhase;
-            // #endregion
 
             if (_orbitPhase == 0)
             {
@@ -234,16 +222,6 @@ namespace HS2OrbitAndExciter
             var rot = ctrl.CameraAngle;
             rot.y = rotY;
             ctrl.Rot = rot;
-
-            // #region agent log
-            if (dbgPhaseBefore != _orbitPhase)
-            {
-                OrbitAgentDebugLog.Write("G1", "OrbitController.LateUpdate", "orbit_phase_edge",
-                    "{\"from\":" + dbgPhaseBefore + ",\"to\":" + _orbitPhase
-                    + ",\"accumDeg\":" + R(_orbitAccumulatedDegrees) + ",\"rotY\":" + R(rotY) + ",\"cycleCount\":" + _orbitCycleCount + "}");
-            }
-            DbgMaybeLogGameplaySnapshot(hScene, ctrl, rotY, orbitTime, speedDegPerSec);
-            // #endregion
         }
 
         /// <summary>Minimum camera distance in body-height units (legacy configs often had 0.3; too tight for full-body framing).</summary>
@@ -350,19 +328,6 @@ namespace HS2OrbitAndExciter
             bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
             bool suppressCycleActions = OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out _);
 
-            // #region agent log
-            bool willRandomize = nRandom > 0 && _orbitCycleCount % nRandom == 0;
-            bool willClothes = clothesEnabled && !suppressCycleActions;
-            bool willPose = changePose && !suppressCycleActions && nPose > 0 && _orbitCycleCount % nPose == 0;
-            OrbitAgentDebugLog.Write("G3", "OnOrbitCycleComplete", "ping_pong_cycle_complete",
-                "{\"orbitCycleCount\":" + _orbitCycleCount + ",\"nRandom\":" + nRandom + ",\"nPose\":" + nPose
-                + ",\"willRandomizeFocus\":" + (willRandomize ? "true" : "false")
-                + ",\"willClothesStep\":" + (willClothes ? "true" : "false")
-                + ",\"willPoseChange\":" + (willPose ? "true" : "false")
-                + ",\"suppressCycleActions\":" + (suppressCycleActions ? "true" : "false")
-                + ",\"viewOption\":" + _currentViewOption + ",\"clothesSeqIdx\":" + _currentClothesSequenceIndex + "}");
-            // #endregion
-
             if (nRandom > 0 && _orbitCycleCount % nRandom == 0)
             {
                 int totalOptions = maxFocus + 1;
@@ -428,10 +393,6 @@ namespace HS2OrbitAndExciter
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
                 _orbitCycleCount = 0;
-                // #region agent log
-                _dbgLastFeelFTracked = -1f;
-                _dbgLastGameplaySnapUnscaled = -999f;
-                // #endregion
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
@@ -453,9 +414,6 @@ namespace HS2OrbitAndExciter
             else
             {
                 _waitingForPrepStart = false;
-                // #region agent log
-                _dbgLastFeelFTracked = -1f;
-                // #endregion
                 // Restoring saved delegate can evaluate false after orbit stop and keep UI unclickable; keep permissive after orbit off.
                 ctrl.NoCtrlCondition = () => true;
             }
@@ -475,11 +433,6 @@ namespace HS2OrbitAndExciter
         internal void RunLateHSceneAssist(HScene hScene)
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
-            // #region agent log
-            _dbgLateAssistSample++;
-            if (_dbgLateAssistSample <= 8 || _dbgLateAssistSample % 240 == 0)
-                OrbitAgentDebugLog.Write("H1", "OrbitController.RunLateHSceneAssist", "enter", "{\"sample\":" + _dbgLateAssistSample + "}");
-            // #endregion
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
             OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }
@@ -489,97 +442,6 @@ namespace HS2OrbitAndExciter
         {
             _requestViewReapplyNextFrame = true;
         }
-
-        // #region agent log
-        private static string R(float v) => v.ToString("R", CultureInfo.InvariantCulture);
-
-        private static float DbgReadFeelF(HSceneFlagCtrl? f)
-        {
-            if (f == null) return -1f;
-            try { return (float)(Traverse.Create(f).Field("feel_f").GetValue() ?? 0f); }
-            catch { return -1f; }
-        }
-
-        private static float DbgReadSpeed(HSceneFlagCtrl? f)
-        {
-            if (f == null) return -1f;
-            try { return (float)(Traverse.Create(f).Field("speed").GetValue() ?? 0f); }
-            catch { return -1f; }
-        }
-
-        private static void DbgMaybeLogFeelMilestone(HSceneFlagCtrl? cf)
-        {
-            if (cf == null) return;
-            float ff = DbgReadFeelF(cf);
-            if (_dbgLastFeelFTracked >= 0f && _dbgLastFeelFTracked < 1f && ff >= 1f)
-            {
-                OrbitAgentDebugLog.Write("G2", "OrbitController", "feel_f_crossed_full",
-                    "{\"feel_f\":" + R(ff) + ",\"exciterDelayAtFull_cfg\":" + R(Patches.ExciterState.DelaySecondsAtFull) + "}");
-            }
-            _dbgLastFeelFTracked = ff;
-        }
-
-        private void DbgMaybeLogGameplaySnapshot(HScene hScene, CameraControl_Ver2 ctrl, float rotY, float orbitTimeCfg, float speedDegPerSec)
-        {
-            if (Time.unscaledTime - _dbgLastGameplaySnapUnscaled < 0.5f) return;
-            _dbgLastGameplaySnapUnscaled = Time.unscaledTime;
-
-            var cf = hScene.ctrlFlag;
-            float ff = DbgReadFeelF(cf);
-            float sp = DbgReadSpeed(cf);
-            bool inLoop = OrbitHelpers.IsFirstFemaleInActionLoop(hScene);
-            int fph = 0;
-            float normT = 0f;
-            bool inTr = false;
-            var cha0 = OrbitHelpers.GetChaFemales(hScene)?[0];
-            var anim = OrbitHelpers.TryGetFemaleAnimBody(cha0);
-            if (anim != null)
-            {
-                var si = anim.GetCurrentAnimatorStateInfo(0);
-                fph = si.fullPathHash;
-                normT = si.normalizedTime;
-                inTr = anim.IsInTransition(0);
-            }
-
-            bool autoCh = false;
-            try { autoCh = cf != null && cf.isAutoActionChange; } catch { }
-            int initv = -999;
-            try { initv = cf != null ? (int)(Traverse.Create(cf).Field("initiative").GetValue() ?? -1) : -999; } catch { }
-            bool hasList = false;
-            try { hasList = cf != null && cf.selectAnimationListInfo != null; } catch { }
-
-            float prepEl = _waitingForPrepStart ? (Time.unscaledTime - _prepCountdownStart) : 0f;
-
-            var sb = new StringBuilder(768);
-            sb.Append("{\"orbitPhase\":").Append(_orbitPhase)
-                .Append(",\"orbitAccumDeg\":").Append(R(_orbitAccumulatedDegrees))
-                .Append(",\"orbitCycleCount\":").Append(_orbitCycleCount)
-                .Append(",\"rotY\":").Append(R(rotY))
-                .Append(",\"startOrbitY\":").Append(R(_startOrbitY))
-                .Append(",\"orbitTimePer360_cfg\":").Append(R(orbitTimeCfg))
-                .Append(",\"speedDegPerSec\":").Append(R(speedDegPerSec))
-                .Append(",\"waitingPrep\":").Append(_waitingForPrepStart ? "true" : "false")
-                .Append(",\"prepElapsedSec\":").Append(R(prepEl))
-                .Append(",\"viewOption\":").Append(_currentViewOption)
-                .Append(",\"clothesSeqIdx\":").Append(_currentClothesSequenceIndex)
-                .Append(",\"feel_f\":").Append(R(ff))
-                .Append(",\"hSpeed\":").Append(R(sp))
-                .Append(",\"isAutoActionChange\":").Append(autoCh ? "true" : "false")
-                .Append(",\"initiative\":").Append(initv)
-                .Append(",\"hasSelectList\":").Append(hasList ? "true" : "false")
-                .Append(",\"anim0_fullPathHash\":").Append(fph)
-                .Append(",\"anim0_normTime\":").Append(R(normT))
-                .Append(",\"anim0_inTransition\":").Append(inTr ? "true" : "false")
-                .Append(",\"inActionLoop\":").Append(inLoop ? "true" : "false")
-                .Append(",\"feelAddPerSec_cfg\":").Append(R(GetOrbitFeelAddPerSecond()))
-                .Append(",\"exciterDelayAtFull_cfg\":").Append(R(Patches.ExciterState.DelaySecondsAtFull))
-                .Append(",\"checkpointTimeout_cfg\":").Append(R(HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f))
-                .Append(",\"autoAssistInterval_cfg\":").Append(R(HS2OrbitAndExciter.AutoAssistMinIntervalSeconds?.Value ?? 1f))
-                .Append(",\"orbitAutoAction_cfg\":").Append(HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value == true ? "true" : "false")
-                .Append('}');
-            OrbitAgentDebugLog.Write("G0", "OrbitController.LateUpdate", "gameplay_snapshot", sb.ToString());
-        }
-        // #endregion
 
     }
 }
