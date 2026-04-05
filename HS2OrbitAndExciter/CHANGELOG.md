@@ -2,6 +2,21 @@
 
 ## 2026-04-05
 
+### 環視：回程真正反向＋旋轉／迴轉雙計數
+
+- **Yaw**：相位 1（回程）改為與相位 0 共用 `rotY = _startOrbitY + _orbitAccumulatedDegrees`，`acc` 遞減時鏡頭沿反方向掃回，不再出現「兩段都像同向繞」的錯覺。
+- **計數**：新增「旋轉」（每完成單向 360° 一次，去程結束與回程結束各 +1）與「迴轉」（完整來回 +1）。**1 迴轉 = 2 旋轉**。
+- **觸發**：`OrbitCountBeforeRandom` 語意改為每 **N 次旋轉** 亂數焦點；**水平角預設**僅在**迴轉完成**的觸發點套用（半圈觸發時只亂數焦點，避免 `acc=360` 時改 `_startOrbitY` 造成跳角）。換裝與同一 N 對齊；**N=0** 時關閉亂數，換裝改為**每迴轉一次**。`OrbitCountBeforePoseChange` 改為每 **M 次迴轉**換姿（搭配 `ChangePoseOnCycle`）。
+- **預設**：`OrbitCountBeforeRandom` 預設由 `1` 改為 **`2`**，約略對應舊版「每完整來回亂數一次」的節奏；既有 cfg 仍保留已存數值。
+- **程式結構**：週期副作用集中於新檔 `OrbitCycleCoordinator.cs`；`OrbitBehaviorHub` 仍只負責 assist／UI suppress。
+- **設定與 HUD**：BepInEx 英文說明、`OrbitSettingsGUI`（Ctrl+Shift+P）繁中標籤、`OrbitHudSnapshot`／狀態面板文案改為旋轉／迴轉用語與新估算方式。
+
+### 環視狀態 HUD（繁中）
+
+- 環視開啟（Ctrl+Shift+O）後預設顯示左下角精簡狀態：相機仍在運轉、自動操作是否因 UI／滑鼠／啟動緩衝等暫停、準備倒數、本圈剩餘時間估算、下一個亂數焦點／換姿／換裝約略圈數與秒數。
+- **Ctrl+Shift+I** 切換面板顯示；**Ctrl+Shift+P** 設定視窗可關閉整個 HUD 功能或暫時隱藏面板。
+- 新增 `OrbitStatusHud`、`OrbitHudSnapshot`；`OrbitBehaviorHub` 於啟動環視時通知顯示面板，並提供 grace／UI 點擊抑制的剩餘秒數供文案使用。
+
 ### 清理除錯／對照用程式碼
 
 - 移除 `CursorSessionDebugLog`、`OrbitAgentDebugLog` 與所有寫入工作區 NDJSON 的路徑；`OrbitController`／`OrbitBehaviorHub` 內僅供 Cursor 對照與假設驗證的記錄一併刪除（含 `BuildCursorAssistGateJsonFields`、SNAP/GATE/CYC、checkpoint 取樣等）。量產外掛不再寫 `debug-*.log` 或 `orbit-compare`。

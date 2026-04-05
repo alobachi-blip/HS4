@@ -35,6 +35,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrbitDistancePelvis;
         /// <summary>Override faintness state in H scene (HScene.ctrlFlag.isFaintness). When toggled, pose list and camera view update.</summary>
         internal static ConfigEntry<bool>? OverrideFaintness;
+        /// <summary>When false, the compact orbit status HUD is disabled entirely.</summary>
+        internal static ConfigEntry<bool>? OrbitStatusHudEnabled;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -47,15 +49,15 @@ namespace HS2OrbitAndExciter
             Log = Logger;
 
             OrbitTimePer360 = Config.Bind("Orbit", "OrbitTimePer360", 10f,
-                "Seconds for one full 360° rotation (one direction).");
-            OrbitCountBeforeRandom = Config.Bind("Orbit", "OrbitCountBeforeRandom", 1,
-                "After this many full orbits (360°+reverse), randomize focus and angle. 0 = never.");
+                "Seconds for one 360° camera leg in one direction (one rotation). One full round-trip (out+back) ≈ 2× this value.");
+            OrbitCountBeforeRandom = Config.Bind("Orbit", "OrbitCountBeforeRandom", 2,
+                "After this many rotations (each 360° leg), randomize body focus and horizontal angle preset. 0 = no random (clothes then advance once per round-trip only). 1 round-trip = 2 rotations.");
             OrbitCountBeforePoseChange = Config.Bind("Orbit", "OrbitCountBeforePoseChange", 2,
-                "After this many full orbits, change pose (if ChangePoseOnCycle is true).");
+                "After this many full round-trips (out+back), change pose when ChangePoseOnCycle is true.");
             ChangePoseOnCycle = Config.Bind("Orbit", "ChangePoseOnCycle", false,
-                "Whether to change pose after OrbitCountBeforePoseChange orbits.");
+                "When true, change pose every OrbitCountBeforePoseChange round-trips.");
             ClothesChangeEnabled = Config.Bind("Orbit", "ClothesChangeEnabled", false,
-                "Whether to advance clothes stage (Full→Half→KeepAccessories→FullOff) each full orbit.");
+                "Advance clothes stage on the same schedule as OrbitCountBeforeRandom rotations; if that count is 0, once per round-trip instead.");
             ExcitementTriggerDelaySeconds = Config.Bind("Exciter", "ExcitementTriggerDelaySeconds", 0f,
                 "Seconds at full gauge before auto trigger (0 = immediate, range 0–10). Mouse click still triggers immediately.");
             FeelAddPerSecondWhenOrbit = Config.Bind("Exciter", "FeelAddPerSecondWhenOrbit", 0.1f,
@@ -76,6 +78,8 @@ namespace HS2OrbitAndExciter
                 "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
             OverrideFaintness = Config.Bind("State", "OverrideFaintness", false,
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
+            OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,
+                "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle visibility with Ctrl+Shift+I while orbit is on.");
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
@@ -122,7 +126,8 @@ namespace HS2OrbitAndExciter
             go.AddComponent<OrbitController>();
             go.AddComponent<OrbitHSceneLateAssist>();
             go.AddComponent<OrbitSettingsGUI>();
-            Log.LogInfo($"{PluginInfo.PLUGIN_NAME} v{PluginInfo.PLUGIN_VERSION} loaded. Settings: Ctrl+Shift+P.");
+            go.AddComponent<OrbitStatusHud>();
+            Log.LogInfo($"{PluginInfo.PLUGIN_NAME} v{PluginInfo.PLUGIN_VERSION} loaded. Settings: Ctrl+Shift+P; status HUD: Ctrl+Shift+I.");
         }
     }
 }

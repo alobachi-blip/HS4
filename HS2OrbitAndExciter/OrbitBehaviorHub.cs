@@ -59,6 +59,7 @@ namespace HS2OrbitAndExciter
                 _autoActionNullSelectionSinceUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
+                OrbitStatusHud.NotifyOrbitActivated();
             }
             else
             {
@@ -104,6 +105,20 @@ namespace HS2OrbitAndExciter
             }
             reason = "none";
             return false;
+        }
+
+        /// <summary>Seconds until orbit-start auto-action grace ends (0 if not in grace).</summary>
+        internal static float RemainingOrbitStartGraceSeconds()
+        {
+            if (_orbitAutoActionGraceUntilUnscaled < 0f) return 0f;
+            return Mathf.Max(0f, _orbitAutoActionGraceUntilUnscaled - Time.unscaledTime);
+        }
+
+        /// <summary>Seconds until post-UI-click suppress ends (0 if not active).</summary>
+        internal static float RemainingManualUiSuppressSeconds()
+        {
+            if (_manualSelectionSuppressUntilUnscaled < 0f) return 0f;
+            return Mathf.Max(0f, _manualSelectionSuppressUntilUnscaled - Time.unscaledTime);
         }
 
         /// <summary>Defer orbit Q/W/E focus hotkeys when game uses the same keys (vanilla <c>HScene.ShortcutKey</c> path).</summary>

@@ -12,7 +12,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier2 = KeyCode.LeftControl;
         private bool _visible;
         private bool _needSyncFromConfig; // 每次打開視窗時從 config 同步顯示，確保看到的是已保存的值
-        private Rect _windowRect = new Rect(100, 100, 440, 560);
+        private Rect _windowRect = new Rect(100, 100, 480, 620);
         private GUIStyle? _labelStyle;
         private bool _stylesInitialized;
         // Per-field strings so TextField isn't reset from config every frame (which hides typing)
@@ -84,10 +84,23 @@ namespace HS2OrbitAndExciter
             GUILayout.EndVertical();
 
             GUILayout.Label("環視相機", GUI.skin.box);
+            GUILayout.Label("名詞：單向繞水平 360°＝一次「旋轉」；去程加回程＝一次「迴轉」（約 2×單向秒數）。", _labelStyle ?? GUI.skin.label);
+            if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
+            {
+                HS2OrbitAndExciter.OrbitStatusHudEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.OrbitStatusHudEnabled.Value,
+                    " 啟用左下角環視狀態面板（繁中；環視開啟時 Ctrl+Shift+I 切換顯示）");
+            }
+            if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == true)
+            {
+                bool pv = OrbitStatusHud.GetPanelVisible();
+                pv = GUILayout.Toggle(pv, " 目前顯示狀態面板");
+                OrbitStatusHud.SetPanelVisible(pv);
+            }
             if (HS2OrbitAndExciter.OrbitTimePer360 != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("水平繞一圈所需秒數：", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("單向水平 360° 所需秒數：", _labelStyle, GUILayout.Width(220));
                 GUI.SetNextControlName("OrbitTimePer360");
                 _orbitTimeStr = GUILayout.TextField(_orbitTimeStr, GUILayout.Width(60));
                 if (float.TryParse(_orbitTimeStr, out float v) && v > 0.1f && v <= 120f)
@@ -97,7 +110,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.OrbitCountBeforeRandom != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("繞幾圈後亂數焦點與角度（0＝不要亂數）：", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("每幾次旋轉亂數焦點＋水平角（0＝關閉亂數；換裝改每迴轉一次）：", _labelStyle, GUILayout.Width(260));
                 GUI.SetNextControlName("OrbitCountBeforeRandom");
                 _orbitCountRandomStr = GUILayout.TextField(_orbitCountRandomStr, GUILayout.Width(60));
                 if (int.TryParse(_orbitCountRandomStr, out int v) && v >= 0 && v <= 99)
@@ -107,7 +120,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.OrbitCountBeforePoseChange != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("繞幾圈後換姿勢（需開啟下方開關）：", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("每幾次迴轉換姿勢（需開啟下方開關）：", _labelStyle, GUILayout.Width(260));
                 GUI.SetNextControlName("OrbitCountBeforePoseChange");
                 _orbitCountPoseStr = GUILayout.TextField(_orbitCountPoseStr, GUILayout.Width(60));
                 if (int.TryParse(_orbitCountPoseStr, out int v) && v >= 1 && v <= 99)
@@ -115,9 +128,9 @@ namespace HS2OrbitAndExciter
                 GUILayout.EndHorizontal();
             }
             if (HS2OrbitAndExciter.ChangePoseOnCycle != null)
-                HS2OrbitAndExciter.ChangePoseOnCycle.Value = GUILayout.Toggle(HS2OrbitAndExciter.ChangePoseOnCycle.Value, " 依上方面數，每繞滿幾圈就換姿勢");
+                HS2OrbitAndExciter.ChangePoseOnCycle.Value = GUILayout.Toggle(HS2OrbitAndExciter.ChangePoseOnCycle.Value, " 依上方面數，每滿幾次迴轉就換姿勢");
             if (HS2OrbitAndExciter.ClothesChangeEnabled != null)
-                HS2OrbitAndExciter.ClothesChangeEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.ClothesChangeEnabled.Value, " 每繞滿一圈就切換衣物階段（脫／穿序列）");
+                HS2OrbitAndExciter.ClothesChangeEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.ClothesChangeEnabled.Value, " 依上方「每幾次旋轉」切換衣物階段（N＝0 時改為每迴轉一次）");
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled != null)
                 HS2OrbitAndExciter.OrbitAutoActionEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.OrbitAutoActionEnabled.Value, " 環視開著時，自動幫你選下一個動作（少自己點）");
             if (HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds != null)
@@ -232,7 +245,7 @@ namespace HS2OrbitAndExciter
 
             GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);
-            GUILayout.Label("熱鍵：左 Ctrl＋左 Shift＋O 開關環視；左 Ctrl＋左 Shift＋P 開本視窗。頂端為版本對照資訊。", _labelStyle);
+            GUILayout.Label("熱鍵：左 Ctrl＋左 Shift＋O 開關環視；左 Ctrl＋左 Shift＋P 開本視窗；環視開著時左 Ctrl＋左 Shift＋I 切換狀態面板。頂端為版本對照資訊。", _labelStyle);
             if (GUILayout.Button("關閉"))
                 _visible = false;
 

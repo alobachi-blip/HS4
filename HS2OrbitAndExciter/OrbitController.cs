@@ -9,9 +9,11 @@ using UnityEngine.EventSystems;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Drives orbit camera in H scene: hotkey Ctrl+Shift+O, 360° then reverse; optional random focus/angle, pose change, clothes.
+    /// Drives orbit camera in H scene: Ctrl+Shift+O. Each <b>rotation</b> is one 360° leg (outbound then inbound); yaw uses
+    /// <c>_startOrbitY + _orbitAccumulatedDegrees</c> so inbound is a true reverse. Each full out+in is one <b>round-trip</b>.
+    /// Cycle side effects (N rotations / M round-trips) are delegated to <see cref="OrbitCycleCoordinator"/>.
     /// Runs LateUpdate before <see cref="CameraControl_Ver2"/> (default 0) so yaw is written to CamDat.Rot and CameraUpdate() applies transBase correctly.
-    /// H-scene flag assist (auto action / checkpoint) runs in <see cref="OrbitHSceneLateAssist"/> after game proc.
+    /// H-scene flag assist runs in <see cref="OrbitHSceneLateAssist"/> after game proc.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class OrbitController : MonoBehaviour
@@ -34,7 +36,10 @@ namespace HS2OrbitAndExciter
         private float _startOrbitY;
         private int _orbitPhase;
         private float _orbitAccumulatedDegrees;
-        private int _orbitCycleCount;
+        /// <summary>Completed single-direction 360° legs (outbound end + inbound end each +1).</summary>
+        private int _rotationCount;
+        /// <summary>Completed full out+in cycles.</summary>
+        private int _roundTripCount;
         /// <summary>Current view option: 0..maxFocus-1 = body focus index, maxFocus = pose default camera. Total options = maxFocus + 1.</summary>
         private int _currentViewOption;
         /// <summary>Index into sequence [0,1,2,3,2,1]; next step is (_currentClothesSequenceIndex + 1) % 6.</summary>
@@ -49,6 +54,9 @@ namespace HS2OrbitAndExciter
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
         private const float PrepWaitSeconds = 3f;
+
+        private bool _hudSnapshotValid;
+        private OrbitHudSnapshot _hudSnapshot;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -139,17 +147,24 @@ namespace HS2OrbitAndExciter
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive())
             {
+                _hudSnapshotValid = false;
                 _requestViewReapplyNextFrame = false;
                 return;
             }
 
             var hScene = GetHScene();
             if (hScene == null)
+            {
+                _hudSnapshotValid = false;
                 return;
+            }
 
             var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
             if (ctrl == null)
+            {
+                _hudSnapshotValid = false;
                 return;
+            }
 
             ApplyOrbitFocusHotkeys(hScene, ctrl);
 
@@ -202,6 +217,8 @@ namespace HS2OrbitAndExciter
                 {
                     _orbitAccumulatedDegrees = 360f;
                     _orbitPhase = 1;
+                    _rotationCount++;
+                    OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
                 }
             }
             else
@@ -211,17 +228,83 @@ namespace HS2OrbitAndExciter
                 {
                     _orbitAccumulatedDegrees = 0f;
                     _orbitPhase = 0;
-                    OnOrbitCycleComplete(hScene, ctrl);
+                    _rotationCount++;
+                    _roundTripCount++;
+                    OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
+                    OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
                 }
             }
 
-            float rotY = _startOrbitY + (_orbitPhase == 0 ? _orbitAccumulatedDegrees : 360f - _orbitAccumulatedDegrees);
+            float rotY = _startOrbitY + _orbitAccumulatedDegrees;
             rotY = ((rotY % 360f) + 360f) % 360f;
             // Do NOT assign CameraAngle: its setter does transform.rotation = Euler(v) without transBase, breaking orbit vs CameraUpdate().
             // Match game autoCamera: only CamDat.Rot; CameraControl_Ver2.LateUpdate -> CameraUpdate applies transBase * Euler(CamDat.Rot).
             var rot = ctrl.CameraAngle;
             rot.y = rotY;
             ctrl.Rot = rot;
+
+            RefreshHudSnapshot(hScene, orbitTime, speedDegPerSec);
+        }
+
+        internal bool TryGetCachedHudSnapshot(out OrbitHudSnapshot s)
+        {
+            s = _hudSnapshot;
+            return _hudSnapshotValid;
+        }
+
+        private static int CountsUntilNextMultiple(int completedCount, int period)
+        {
+            if (period <= 0) return -1;
+            int k = (period - (completedCount % period)) % period;
+            if (k == 0) k = period;
+            return k;
+        }
+
+        private void RefreshHudSnapshot(HScene hScene, float orbitTimePer360, float speedDegPerSec)
+        {
+            float tLeg = _orbitPhase == 0
+                ? (360f - _orbitAccumulatedDegrees) / speedDegPerSec
+                : _orbitAccumulatedDegrees / speedDegPerSec;
+            float tCompleteRoundTrip = _orbitPhase == 0 ? tLeg + orbitTimePer360 : tLeg;
+            float roundTripSec = 2f * orbitTimePer360;
+
+            float prepRemain = 0f;
+            if (_waitingForPrepStart)
+                prepRemain = Mathf.Max(0f, PrepWaitSeconds - (Time.unscaledTime - _prepCountdownStart));
+
+            int nRandom = HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0;
+            int mPose = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
+            bool changePose = HS2OrbitAndExciter.ChangePoseOnCycle?.Value ?? false;
+            bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
+
+            int rotationsUntilRandom = nRandom > 0 ? CountsUntilNextMultiple(_rotationCount, nRandom) : -1;
+            int rotationsUntilClothes;
+            if (!clothesEnabled)
+                rotationsUntilClothes = -1;
+            else if (nRandom > 0)
+                rotationsUntilClothes = CountsUntilNextMultiple(_rotationCount, nRandom);
+            else
+                rotationsUntilClothes = OrbitHudSnapshot.ClothesHintNextRoundTrip;
+
+            int roundTripsUntilPose = changePose && mPose > 0 ? CountsUntilNextMultiple(_roundTripCount, mPose) : -1;
+
+            OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out string reason);
+            bool faint = hScene.ctrlFlag?.isFaintness ?? false;
+
+            _hudSnapshot = new OrbitHudSnapshot(
+                _waitingForPrepStart,
+                prepRemain,
+                _orbitPhase,
+                tLeg,
+                tCompleteRoundTrip,
+                rotationsUntilRandom,
+                rotationsUntilClothes,
+                roundTripsUntilPose,
+                reason,
+                faint,
+                orbitTimePer360,
+                roundTripSec);
+            _hudSnapshotValid = true;
         }
 
         /// <summary>Minimum camera distance in body-height units (legacy configs often had 0.3; too tight for full-body framing).</summary>
@@ -317,61 +400,40 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private void OnOrbitCycleComplete(HScene hScene, CameraControl_Ver2 ctrl)
+        internal void InternalAdvanceClothesStage(HScene hScene)
         {
-            _orbitCycleCount++;
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            _currentClothesSequenceIndex = (_currentClothesSequenceIndex + 1) % 6;
+            int stage = OrbitHelpers.ClothesSequenceStage(_currentClothesSequenceIndex);
+            var chaMales = OrbitHelpers.GetChaMales(hScene);
+            OrbitHelpers.SetClothesStage(chaFemales, chaMales, stage);
+        }
+
+        internal void InternalRandomizeViewOption(HScene hScene, CameraControl_Ver2 ctrl)
+        {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-            int nRandom = HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 1;
-            int nPose = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
-            bool changePose = HS2OrbitAndExciter.ChangePoseOnCycle?.Value ?? false;
-            bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
-            bool suppressCycleActions = OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out _);
+            int totalOptions = maxFocus + 1;
+            if (totalOptions <= 0)
+                return;
+            int current = _currentViewOption;
+            if (current < 0 || current > maxFocus) current = 0;
+            var candidates = new List<int>();
+            for (int i = 0; i <= maxFocus; i++)
+                if (i != current)
+                    candidates.Add(i);
+            if (Random.value < PreferGameDefaultCameraChance)
+                _currentViewOption = maxFocus;
+            else if (candidates.Count > 0)
+                _currentViewOption = candidates[Random.Range(0, candidates.Count)];
+            else
+                _currentViewOption = current;
+            ApplyCurrentViewOption(hScene, ctrl);
+        }
 
-            if (nRandom > 0 && _orbitCycleCount % nRandom == 0)
-            {
-                int totalOptions = maxFocus + 1;
-                if (totalOptions > 0)
-                {
-                    int current = _currentViewOption;
-                    if (current < 0 || current > maxFocus) current = 0;
-                    // Exclude current so we don't get the same option twice in a row
-                    var candidates = new List<int>();
-                    for (int i = 0; i <= maxFocus; i++)
-                        if (i != current)
-                            candidates.Add(i);
-                    if (Random.value < PreferGameDefaultCameraChance)
-                        _currentViewOption = maxFocus;
-                    else if (candidates.Count > 0)
-                        _currentViewOption = candidates[Random.Range(0, candidates.Count)];
-                    else
-                        _currentViewOption = current;
-                    ApplyCurrentViewOption(hScene, ctrl);
-                }
-                _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
-            }
-
-            if (clothesEnabled && !suppressCycleActions)
-            {
-                _currentClothesSequenceIndex = (_currentClothesSequenceIndex + 1) % 6;
-                int stage = OrbitHelpers.ClothesSequenceStage(_currentClothesSequenceIndex);
-                var chaMales = OrbitHelpers.GetChaMales(hScene);
-                OrbitHelpers.SetClothesStage(chaFemales, chaMales, stage);
-            }
-
-            if (changePose && !suppressCycleActions && nPose > 0 && _orbitCycleCount % nPose == 0)
-            {
-                var all = OrbitHelpers.GetAllPoseList();
-                if (all.Count > 0)
-                {
-                    var current = hScene.ctrlFlag?.nowAnimationInfo;
-                    var next = OrbitHelpers.PickNextPose(current, all);
-                    if (next != null)
-                    {
-                        hScene.StartCoroutine(hScene.ChangeAnimation(next, _isForceResetCamera: false, _isForceLoopAction: false, _UseFade: true));
-                    }
-                }
-            }
+        internal void InternalRandomizeStartOrbitY()
+        {
+            _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
         }
 
         private void OnOrbitToggled(bool active)
@@ -392,7 +454,8 @@ namespace HS2OrbitAndExciter
                 _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
-                _orbitCycleCount = 0;
+                _rotationCount = 0;
+                _roundTripCount = 0;
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);

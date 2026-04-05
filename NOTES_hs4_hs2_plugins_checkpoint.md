@@ -121,3 +121,37 @@ git switch -c recover/hs2-plugins checkpoint/hs4-hs2-plugins-deploy
 - 先對照反組譯：`dll_decompiled` 裡 **實際被呼叫的方法名與參數** 是否已有對應 Harmony（例如 `Aibu.AutoStartProcTrigger(bool)` 無 `wheel` 參數則無法用同一招 patch）。
 - 不要用 `Traverse.Field` 猜 **auto-property**；優先查 `ChaControl` / `ChaInfo` 的公開 API。
 - 區分「沒進 TryBypass」與「進了但被 orbit／閘門／2s 延遲擋住」。
+
+---
+
+## HS2OrbitAndExciter：環視分層與邊界（維護約定，2026-04）
+
+目標：**好讀、好改、不把 `OrbitBehaviorHub` 變成上帝類**。新功能（例如「旋轉／迴轉」雙計數、每 N 旋轉換裝／亂數視點、每 M 迴轉換姿）優先遵守下列邊界。
+
+### 三層分工
+
+| 層級 | 責任 | 典型落點 |
+|------|------|----------|
+| **時間積分與相位** | `Time.deltaTime` 積分、`_orbitPhase`／`_orbitAccumulatedDegrees`、`rotY` 寫入、何時觸發「半圈／迴轉」邊界 | **`OrbitController`**（若檔案過大可再抽 **`OrbitCameraMotor`** 等類別，仍由同一執行序驅動） |
+| **週期副作用政策** | N／M 與設定如何對應「本邊界是否亂數焦點、是否換裝、是否換姿、水平角是否在半圈可改」等編排 | **單一編排入口**：實作中可為 **`OrbitCycleCoordinator`**（或同等命名）之 **static／instance**，由 Controller 在邊界呼叫 `OnRotationCompleted(...)`；**不要**把這段規則拆散在多處複製 |
+| **與 H 自動操作／UI 的競爭** | 指標在 UI、grace、選單開著、左鍵按住等 → **要不要 suppress** 對 `HSceneFlagCtrl` 的 assist／**週期換裝／換姿是否暫停** | **`OrbitBehaviorHub`**：`ShouldSuppressAssist`（及相關計時欄位）；**只負責 gate／reason**，不持有相機相位狀態 |
+
+### 維持在 `OrbitHelpers` 的內容
+
+- **場景／角色查詢**（焦點位置、姿勢列表、衣物階段、Animator 取得等）。
+- **無狀態小函式**（例如「再幾次事件才到下一個 N 倍數」這類純計算）若可重用，可放 Helper 以利測試；**不必**塞進 Hub。
+
+### 刻意不做的做法
+
+- **不要把「相機相位＋計數器＋所有週期副作用」全併入現有 `OrbitBehaviorHub` 單一 static 類**：Hub 註解職責是 **對 `HSceneFlagCtrl` 的策略與節流**；再塞滿相機幾何與換裝／換姿編排會混淆領域、狀態難追、檔案難維護。
+- **若堅持「邏輯集中、Controller 極薄」**：寧可 **新增** `OrbitCycleCoordinator`（或拆分 `OrbitAssistHub` / `OrbitCycleCoordinator` 兩檔），也不要讓單一 Hub 無限膨脹。
+
+### 閱讀程式時的捷徑
+
+- 鏡頭怎麼轉、幾時算一次旋轉／迴轉 → **Controller（或 Motor）**。
+- 每 N／M 觸發什麼、與設定的對應 → **Coordinator**。
+- 為什麼滑鼠在 UI 上會暫停自動操作／週期副作用 → **Hub** `ShouldSuppressAssist`。
+
+### 落地紀錄（與 CHANGELOG 對照）
+
+- **2026-04-05 起**：環視 **回程 yaw 真正反向**、**旋轉／迴轉雙計數**、新增 **`OrbitCycleCoordinator`**、左下角 **狀態 HUD**（Ctrl+Shift+I）、BepInEx／Ctrl+Shift+P 用語與預設值調整。細節見 [`HS2OrbitAndExciter/CHANGELOG.md`](HS2OrbitAndExciter/CHANGELOG.md) 同日「環視：回程真正反向＋旋轉／迴轉雙計數」與「環視狀態 HUD」條目。
