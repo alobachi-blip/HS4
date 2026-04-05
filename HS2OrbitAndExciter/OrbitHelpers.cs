@@ -39,6 +39,33 @@ namespace HS2OrbitAndExciter
             return null;
         }
 
+        /// <summary>Animator state names for H-scene action loop (excitement / speed assist during orbit).</summary>
+        private static readonly HashSet<string> ActionLoopStateNames = new HashSet<string>
+        {
+            "WLoop", "SLoop", "OLoop", "D_WLoop", "D_SLoop", "D_OLoop",
+            "MLoop",
+            "WIdle", "SIdle", "WAction", "SAction", "D_Action"
+        };
+
+        /// <summary>True when first female's animator layer 0 is in an action loop state (scene query only).</summary>
+        public static bool IsFirstFemaleInActionLoop(HScene? hScene)
+        {
+            if (hScene == null) return false;
+            var chaFemales = GetChaFemales(hScene);
+            if (chaFemales == null || chaFemales.Length == 0) return false;
+            var cha = chaFemales[0];
+            if (cha == null) return false;
+            var animBody = TryGetFemaleAnimBody(cha);
+            if (animBody == null) return false;
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            foreach (string name in ActionLoopStateNames)
+            {
+                if (stateInfo.IsName(name))
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>Get world position of a bone on female (0 or 1). Returns null if not found.</summary>
         public static Vector3? GetBonePosition(ChaControl[] chaFemales, int femaleIndex, string boneName)
         {

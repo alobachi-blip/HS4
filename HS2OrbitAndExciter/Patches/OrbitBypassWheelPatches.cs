@@ -1,5 +1,4 @@
 using HarmonyLib;
-using UnityEngine;
 
 namespace HS2OrbitAndExciter.Patches
 {
@@ -9,35 +8,10 @@ namespace HS2OrbitAndExciter.Patches
     /// </summary>
     internal static class OrbitBypassWheelState
     {
-        public const float BypassWheelValue = 0.10f;
-        public const float DelaySeconds = 2f;
-        private static float _bypassStartTimeUnscaled = -1f;
+        public const float BypassWheelValue = OrbitBehaviorHub.WheelBypassValue;
+        public const float DelaySeconds = OrbitBehaviorHub.WheelBypassDelaySeconds;
 
-        public static bool TryBypass(ref float wheel)
-        {
-            if (!OrbitController.IsOrbitActive() || wheel != 0f)
-            {
-                _bypassStartTimeUnscaled = -1f;
-                return false;
-            }
-
-            if (!OrbitBypassAnimatorGate.IsBypassAllowedForCurrentHScene())
-            {
-                _bypassStartTimeUnscaled = -1f;
-                return false;
-            }
-
-            if (_bypassStartTimeUnscaled < 0f)
-                _bypassStartTimeUnscaled = Time.unscaledTime;
-
-            float elapsed = Time.unscaledTime - _bypassStartTimeUnscaled;
-            if (elapsed < DelaySeconds)
-                return false;
-
-            _bypassStartTimeUnscaled = -1f;
-            wheel = BypassWheelValue;
-            return true;
-        }
+        public static bool TryBypass(ref float wheel) => OrbitBehaviorHub.TryInjectOrbitWheelBypass(ref wheel);
     }
 
     [HarmonyPatch(typeof(MultiPlay_F2M1), "StartProcTrigger")]

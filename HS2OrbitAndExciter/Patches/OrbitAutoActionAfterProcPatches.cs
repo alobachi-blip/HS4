@@ -15,25 +15,11 @@ namespace HS2OrbitAndExciter.Patches
         public static void Postfix(ProcBase __instance)
         {
             if (__instance == null) return;
-            if (!OrbitController.IsOrbitActive()) return;
+            if (!OrbitBehaviorHub.IsOrbitAssistActive()) return;
             if (HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback?.Value != true)
                 return;
             var ctrlFlag = Traverse.Create(__instance).Field("ctrlFlag").GetValue() as HSceneFlagCtrl;
-            if (ctrlFlag == null) return;
-            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-                return;
-            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
-            {
-                ctrlFlag.isAutoActionChange = false;
-                ctrlFlag.initiative = 0;
-                return;
-            }
-            if (!OrbitBehaviorHub.IsNullSelectionReadyForAssist())
-                return;
-            if (!OrbitBehaviorHub.TryConsumeAssistFlagPush(out _))
-                return;
-            ctrlFlag.isAutoActionChange = true;
-            ctrlFlag.initiative = 1;
+            OrbitBehaviorHub.TryPushOrbitAutoActionAssist(ctrlFlag);
         }
     }
 }

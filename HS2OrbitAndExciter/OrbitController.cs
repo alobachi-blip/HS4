@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
+using System.Text;
 using AIChara;
 using HarmonyLib;
 using Manager;
@@ -29,9 +31,6 @@ namespace HS2OrbitAndExciter
         /// <summary>When choosing orbit focus option, prefer the game's default camera (option==maxFocus) to reduce distance surprises.</summary>
         private const float PreferGameDefaultCameraChance = 0.8f;
 
-        private bool _orbitActive;
-        /// <summary>Mirror of _orbitActive for Harmony patches (static read).</summary>
-        private static bool _orbitActiveForPatches;
         private float _lastHotkeyTime = -999f;
 
         private float _startOrbitY;
@@ -48,15 +47,15 @@ namespace HS2OrbitAndExciter
         private static bool _requestViewReapplyNextFrame;
 
         private static FieldInfo? _feelFField;
-        /// <summary>Seconds spent at checkpoint (Idle, no selection) while orbit is on; reset when we advance or leave checkpoint.</summary>
-        private float _checkpointIdleTime;
-        private static MethodInfo? _getAutoAnimationMethod;
-        private static FieldInfo? _isAutoActionChangeField;
-        private static PropertyInfo? _isAutoActionChangeProp;
         /// <summary>When orbit started in preparation (Idle + speed 0): wait this many seconds then set speed=1 to start; excitement only accumulates after start.</summary>
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
         private const float PrepWaitSeconds = 3f;
+
+        private static int _dbgLateAssistSample;
+
+        private static float _dbgLastGameplaySnapUnscaled = -999f;
+        private static float _dbgLastFeelFTracked = -1f;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -64,36 +63,10 @@ namespace HS2OrbitAndExciter
             return v <= 0f ? 0f : v;
         }
 
-        /// <summary>Animator state names where excitement is accumulated (action loop). Aibu/Houshi/Sonyu/Les/MultiPlay: W/S/O; Masturbation: W/M/S/O; Spnking: WIdle/SIdle/WAction/SAction.</summary>
-        private static readonly HashSet<string> ActionLoopStateNames = new HashSet<string>
-        {
-            "WLoop", "SLoop", "OLoop", "D_WLoop", "D_SLoop", "D_OLoop",
-            "MLoop",
-            "WIdle", "SIdle", "WAction", "SAction", "D_Action"
-        };
-
         private const float OrbitSpeedAddPerSecond = 0.35f;
 
-        /// <summary>True when first female's animator is in an action loop state (only then we add feel_f / speed during orbit).</summary>
-        private static bool IsInActionLoopState(HScene hScene)
-        {
-            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
-            if (chaFemales == null || chaFemales.Length == 0) return false;
-            var cha = chaFemales[0];
-            if (cha == null) return false;
-            var animBody = OrbitHelpers.TryGetFemaleAnimBody(cha);
-            if (animBody == null) return false;
-            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
-            foreach (string name in ActionLoopStateNames)
-            {
-                if (stateInfo.IsName(name))
-                    return true;
-            }
-            return false;
-        }
-
-        /// <summary>Whether orbit is currently active (for Harmony patches).</summary>
-        public static bool IsOrbitActive() => _orbitActiveForPatches;
+        /// <summary>Whether orbit is currently active (for Harmony patches). Authoritative state is <see cref="OrbitBehaviorHub.IsOrbitAssistActive"/>.</summary>
+        public static bool IsOrbitActive() => OrbitBehaviorHub.IsOrbitAssistActive();
 
         /// <summary>True when in preparation state: Idle/D_Idle and speed &lt;= 0.</summary>
         private static bool IsInPreparationState(HScene hScene)
@@ -116,8 +89,7 @@ namespace HS2OrbitAndExciter
         /// <summary>When orbit is active and in action loop only: add to excitement gauge and to speed so W/S/O segments advance without wheel.</summary>
         private void AccumulateFeelWhenOrbit(HScene hScene)
         {
-            if (_waitingForPrepStart) return;
-            if (!IsInActionLoopState(hScene)) return;
+            if (!OrbitBehaviorHub.CanAccumulateFeelDuringOrbit(hScene, _waitingForPrepStart)) return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
             float addPerSec = GetOrbitFeelAddPerSecond();
@@ -142,116 +114,6 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        /// <summary>When orbit is on and OrbitAutoActionEnabled: set isAutoActionChange and initiative so game auto-picks next action.</summary>
-        private void ApplyOrbitAutoAction(HScene hScene)
-        {
-            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-                return;
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null)
-                return;
-            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
-            {
-                ctrlFlag.isAutoActionChange = false;
-                ctrlFlag.initiative = 0;
-                OrbitBehaviorHub.ResetNullSelectionTracking();
-                return;
-            }
-            bool hasSelectionNow = ctrlFlag.selectAnimationListInfo != null;
-            if (hasSelectionNow)
-            {
-                OrbitBehaviorHub.ResetNullSelectionTracking();
-                return;
-            }
-            if (!OrbitBehaviorHub.IsNullSelectionReadyForAssist())
-                return;
-            if (!OrbitBehaviorHub.TryConsumeAssistFlagPush(out _))
-                return;
-
-            var flagType = ctrlFlag.GetType();
-            if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
-            {
-                _isAutoActionChangeField = flagType.GetField("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_isAutoActionChangeField == null)
-                    _isAutoActionChangeProp = flagType.GetProperty("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            }
-            try
-            {
-                if (_isAutoActionChangeField != null)
-                    _isAutoActionChangeField.SetValue(ctrlFlag, true);
-                else
-                    _isAutoActionChangeProp?.SetValue(ctrlFlag, true, null);
-            }
-            catch { }
-            Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-        }
-
-        /// <summary>When orbit is on, not yet in action loop, and (no pose list or similar gate) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation. In-loop means checkpoint passed — do not use list-null alone.</summary>
-        private void TryAutoAdvancePastCheckpoint(HScene hScene)
-        {
-            float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
-            if (timeout <= 0f) return;
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null) return;
-            if (IsInActionLoopState(hScene))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            var sel = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue();
-            bool hasSelection = sel != null;
-            if (hasSelection)
-            {
-                _checkpointIdleTime = 0f;
-                OrbitBehaviorHub.ResetCheckpointInvokeCooldown();
-                return;
-            }
-            if (Input.GetMouseButton(0))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            if (OrbitBehaviorHub.IsCheckpointInvokeOnLegacyCooldown())
-                return;
-            // Not in action loop (see IsInActionLoopState gate above); list-null still used as gate hint for pre-loop UI stalls.
-            _checkpointIdleTime += Time.deltaTime;
-            if (_checkpointIdleTime < timeout) return;
-            _checkpointIdleTime = 0f;
-            if (!OrbitBehaviorHub.TryConsumeCheckpointInvoke(out _))
-                return;
-            if (_getAutoAnimationMethod == null)
-            {
-                _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_getAutoAnimationMethod == null)
-                    return;
-            }
-            try
-            {
-                _getAutoAnimationMethod.Invoke(hScene, new object[] { false });
-                if (Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() == null)
-                    _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
-            }
-            catch { }
-            OrbitBehaviorHub.MarkCheckpointInvokeLegacyCooldown(timeout);
-
-            // Fallback: if we still can't pick next action, try to bump speed once (no feel_f change).
-            bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
-            if (!hasSelAfter)
-            {
-                try
-                {
-                    const float FallbackSpeedBump = 1.2f;
-                    Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
-                }
-                catch { }
-            }
-        }
-
         private void Update()
         {
             var hProbe = TryGetHScene();
@@ -261,7 +123,7 @@ namespace HS2OrbitAndExciter
                 if (overUi)
                     OrbitBehaviorHub.NotifyManualUiClick();
             }
-            else if (_orbitActive && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            else if (OrbitBehaviorHub.IsOrbitAssistActive() && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
                 // Keep suppress window alive while cursor stays on UI, so auto-action can't race hover->click.
                 OrbitBehaviorHub.NotifyUiHoverWhileOrbit();
@@ -274,15 +136,15 @@ namespace HS2OrbitAndExciter
                 if (Time.unscaledTime - _lastHotkeyTime < HotkeyCooldownSeconds)
                     return;
                 _lastHotkeyTime = Time.unscaledTime;
-                _orbitActive = !_orbitActive;
-                _orbitActiveForPatches = _orbitActive;
-                OnOrbitToggled(_orbitActive);
+                bool active = !OrbitBehaviorHub.IsOrbitAssistActive();
+                OrbitBehaviorHub.NotifyOrbitToggled(active);
+                OnOrbitToggled(active);
             }
         }
 
         private void LateUpdate()
         {
-            if (!_orbitActive)
+            if (!OrbitBehaviorHub.IsOrbitAssistActive())
             {
                 _requestViewReapplyNextFrame = false;
                 return;
@@ -311,6 +173,10 @@ namespace HS2OrbitAndExciter
             // Excitement gauge auto-accumulates while orbit is active (skipped during prep countdown)
             AccumulateFeelWhenOrbit(hScene);
 
+            // #region agent log
+            DbgMaybeLogFeelMilestone(hScene.ctrlFlag);
+            // #endregion
+
             // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
             // Re-apply camera takeover every frame (e.g. after ChangeAnimation sets camera flag)
@@ -336,6 +202,10 @@ namespace HS2OrbitAndExciter
             if (orbitTime <= 0f) orbitTime = 10f;
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
+
+            // #region agent log
+            int dbgPhaseBefore = _orbitPhase;
+            // #endregion
 
             if (_orbitPhase == 0)
             {
@@ -364,6 +234,16 @@ namespace HS2OrbitAndExciter
             var rot = ctrl.CameraAngle;
             rot.y = rotY;
             ctrl.Rot = rot;
+
+            // #region agent log
+            if (dbgPhaseBefore != _orbitPhase)
+            {
+                OrbitAgentDebugLog.Write("G1", "OrbitController.LateUpdate", "orbit_phase_edge",
+                    "{\"from\":" + dbgPhaseBefore + ",\"to\":" + _orbitPhase
+                    + ",\"accumDeg\":" + R(_orbitAccumulatedDegrees) + ",\"rotY\":" + R(rotY) + ",\"cycleCount\":" + _orbitCycleCount + "}");
+            }
+            DbgMaybeLogGameplaySnapshot(hScene, ctrl, rotY, orbitTime, speedDegPerSec);
+            // #endregion
         }
 
         /// <summary>Minimum camera distance in body-height units (legacy configs often had 0.3; too tight for full-body framing).</summary>
@@ -396,8 +276,7 @@ namespace HS2OrbitAndExciter
         /// </summary>
         private void ApplyOrbitFocusHotkeys(HScene hScene, CameraControl_Ver2 ctrl)
         {
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag != null && ctrlFlag.inputForcus)
+            if (OrbitBehaviorHub.ShouldDeferOrbitFocusHotkeysToGame(hScene.ctrlFlag))
                 return;
 
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
@@ -471,6 +350,19 @@ namespace HS2OrbitAndExciter
             bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
             bool suppressCycleActions = OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out _);
 
+            // #region agent log
+            bool willRandomize = nRandom > 0 && _orbitCycleCount % nRandom == 0;
+            bool willClothes = clothesEnabled && !suppressCycleActions;
+            bool willPose = changePose && !suppressCycleActions && nPose > 0 && _orbitCycleCount % nPose == 0;
+            OrbitAgentDebugLog.Write("G3", "OnOrbitCycleComplete", "ping_pong_cycle_complete",
+                "{\"orbitCycleCount\":" + _orbitCycleCount + ",\"nRandom\":" + nRandom + ",\"nPose\":" + nPose
+                + ",\"willRandomizeFocus\":" + (willRandomize ? "true" : "false")
+                + ",\"willClothesStep\":" + (willClothes ? "true" : "false")
+                + ",\"willPoseChange\":" + (willPose ? "true" : "false")
+                + ",\"suppressCycleActions\":" + (suppressCycleActions ? "true" : "false")
+                + ",\"viewOption\":" + _currentViewOption + ",\"clothesSeqIdx\":" + _currentClothesSequenceIndex + "}");
+            // #endregion
+
             if (nRandom > 0 && _orbitCycleCount % nRandom == 0)
             {
                 int totalOptions = maxFocus + 1;
@@ -531,13 +423,15 @@ namespace HS2OrbitAndExciter
 
             if (active)
             {
-                _orbitActiveForPatches = true;
-                OrbitBehaviorHub.NotifyOrbitToggled(true);
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
                 _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
                 _orbitCycleCount = 0;
+                // #region agent log
+                _dbgLastFeelFTracked = -1f;
+                _dbgLastGameplaySnapUnscaled = -999f;
+                // #endregion
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
@@ -558,9 +452,10 @@ namespace HS2OrbitAndExciter
             }
             else
             {
-                _orbitActiveForPatches = false;
-                OrbitBehaviorHub.NotifyOrbitToggled(false);
                 _waitingForPrepStart = false;
+                // #region agent log
+                _dbgLastFeelFTracked = -1f;
+                // #endregion
                 // Restoring saved delegate can evaluate false after orbit stop and keep UI unclickable; keep permissive after orbit off.
                 ctrl.NoCtrlCondition = () => true;
             }
@@ -579,9 +474,14 @@ namespace HS2OrbitAndExciter
         /// <summary>Runs after H-scene proc (see OrbitHSceneLateAssist). Do not call from early LateUpdate.</summary>
         internal void RunLateHSceneAssist(HScene hScene)
         {
-            if (!_orbitActive || hScene == null) return;
-            ApplyOrbitAutoAction(hScene);
-            TryAutoAdvancePastCheckpoint(hScene);
+            if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
+            // #region agent log
+            _dbgLateAssistSample++;
+            if (_dbgLateAssistSample <= 8 || _dbgLateAssistSample % 240 == 0)
+                OrbitAgentDebugLog.Write("H1", "OrbitController.RunLateHSceneAssist", "enter", "{\"sample\":" + _dbgLateAssistSample + "}");
+            // #endregion
+            OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
+            OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }
 
         /// <summary>Request that the next LateUpdate reapplies the current orbit view (e.g. after faintness toggle).</summary>
@@ -589,6 +489,97 @@ namespace HS2OrbitAndExciter
         {
             _requestViewReapplyNextFrame = true;
         }
+
+        // #region agent log
+        private static string R(float v) => v.ToString("R", CultureInfo.InvariantCulture);
+
+        private static float DbgReadFeelF(HSceneFlagCtrl? f)
+        {
+            if (f == null) return -1f;
+            try { return (float)(Traverse.Create(f).Field("feel_f").GetValue() ?? 0f); }
+            catch { return -1f; }
+        }
+
+        private static float DbgReadSpeed(HSceneFlagCtrl? f)
+        {
+            if (f == null) return -1f;
+            try { return (float)(Traverse.Create(f).Field("speed").GetValue() ?? 0f); }
+            catch { return -1f; }
+        }
+
+        private static void DbgMaybeLogFeelMilestone(HSceneFlagCtrl? cf)
+        {
+            if (cf == null) return;
+            float ff = DbgReadFeelF(cf);
+            if (_dbgLastFeelFTracked >= 0f && _dbgLastFeelFTracked < 1f && ff >= 1f)
+            {
+                OrbitAgentDebugLog.Write("G2", "OrbitController", "feel_f_crossed_full",
+                    "{\"feel_f\":" + R(ff) + ",\"exciterDelayAtFull_cfg\":" + R(Patches.ExciterState.DelaySecondsAtFull) + "}");
+            }
+            _dbgLastFeelFTracked = ff;
+        }
+
+        private void DbgMaybeLogGameplaySnapshot(HScene hScene, CameraControl_Ver2 ctrl, float rotY, float orbitTimeCfg, float speedDegPerSec)
+        {
+            if (Time.unscaledTime - _dbgLastGameplaySnapUnscaled < 0.5f) return;
+            _dbgLastGameplaySnapUnscaled = Time.unscaledTime;
+
+            var cf = hScene.ctrlFlag;
+            float ff = DbgReadFeelF(cf);
+            float sp = DbgReadSpeed(cf);
+            bool inLoop = OrbitHelpers.IsFirstFemaleInActionLoop(hScene);
+            int fph = 0;
+            float normT = 0f;
+            bool inTr = false;
+            var cha0 = OrbitHelpers.GetChaFemales(hScene)?[0];
+            var anim = OrbitHelpers.TryGetFemaleAnimBody(cha0);
+            if (anim != null)
+            {
+                var si = anim.GetCurrentAnimatorStateInfo(0);
+                fph = si.fullPathHash;
+                normT = si.normalizedTime;
+                inTr = anim.IsInTransition(0);
+            }
+
+            bool autoCh = false;
+            try { autoCh = cf != null && cf.isAutoActionChange; } catch { }
+            int initv = -999;
+            try { initv = cf != null ? (int)(Traverse.Create(cf).Field("initiative").GetValue() ?? -1) : -999; } catch { }
+            bool hasList = false;
+            try { hasList = cf != null && cf.selectAnimationListInfo != null; } catch { }
+
+            float prepEl = _waitingForPrepStart ? (Time.unscaledTime - _prepCountdownStart) : 0f;
+
+            var sb = new StringBuilder(768);
+            sb.Append("{\"orbitPhase\":").Append(_orbitPhase)
+                .Append(",\"orbitAccumDeg\":").Append(R(_orbitAccumulatedDegrees))
+                .Append(",\"orbitCycleCount\":").Append(_orbitCycleCount)
+                .Append(",\"rotY\":").Append(R(rotY))
+                .Append(",\"startOrbitY\":").Append(R(_startOrbitY))
+                .Append(",\"orbitTimePer360_cfg\":").Append(R(orbitTimeCfg))
+                .Append(",\"speedDegPerSec\":").Append(R(speedDegPerSec))
+                .Append(",\"waitingPrep\":").Append(_waitingForPrepStart ? "true" : "false")
+                .Append(",\"prepElapsedSec\":").Append(R(prepEl))
+                .Append(",\"viewOption\":").Append(_currentViewOption)
+                .Append(",\"clothesSeqIdx\":").Append(_currentClothesSequenceIndex)
+                .Append(",\"feel_f\":").Append(R(ff))
+                .Append(",\"hSpeed\":").Append(R(sp))
+                .Append(",\"isAutoActionChange\":").Append(autoCh ? "true" : "false")
+                .Append(",\"initiative\":").Append(initv)
+                .Append(",\"hasSelectList\":").Append(hasList ? "true" : "false")
+                .Append(",\"anim0_fullPathHash\":").Append(fph)
+                .Append(",\"anim0_normTime\":").Append(R(normT))
+                .Append(",\"anim0_inTransition\":").Append(inTr ? "true" : "false")
+                .Append(",\"inActionLoop\":").Append(inLoop ? "true" : "false")
+                .Append(",\"feelAddPerSec_cfg\":").Append(R(GetOrbitFeelAddPerSecond()))
+                .Append(",\"exciterDelayAtFull_cfg\":").Append(R(Patches.ExciterState.DelaySecondsAtFull))
+                .Append(",\"checkpointTimeout_cfg\":").Append(R(HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f))
+                .Append(",\"autoAssistInterval_cfg\":").Append(R(HS2OrbitAndExciter.AutoAssistMinIntervalSeconds?.Value ?? 1f))
+                .Append(",\"orbitAutoAction_cfg\":").Append(HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value == true ? "true" : "false")
+                .Append('}');
+            OrbitAgentDebugLog.Write("G0", "OrbitController.LateUpdate", "gameplay_snapshot", sb.ToString());
+        }
+        // #endregion
 
     }
 }
