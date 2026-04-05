@@ -14,6 +14,10 @@
 - `ProcBase.Proc` 的 AfterProc Postfix 改為預設停用（no-op 路徑）；僅在 `EnableAfterProcAssistPostfixFallback=true` 時啟用，作為相容回退方案。
 - 補充相容提醒：本插件仍採 Harmony patch，與其他同類 H 流程插件可能存在相互覆蓋或順序競爭風險；若觀察到自動推進異常，優先檢查上述 fallback 與插件組合。
 
+### 行為調整（卡關推進）
+
+- `TryAutoAdvancePastCheckpoint`（預設約每 2 秒可觸發的強制過關）改為**僅在** `OrbitAutoActionEnabled` 開啟時執行，與「每繞幾圈換姿／換裝」分離；關閉自動動作後不再出現數秒一換段的體感。
+
 ## 已知問題
 
 - **環視開啟時，畫面右上角 H 場景選單（例如「愛撫」等動作列表）無法點選**：此現象在部署「移除環視滾輪縮放、bypass 動畫狀態閘門、Ctrl+Shift+P 建置識別」等變更**之前**即已存在，**並非**該次建置才引入。後續若要修復，需另查 `NoCtrlCondition`、滑鼠事件是否被相機／全螢幕層吃掉、或遊戲 UI 射線與 `inputForcus` 等路徑。

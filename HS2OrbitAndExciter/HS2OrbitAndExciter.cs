@@ -63,7 +63,7 @@ namespace HS2OrbitAndExciter
             OrbitAutoActionEnabled = Config.Bind("Orbit", "OrbitAutoActionEnabled", true,
                 "When orbit is on: enable game auto action so next pose/action is chosen automatically (user rarely needs to operate).");
             OrbitCheckpointTimeoutSeconds = Config.Bind("Orbit", "OrbitCheckpointTimeoutSeconds", 2f,
-                "When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds. 0 = only use game auto, no forced advance.");
+                "When orbit is on and OrbitAutoActionEnabled: stuck at checkpoint (Idle, no selection) auto-advances after this many seconds. 0 = no forced advance. Ignored when OrbitAutoActionEnabled is false.");
             AutoAssistMinIntervalSeconds = Config.Bind("Orbit", "AutoAssistMinIntervalSeconds", 1.0f,
                 "Minimum unscaled seconds between auto-assist pushes (isAutoActionChange/initiative and checkpoint invoke). 0 = legacy aggressive behavior.");
             EnableAfterProcAssistPostfixFallback = Config.Bind("Orbit", "EnableAfterProcAssistPostfixFallback", false,

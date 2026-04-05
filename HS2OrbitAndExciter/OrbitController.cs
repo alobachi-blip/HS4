@@ -200,6 +200,9 @@ namespace HS2OrbitAndExciter
         /// <summary>When orbit is on, not yet in action loop, and (no pose list or similar gate) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation. In-loop means checkpoint passed — do not use list-null alone.</summary>
         private void TryAutoAdvancePastCheckpoint(HScene hScene)
         {
+            // Same mental model as ApplyOrbitAutoAction: no forced segment advance unless user enabled auto assist.
+            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
+                return;
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f) return;
             var ctrlFlag = hScene.ctrlFlag;
