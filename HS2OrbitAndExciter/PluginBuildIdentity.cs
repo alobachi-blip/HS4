@@ -48,14 +48,15 @@ namespace HS2OrbitAndExciter
 
         public static string[] GetGuiLines()
         {
+            const string displayName = "環視與興奮條";
             try
             {
                 var path = Assembly.GetExecutingAssembly().Location ?? "";
                 var lines = new[]
                 {
                     "建置識別（測試對照用）",
-                    $"{PluginInfo.PLUGIN_NAME}  v{SemanticVersion}",
-                    $"DLL: {AssemblyFileName}"
+                    $"{displayName}　版本 {SemanticVersion}",
+                    $"檔案名稱：{AssemblyFileName}"
                 };
                 if (TryParseVersionedFileName(path, out var git, out var date, out var dirty))
                 {
@@ -63,7 +64,7 @@ namespace HS2OrbitAndExciter
                     {
                         lines[0],
                         lines[1],
-                        $"Git: {git}   UTC日期: {date}" + (dirty ? "   (dirty)" : ""),
+                        $"原始碼版本：{git}　建置日期：{date}（世界協調時間）" + (dirty ? "　（含未提交變更）" : ""),
                         lines[2]
                     };
                 }
@@ -71,13 +72,13 @@ namespace HS2OrbitAndExciter
                 {
                     lines[0],
                     lines[1],
-                    "（未偵測到版本化檔名，無 Git 段；建置目標可產生 HS2OrbitAndExciter_<git>_<date>.dll）",
+                    "（檔名未含版本編號；建置時可產出帶日期與版號的檔名以利對照）",
                     lines[2]
                 };
             }
             catch
             {
-                return new[] { PluginInfo.PLUGIN_NAME, "v" + SemanticVersion };
+                return new[] { displayName, "版本 " + SemanticVersion };
             }
         }
     }

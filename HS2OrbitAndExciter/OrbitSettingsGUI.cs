@@ -71,7 +71,7 @@ namespace HS2OrbitAndExciter
             }
 
             InitStyles();
-            _windowRect = GUILayout.Window(9001, _windowRect, DrawWindow, "HS2 Orbit and Exciter — 設定");
+            _windowRect = GUILayout.Window(9001, _windowRect, DrawWindow, "環視與興奮條 — 設定");
         }
 
         private void DrawWindow(int id)
@@ -83,11 +83,11 @@ namespace HS2OrbitAndExciter
                 GUILayout.Label(line, _labelStyle ?? GUI.skin.label);
             GUILayout.EndVertical();
 
-            GUILayout.Label("環視 POV (Orbit)", GUI.skin.box);
+            GUILayout.Label("環視相機", GUI.skin.box);
             if (HS2OrbitAndExciter.OrbitTimePer360 != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("環視 POV 一圈 360° 時間 (秒):", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("水平繞一圈所需秒數：", _labelStyle, GUILayout.Width(220));
                 GUI.SetNextControlName("OrbitTimePer360");
                 _orbitTimeStr = GUILayout.TextField(_orbitTimeStr, GUILayout.Width(60));
                 if (float.TryParse(_orbitTimeStr, out float v) && v > 0.1f && v <= 120f)
@@ -97,7 +97,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.OrbitCountBeforeRandom != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("幾次 360 後亂數焦點/角度 (0=不亂數):", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("繞幾圈後亂數焦點與角度（0＝不要亂數）：", _labelStyle, GUILayout.Width(220));
                 GUI.SetNextControlName("OrbitCountBeforeRandom");
                 _orbitCountRandomStr = GUILayout.TextField(_orbitCountRandomStr, GUILayout.Width(60));
                 if (int.TryParse(_orbitCountRandomStr, out int v) && v >= 0 && v <= 99)
@@ -107,7 +107,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.OrbitCountBeforePoseChange != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("幾次 360 後換姿勢:", _labelStyle, GUILayout.Width(220));
+                GUILayout.Label("繞幾圈後換姿勢（需開啟下方開關）：", _labelStyle, GUILayout.Width(220));
                 GUI.SetNextControlName("OrbitCountBeforePoseChange");
                 _orbitCountPoseStr = GUILayout.TextField(_orbitCountPoseStr, GUILayout.Width(60));
                 if (int.TryParse(_orbitCountPoseStr, out int v) && v >= 1 && v <= 99)
@@ -115,15 +115,15 @@ namespace HS2OrbitAndExciter
                 GUILayout.EndHorizontal();
             }
             if (HS2OrbitAndExciter.ChangePoseOnCycle != null)
-                HS2OrbitAndExciter.ChangePoseOnCycle.Value = GUILayout.Toggle(HS2OrbitAndExciter.ChangePoseOnCycle.Value, " 每 n 次 360 後換姿勢 (ChangePoseOnCycle)");
+                HS2OrbitAndExciter.ChangePoseOnCycle.Value = GUILayout.Toggle(HS2OrbitAndExciter.ChangePoseOnCycle.Value, " 依上方面數，每繞滿幾圈就換姿勢");
             if (HS2OrbitAndExciter.ClothesChangeEnabled != null)
-                HS2OrbitAndExciter.ClothesChangeEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.ClothesChangeEnabled.Value, " 每完成 1 次 360 切換衣物階段 (ClothesChangeEnabled)");
+                HS2OrbitAndExciter.ClothesChangeEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.ClothesChangeEnabled.Value, " 每繞滿一圈就切換衣物階段（脫／穿序列）");
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled != null)
-                HS2OrbitAndExciter.OrbitAutoActionEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.OrbitAutoActionEnabled.Value, " 環視時自動進動作／少操作 (OrbitAutoActionEnabled)");
+                HS2OrbitAndExciter.OrbitAutoActionEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.OrbitAutoActionEnabled.Value, " 環視開著時，自動幫你選下一個動作（少自己點）");
             if (HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("環視時卡點超過幾秒自動下一階段 (0=不強制):", _labelStyle, GUILayout.Width(260));
+                GUILayout.Label("卡關超過幾秒就自動往下一階段（0＝不強制跳關）：", _labelStyle, GUILayout.Width(260));
                 GUI.SetNextControlName("OrbitCheckpointTimeout");
                 _checkpointTimeoutStr = GUILayout.TextField(_checkpointTimeoutStr, GUILayout.Width(60));
                 if (float.TryParse(_checkpointTimeoutStr, out float v) && v >= 0f && v <= 60f)
@@ -133,7 +133,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.AutoAssistMinIntervalSeconds != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("自動協助最短間隔 (秒，0=最積極):", _labelStyle, GUILayout.Width(260));
+                GUILayout.Label("自動協助最短間隔（秒；0＝最積極、最容易搶選單）：", _labelStyle, GUILayout.Width(260));
                 GUI.SetNextControlName("AutoAssistMinInterval");
                 _autoAssistMinIntervalStr = GUILayout.TextField(_autoAssistMinIntervalStr, GUILayout.Width(60));
                 if (float.TryParse(_autoAssistMinIntervalStr, out float iv) && iv >= 0f && iv <= 30f)
@@ -142,10 +142,10 @@ namespace HS2OrbitAndExciter
             }
             if (HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback != null)
             {
-                GUILayout.Label("僅在「長時間卡住不推進」時再開：每 Proc 補旗標（舊版相容）", _labelStyle);
+                GUILayout.Label("僅在「停很久都不會自動往下走」時再開；一般請維持關閉。", _labelStyle);
                 HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback.Value,
-                    " 啟用 AfterProc 補旗標回退 (EnableAfterProcAssistPostfixFallback)");
+                    " 相容模式：每段流程結束後再補一次自動旗標（舊版行為）");
             }
             GUILayout.Label("焦點距離（單位：全身長倍率，1～3，設定會記錄；輸入後立即套用）", _labelStyle);
             if (HS2OrbitAndExciter.OrbitDistanceHead != null)
@@ -189,10 +189,10 @@ namespace HS2OrbitAndExciter
             }
 
             GUILayout.Space(8);
-            GUILayout.Label("狀態 (State)", GUI.skin.box);
+            GUILayout.Label("角色狀態", GUI.skin.box);
             if (HS2OrbitAndExciter.OverrideFaintness != null)
             {
-                bool newFaintness = GUILayout.Toggle(HS2OrbitAndExciter.OverrideFaintness.Value, " 脫力 (OverrideFaintness)");
+                bool newFaintness = GUILayout.Toggle(HS2OrbitAndExciter.OverrideFaintness.Value, " 強制脫力開／關（影響姿勢表與鏡頭）");
                 HS2OrbitAndExciter.OverrideFaintness.Value = newFaintness;
                 if (newFaintness != _lastOverrideFaintness)
                 {
@@ -202,7 +202,7 @@ namespace HS2OrbitAndExciter
             }
 
             GUILayout.Space(8);
-            GUILayout.Label("興奮條 (Exciter)", GUI.skin.box);
+            GUILayout.Label("興奮條", GUI.skin.box);
             if (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit != null)
             {
                 GUILayout.BeginHorizontal();
@@ -232,7 +232,7 @@ namespace HS2OrbitAndExciter
 
             GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);
-            GUILayout.Label("熱鍵：Ctrl+Shift+O 環視開關，Ctrl+Shift+P 本視窗；頂部為建置識別。", _labelStyle);
+            GUILayout.Label("熱鍵：左 Ctrl＋左 Shift＋O 開關環視；左 Ctrl＋左 Shift＋P 開本視窗。頂端為版本對照資訊。", _labelStyle);
             if (GUILayout.Button("關閉"))
                 _visible = false;
 
