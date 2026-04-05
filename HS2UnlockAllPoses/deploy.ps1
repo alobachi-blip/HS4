@@ -17,7 +17,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$OutDir = Join-Path $PSScriptRoot "bin\Debug\net472"
+# csproj uses AppendTargetFrameworkToOutputPath=false → bin\Debug\, not bin\Debug\net472\
+$OutDir = Join-Path $PSScriptRoot "bin\Debug"
 $SourceDll = Join-Path $OutDir $PluginName
 if (-not (Test-Path $SourceDll)) {
     Write-Error "Build output not found: $SourceDll"
@@ -41,11 +42,6 @@ if (Test-Path $ExistingPlugin) {
     Write-Host "Backed up existing plugin to $backupPath"
 }
 
-# Copy new plugin and dependencies
+# Copy plugin only (bin\Debug may contain game refs from CopyLocalLockFileAssemblies — do not copy those to plugins)
 Copy-Item -Path $SourceDll -Destination $PluginsDir -Force
-# BepInEx packs dependencies; copy any other output DLLs that are needed
-Get-ChildItem -Path $OutDir -Filter "*.dll" | Where-Object { $_.Name -ne $PluginName } | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $PluginsDir -Force
-    Write-Host "Copied $($_.Name)"
-}
 Write-Host "Deployed $PluginName to $PluginsDir"
