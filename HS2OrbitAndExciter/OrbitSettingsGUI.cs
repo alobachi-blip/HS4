@@ -12,7 +12,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier2 = KeyCode.LeftControl;
         private bool _visible;
         private bool _needSyncFromConfig; // 每次打開視窗時從 config 同步顯示，確保看到的是已保存的值
-        private Rect _windowRect = new Rect(100, 100, 420, 460);
+        private Rect _windowRect = new Rect(100, 100, 440, 560);
         private GUIStyle? _labelStyle;
         private bool _stylesInitialized;
         // Per-field strings so TextField isn't reset from config every frame (which hides typing)
@@ -25,6 +25,7 @@ namespace HS2OrbitAndExciter
         private string _orbitDistHeadStr = "";
         private string _orbitDistChestStr = "";
         private string _orbitDistPelvisStr = "";
+        private string _autoAssistMinIntervalStr = "";
 
         private bool _lastOverrideFaintness;
 
@@ -59,6 +60,7 @@ namespace HS2OrbitAndExciter
                 _orbitCountRandomStr = (HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0).ToString();
                 _orbitCountPoseStr = (HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2).ToString();
                 _checkpointTimeoutStr = (HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f).ToString("F1");
+                _autoAssistMinIntervalStr = (HS2OrbitAndExciter.AutoAssistMinIntervalSeconds?.Value ?? 1f).ToString("F2");
                 _excitementDelayStr = (HS2OrbitAndExciter.ExcitementTriggerDelaySeconds?.Value ?? 0f).ToString("F1");
                 _feelAddPerSecStr = (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f).ToString("F2");
                 _orbitDistHeadStr = (HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 0.3f).ToString("F2");
@@ -127,6 +129,23 @@ namespace HS2OrbitAndExciter
                 if (float.TryParse(_checkpointTimeoutStr, out float v) && v >= 0f && v <= 60f)
                     HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds.Value = v;
                 GUILayout.EndHorizontal();
+            }
+            if (HS2OrbitAndExciter.AutoAssistMinIntervalSeconds != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("自動協助最短間隔 (秒，0=最積極):", _labelStyle, GUILayout.Width(260));
+                GUI.SetNextControlName("AutoAssistMinInterval");
+                _autoAssistMinIntervalStr = GUILayout.TextField(_autoAssistMinIntervalStr, GUILayout.Width(60));
+                if (float.TryParse(_autoAssistMinIntervalStr, out float iv) && iv >= 0f && iv <= 30f)
+                    HS2OrbitAndExciter.AutoAssistMinIntervalSeconds.Value = iv;
+                GUILayout.EndHorizontal();
+            }
+            if (HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback != null)
+            {
+                GUILayout.Label("僅在「長時間卡住不推進」時再開：每 Proc 補旗標（舊版相容）", _labelStyle);
+                HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.EnableAfterProcAssistPostfixFallback.Value,
+                    " 啟用 AfterProc 補旗標回退 (EnableAfterProcAssistPostfixFallback)");
             }
             GUILayout.Label("焦點距離（單位：全身長倍率，1～3，設定會記錄；輸入後立即套用）", _labelStyle);
             if (HS2OrbitAndExciter.OrbitDistanceHead != null)
