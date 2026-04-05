@@ -23,6 +23,10 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? OrbitAutoActionEnabled;
         /// <summary>When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds (0 = use game auto only).</summary>
         internal static ConfigEntry<float>? OrbitCheckpointTimeoutSeconds;
+        /// <summary>Minimum unscaled seconds between orbit assist pushes (flag write and checkpoint invoke).</summary>
+        internal static ConfigEntry<float>? AutoAssistMinIntervalSeconds;
+        /// <summary>Fallback switch for per-Proc AfterProc assist. Default off: rely on late-assist path only.</summary>
+        internal static ConfigEntry<bool>? EnableAfterProcAssistPostfixFallback;
         /// <summary>Orbit camera distance = body height × this (head focus).</summary>
         internal static ConfigEntry<float>? OrbitDistanceHead;
         /// <summary>Orbit camera distance = body height × this (chest focus).</summary>
@@ -60,6 +64,10 @@ namespace HS2OrbitAndExciter
                 "When orbit is on: enable game auto action so next pose/action is chosen automatically (user rarely needs to operate).");
             OrbitCheckpointTimeoutSeconds = Config.Bind("Orbit", "OrbitCheckpointTimeoutSeconds", 2f,
                 "When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds. 0 = only use game auto, no forced advance.");
+            AutoAssistMinIntervalSeconds = Config.Bind("Orbit", "AutoAssistMinIntervalSeconds", 1.0f,
+                "Minimum unscaled seconds between auto-assist pushes (isAutoActionChange/initiative and checkpoint invoke). 0 = legacy aggressive behavior.");
+            EnableAfterProcAssistPostfixFallback = Config.Bind("Orbit", "EnableAfterProcAssistPostfixFallback", false,
+                "Fallback: run per-Proc AfterProc assist patch. Default false (late-assist only). Enable only if auto-advance stalls in your setup.");
             OrbitDistanceHead = Config.Bind("Orbit", "OrbitDistanceHead", 1.4f,
                 "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
             OrbitDistanceChest = Config.Bind("Orbit", "OrbitDistanceChest", 1.4f,

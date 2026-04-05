@@ -1,5 +1,19 @@
 # HS2OrbitAndExciter 變更紀錄
 
+## 2026-04-05
+
+### Orbit assist 架構重整
+
+- 新增 `OrbitBehaviorHub`，集中處理環視自動協助的 suppress/grace/cooldown 與決策節流，避免條件散落在多檔案。
+- `OrbitController` 的 `ApplyOrbitAutoAction`、`TryAutoAdvancePastCheckpoint`、UI click/hover 抑制通知，改由 Hub 提供統一 API。
+- suppress 鏈新增 `inputForcus` 條件，避免 UI 輸入焦點期間仍被自動協助搶旗標。
+
+### 自動協助節流與回退開關
+
+- 新增設定 `AutoAssistMinIntervalSeconds`（預設 `1.0`）：同時套用於 assist flag push 與 checkpoint invoke 的最短間隔。
+- `ProcBase.Proc` 的 AfterProc Postfix 改為預設停用（no-op 路徑）；僅在 `EnableAfterProcAssistPostfixFallback=true` 時啟用，作為相容回退方案。
+- 補充相容提醒：本插件仍採 Harmony patch，與其他同類 H 流程插件可能存在相互覆蓋或順序競爭風險；若觀察到自動推進異常，優先檢查上述 fallback 與插件組合。
+
 ## 已知問題
 
 - **環視開啟時，畫面右上角 H 場景選單（例如「愛撫」等動作列表）無法點選**：此現象在部署「移除環視滾輪縮放、bypass 動畫狀態閘門、Ctrl+Shift+P 建置識別」等變更**之前**即已存在，**並非**該次建置才引入。後續若要修復，需另查 `NoCtrlCondition`、滑鼠事件是否被相機／全螢幕層吃掉、或遊戲 UI 射線與 `inputForcus` 等路徑。

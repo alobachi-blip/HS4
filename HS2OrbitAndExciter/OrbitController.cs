@@ -46,12 +46,6 @@ namespace HS2OrbitAndExciter
         private object? _lastNowAnimationInfoRef;
         /// <summary>When true, next LateUpdate will call ApplyCurrentViewOption once (e.g. after faintness toggle).</summary>
         private static bool _requestViewReapplyNextFrame;
-        private static float _manualSelectionSuppressUntilUnscaled = -1f;
-        private const float ManualSelectionSuppressSeconds = 3.0f;
-        private static float _orbitAutoActionGraceUntilUnscaled = -1f;
-        private const float OrbitAutoActionGraceSeconds = 2.5f;
-        private static float _autoActionNullSelectionSinceUnscaled = -1f;
-        private const float AutoActionNullSelectionMinSeconds = 1.5f;
 
         private static FieldInfo _feelFField;
         /// <summary>Seconds spent at checkpoint (Idle, no selection) while orbit is on; reset when we advance or leave checkpoint.</summary>
@@ -167,23 +161,22 @@ namespace HS2OrbitAndExciter
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
                 return;
-            if (ShouldSuppressAutoAction(ctrlFlag, out _))
+            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
             {
                 ctrlFlag.isAutoActionChange = false;
                 ctrlFlag.initiative = 0;
-                _autoActionNullSelectionSinceUnscaled = -1f;
+                OrbitBehaviorHub.ResetNullSelectionTracking();
                 return;
             }
             bool hasSelectionNow = ctrlFlag.selectAnimationListInfo != null;
             if (hasSelectionNow)
             {
-                _autoActionNullSelectionSinceUnscaled = -1f;
+                OrbitBehaviorHub.ResetNullSelectionTracking();
                 return;
             }
-            if (_autoActionNullSelectionSinceUnscaled < 0f)
-                _autoActionNullSelectionSinceUnscaled = Time.unscaledTime;
-            float nullSelectionElapsed = Time.unscaledTime - _autoActionNullSelectionSinceUnscaled;
-            if (nullSelectionElapsed < AutoActionNullSelectionMinSeconds)
+            if (!OrbitBehaviorHub.IsNullSelectionReadyForAssist())
+                return;
+            if (!OrbitBehaviorHub.TryConsumeAssistFlagPush(out _))
                 return;
 
             var flagType = ctrlFlag.GetType();
@@ -204,30 +197,44 @@ namespace HS2OrbitAndExciter
             Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
         }
 
-        /// <summary>When orbit is on and stuck at checkpoint (Idle, no selection) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation to advance.</summary>
+        /// <summary>When orbit is on, not yet in action loop, and (no pose list or similar gate) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation. In-loop means checkpoint passed — do not use list-null alone.</summary>
         private void TryAutoAdvancePastCheckpoint(HScene hScene)
         {
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f) return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
-            if (ShouldSuppressAutoAction(ctrlFlag, out _))
+            if (IsInActionLoopState(hScene))
+            {
+                _checkpointIdleTime = 0f;
+                return;
+            }
+            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
             {
                 _checkpointIdleTime = 0f;
                 return;
             }
             var sel = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue();
             bool hasSelection = sel != null;
-            if (hasSelection) { _checkpointIdleTime = 0f; return; }
+            if (hasSelection)
+            {
+                _checkpointIdleTime = 0f;
+                OrbitBehaviorHub.ResetCheckpointInvokeCooldown();
+                return;
+            }
             if (Input.GetMouseButton(0))
             {
                 _checkpointIdleTime = 0f;
                 return;
             }
-            // Runtime evidence: animator state label can stay "unknown" while game still has no selection — do not gate on Idle/D_Idle only.
+            if (OrbitBehaviorHub.IsCheckpointInvokeOnLegacyCooldown())
+                return;
+            // Not in action loop (see IsInActionLoopState gate above); list-null still used as gate hint for pre-loop UI stalls.
             _checkpointIdleTime += Time.deltaTime;
             if (_checkpointIdleTime < timeout) return;
             _checkpointIdleTime = 0f;
+            if (!OrbitBehaviorHub.TryConsumeCheckpointInvoke(out _))
+                return;
             if (_getAutoAnimationMethod == null)
             {
                 _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -241,6 +248,7 @@ namespace HS2OrbitAndExciter
                     _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
             }
             catch { }
+            OrbitBehaviorHub.MarkCheckpointInvokeLegacyCooldown(timeout);
 
             // Fallback: if we still can't pick next action, try to bump speed once (no feel_f change).
             bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
@@ -262,14 +270,12 @@ namespace HS2OrbitAndExciter
             {
                 bool overUi = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
                 if (overUi)
-                    MarkManualUiClick();
+                    OrbitBehaviorHub.NotifyManualUiClick();
             }
             else if (_orbitActive && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
                 // Keep suppress window alive while cursor stays on UI, so auto-action can't race hover->click.
-                float hoverUntil = Time.unscaledTime + 0.25f;
-                if (hoverUntil > _manualSelectionSuppressUntilUnscaled)
-                    _manualSelectionSuppressUntilUnscaled = hoverUntil;
+                OrbitBehaviorHub.NotifyUiHoverWhileOrbit();
             }
             bool mod2 = Input.GetKey(Modifier2);
             bool mod = Input.GetKey(Modifier);
@@ -474,7 +480,7 @@ namespace HS2OrbitAndExciter
             int nPose = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
             bool changePose = HS2OrbitAndExciter.ChangePoseOnCycle?.Value ?? false;
             bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
-            bool suppressCycleActions = ShouldSuppressAutoAction(hScene.ctrlFlag, out _);
+            bool suppressCycleActions = OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out _);
 
             if (nRandom > 0 && _orbitCycleCount % nRandom == 0)
             {
@@ -515,7 +521,9 @@ namespace HS2OrbitAndExciter
                     var current = hScene.ctrlFlag?.nowAnimationInfo;
                     var next = OrbitHelpers.PickNextPose(current, all);
                     if (next != null)
+                    {
                         hScene.StartCoroutine(hScene.ChangeAnimation(next, _isForceResetCamera: false, _isForceLoopAction: false, _UseFade: true));
+                    }
                 }
             }
         }
@@ -535,7 +543,7 @@ namespace HS2OrbitAndExciter
             if (active)
             {
                 _orbitActiveForPatches = true;
-                _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
+                OrbitBehaviorHub.NotifyOrbitToggled(true);
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
                 _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
                 _orbitPhase = 0;
@@ -562,8 +570,7 @@ namespace HS2OrbitAndExciter
             else
             {
                 _orbitActiveForPatches = false;
-                _orbitAutoActionGraceUntilUnscaled = -1f;
-                _autoActionNullSelectionSinceUnscaled = -1f;
+                OrbitBehaviorHub.NotifyOrbitToggled(false);
                 _waitingForPrepStart = false;
                 // Restoring saved delegate can evaluate false after orbit stop and keep UI unclickable; keep permissive after orbit off.
                 ctrl.NoCtrlCondition = () => true;
@@ -594,40 +601,5 @@ namespace HS2OrbitAndExciter
             _requestViewReapplyNextFrame = true;
         }
 
-        internal static void MarkManualUiClick()
-        {
-            _manualSelectionSuppressUntilUnscaled = Time.unscaledTime + ManualSelectionSuppressSeconds;
-        }
-
-        internal static bool ShouldSuppressAutoAction(HSceneFlagCtrl? ctrlFlag, out string reason)
-        {
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
-            {
-                reason = "pointerOverUi";
-                return true;
-            }
-            if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
-            {
-                reason = "orbitStartGrace";
-                return true;
-            }
-            if (ctrlFlag != null && ctrlFlag.selectAnimationListInfo != null)
-            {
-                reason = "selectionListPresent";
-                return true;
-            }
-            if (Input.GetMouseButton(0))
-            {
-                reason = "mouseHolding";
-                return true;
-            }
-            if (Time.unscaledTime < _manualSelectionSuppressUntilUnscaled)
-            {
-                reason = "recentUiClick";
-                return true;
-            }
-            reason = "none";
-            return false;
-        }
     }
 }
