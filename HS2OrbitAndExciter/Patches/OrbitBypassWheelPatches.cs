@@ -13,7 +13,7 @@ namespace HS2OrbitAndExciter.Patches
         public const float DelaySeconds = 2f;
         private static float _bypassStartTimeUnscaled = -1f;
 
-        public static bool TryBypass(string _, ref float wheel)
+        public static bool TryBypass(ref float wheel)
         {
             if (!OrbitController.IsOrbitActive() || wheel != 0f)
             {
@@ -46,7 +46,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(ref float _wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_StartProcTrigger), ref _wheel);
+            OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 
@@ -56,7 +56,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _isReStart, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_StartAibuProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -66,7 +66,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(int _state, bool _restart, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_StartHoushiProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -76,7 +76,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(ref float _wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_FaintnessStartProcTrigger), ref _wheel);
+            OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 
@@ -86,7 +86,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _start, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_FaintnessStartAibuProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -96,7 +96,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(int _state, ref float _wheel, int _modeCtrl)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AfterTheInsideWaitingProc), ref _wheel);
+            OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 
@@ -106,7 +106,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(ref float _wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_Masturbation_StartProcTrriger), ref _wheel);
+            OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 
@@ -117,7 +117,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _start, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AutoStartProcTrigger), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -127,7 +127,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _isReStart, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AutoStartAibuProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -138,7 +138,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(int _state, bool _restart, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AutoStartHoushiProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -149,7 +149,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _restart, int _state, int _modeCtrl, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AutoStartSonyuProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -160,7 +160,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(bool _restart, int _state, int _modeCtrl, ref float wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_StartSonyuProc), ref wheel);
+            OrbitBypassWheelState.TryBypass(ref wheel);
         }
     }
 
@@ -171,7 +171,7 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(int _state, ref float _wheel)
         {
-            OrbitBypassWheelState.TryBypass(nameof(OrbitBypass_AutoAfterTheInsideWaitingProc), ref _wheel);
+            OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 }

@@ -63,7 +63,7 @@ namespace HS2OrbitAndExciter
             OrbitAutoActionEnabled = Config.Bind("Orbit", "OrbitAutoActionEnabled", true,
                 "When orbit is on: enable game auto action so next pose/action is chosen automatically (user rarely needs to operate).");
             OrbitCheckpointTimeoutSeconds = Config.Bind("Orbit", "OrbitCheckpointTimeoutSeconds", 2f,
-                "When orbit is on and OrbitAutoActionEnabled: stuck at checkpoint (Idle, no selection) auto-advances after this many seconds. 0 = no forced advance. Ignored when OrbitAutoActionEnabled is false.");
+                "When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds. 0 = only use game auto, no forced advance.");
             AutoAssistMinIntervalSeconds = Config.Bind("Orbit", "AutoAssistMinIntervalSeconds", 1.0f,
                 "Minimum unscaled seconds between auto-assist pushes (isAutoActionChange/initiative and checkpoint invoke). 0 = legacy aggressive behavior.");
             EnableAfterProcAssistPostfixFallback = Config.Bind("Orbit", "EnableAfterProcAssistPostfixFallback", false,
@@ -100,6 +100,21 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitBypass_AutoStartSonyuProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass_StartSonyuProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass_AutoAfterTheInsideWaitingProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_StartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_StartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AutoStartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AutoStartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AfterTheInsideWaitingProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AutoAfterTheInsideWaitingProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_FaintnessStartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_FaintnessStartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_AutoStartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_StartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_StartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProcTrigger));
+            PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProc));
             PatchSafe(harmony, typeof(Patches.OrbitAutoActionAfterProcPatches));
             // Masturbation/Les/Sonyu/Aibu 不載入（此遊戲 build 無對應方法，避免警告）
             var go = new GameObject("HS2OrbitAndExciterController");

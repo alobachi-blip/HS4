@@ -47,7 +47,7 @@ namespace HS2OrbitAndExciter
         /// <summary>When true, next LateUpdate will call ApplyCurrentViewOption once (e.g. after faintness toggle).</summary>
         private static bool _requestViewReapplyNextFrame;
 
-        private static FieldInfo _feelFField;
+        private static FieldInfo? _feelFField;
         /// <summary>Seconds spent at checkpoint (Idle, no selection) while orbit is on; reset when we advance or leave checkpoint.</summary>
         private float _checkpointIdleTime;
         private static MethodInfo? _getAutoAnimationMethod;
@@ -81,18 +81,12 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || chaFemales.Length == 0) return false;
             var cha = chaFemales[0];
             if (cha == null) return false;
-            var animBody = Traverse.Create(cha).Field("animBody").GetValue();
+            var animBody = OrbitHelpers.TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
-            var animType = animBody.GetType();
-            var getState = animType.GetMethod("GetCurrentAnimatorStateInfo", new[] { typeof(int) });
-            if (getState == null) return false;
-            var state = getState.Invoke(animBody, new object[] { 0 });
-            if (state == null) return false;
-            var isName = state.GetType().GetMethod("IsName", new[] { typeof(string) });
-            if (isName == null) return false;
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
             foreach (string name in ActionLoopStateNames)
             {
-                if ((bool)isName.Invoke(state, new object[] { name }))
+                if (stateInfo.IsName(name))
                     return true;
             }
             return false;
@@ -104,7 +98,8 @@ namespace HS2OrbitAndExciter
         /// <summary>True when in preparation state: Idle/D_Idle and speed &lt;= 0.</summary>
         private static bool IsInPreparationState(HScene hScene)
         {
-            var ctrlFlag = hScene?.ctrlFlag;
+            if (hScene == null) return false;
+            var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return false;
             float speed = (float)(Traverse.Create(ctrlFlag).Field("speed").GetValue() ?? 0f);
             if (speed > 0.01f) return false;
@@ -112,16 +107,10 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || chaFemales.Length == 0) return false;
             var cha = chaFemales[0];
             if (cha == null) return false;
-            var animBody = Traverse.Create(cha).Field("animBody").GetValue();
+            var animBody = OrbitHelpers.TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
-            var animType = animBody.GetType();
-            var getState = animType.GetMethod("GetCurrentAnimatorStateInfo", new[] { typeof(int) });
-            if (getState == null) return false;
-            var state = getState.Invoke(animBody, new object[] { 0 });
-            if (state == null) return false;
-            var isName = state.GetType().GetMethod("IsName", new[] { typeof(string) });
-            if (isName == null) return false;
-            return (bool)isName.Invoke(state, new object[] { "Idle" }) || (bool)isName.Invoke(state, new object[] { "D_Idle" });
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            return stateInfo.IsName("Idle") || stateInfo.IsName("D_Idle");
         }
 
         /// <summary>When orbit is active and in action loop only: add to excitement gauge and to speed so W/S/O segments advance without wheel.</summary>
@@ -200,9 +189,6 @@ namespace HS2OrbitAndExciter
         /// <summary>When orbit is on, not yet in action loop, and (no pose list or similar gate) for OrbitCheckpointTimeoutSeconds, call HScene.GetAutoAnimation. In-loop means checkpoint passed — do not use list-null alone.</summary>
         private void TryAutoAdvancePastCheckpoint(HScene hScene)
         {
-            // Same mental model as ApplyOrbitAutoAction: no forced segment advance unless user enabled auto assist.
-            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-                return;
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f) return;
             var ctrlFlag = hScene.ctrlFlag;

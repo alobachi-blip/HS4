@@ -27,6 +27,18 @@ namespace HS2OrbitAndExciter
             return arr as ChaControl[];
         }
 
+        /// <summary>
+        /// <see cref="ChaInfo.animBody"/> is a property (not a field); <c>Traverse.Field("animBody")</c> returns null and breaks gates.
+        /// </summary>
+        public static Animator? TryGetFemaleAnimBody(ChaControl? cha)
+        {
+            if (cha == null) return null;
+            if (cha.animBody != null) return cha.animBody;
+            if (cha.objAnim != null)
+                return cha.objAnim.GetComponent<Animator>();
+            return null;
+        }
+
         /// <summary>Get world position of a bone on female (0 or 1). Returns null if not found.</summary>
         public static Vector3? GetBonePosition(ChaControl[] chaFemales, int femaleIndex, string boneName)
         {

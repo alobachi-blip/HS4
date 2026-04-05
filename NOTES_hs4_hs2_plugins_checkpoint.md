@@ -94,3 +94,30 @@ git switch -c recover/hs2-plugins checkpoint/hs4-hs2-plugins-deploy
 - 先確認：**僅姿勢列表壞還是全部 UI**；**關環視後是否仍壞**（指向 `NoCtrlCondition`）。
 - 再確認：**關閉 `OrbitAutoActionEnabled` 是否立刻好**（指向 auto-action／checkpoint／cycle）。
 - 建置部署前 **關閉 HS2**，避免 `BepInEx\plugins\*.dll` 被鎖定導致複製失敗。
+
+---
+
+## HS2OrbitAndExciter：環視滾輪繞過、1v1、芙露進 H — 經驗總結（2026-04-05）
+
+### 現象
+
+- 雙人 `MultiPlay_F2M1` 已有滾輪 gate 繞過；**1v1**（含「呼叫芙露」進 H）仍可能卡在要滾輪的檢查點。
+- 除錯時以為「沒進 patch」或「啟動條件過嚴」；實際上 patch 有進，`orbit` 開啟後仍被 **Animator 閘門**擋下。
+
+### 根因（執行期日誌佐證）
+
+1. **類別不同**：1v1 流程跑的是 `Aibu` / `Houshi` / `Sonyu` 實例上的 `StartProcTrigger` 等，與 `MultiPlay_F2M1` 方法簽名不同，必須**另設 Harmony patch**（`OrbitBypassWheelPatches1v1.cs`），不可與 F2M1 共用同一組 Prefix。
+2. **誤用反射**：`ChaInfo.animBody` 在遊戲裡是 **public 屬性**，用 `Traverse.Field("animBody")` 會得到 null，診斷上像「沒有 animBody」。修正為直接讀屬性（並保留 `objAnim` → `GetComponent<Animator>()` 後備）。
+3. **日誌「出不來」**：除路徑／權限外，若 `TryBypass` 被閘門秒退，節流 log 也會讓人誤以為沒執行；需在入口與 boot 時機分開驗證（本次驗證後已移除寫檔儀器化）。
+
+### 實作落點
+
+- `Patches/OrbitBypassWheelPatches1v1.cs`：1v1 專用 Prefix，共用 `OrbitBypassWheelState.TryBypass`。
+- `OrbitHelpers.TryGetFemaleAnimBody`、`OrbitBypassAnimatorGate`、`OrbitController`（讀 layer0 狀態處）：統一走正確的 Animator 取得方式。
+- `HS2OrbitAndExciter.csproj`：`UnityEngine.AnimationModule` 參考。
+
+### 下次若再懷疑「繞過沒生效」
+
+- 先對照反組譯：`dll_decompiled` 裡 **實際被呼叫的方法名與參數** 是否已有對應 Harmony（例如 `Aibu.AutoStartProcTrigger(bool)` 無 `wheel` 參數則無法用同一招 patch）。
+- 不要用 `Traverse.Field` 猜 **auto-property**；優先查 `ChaControl` / `ChaInfo` 的公開 API。
+- 區分「沒進 TryBypass」與「進了但被 orbit／閘門／2s 延遲擋住」。

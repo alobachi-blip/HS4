@@ -1,5 +1,5 @@
 using AIChara;
-using HarmonyLib;
+using UnityEngine;
 
 namespace HS2OrbitAndExciter
 {
@@ -28,23 +28,13 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || chaFemales.Length == 0) return false;
             var cha = chaFemales[0];
             if (cha == null) return false;
-            var animBody = Traverse.Create(cha).Field("animBody").GetValue();
+            var animBody = OrbitHelpers.TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
-            var animType = animBody.GetType();
-            var getState = animType.GetMethod("GetCurrentAnimatorStateInfo", new[] { typeof(int) });
-            if (getState == null) return false;
-            var state = getState.Invoke(animBody, new object[] { 0 });
-            if (state == null) return false;
-            var isName = state.GetType().GetMethod("IsName", new[] { typeof(string) });
-            if (isName == null) return false;
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
             foreach (var name in AllowedStateNames)
             {
-                try
-                {
-                    if ((bool)isName.Invoke(state, new object[] { name }))
-                        return true;
-                }
-                catch { }
+                if (stateInfo.IsName(name))
+                    return true;
             }
             return false;
         }

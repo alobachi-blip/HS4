@@ -122,9 +122,8 @@ namespace HS2OrbitAndExciter
                 HS2OrbitAndExciter.OrbitAutoActionEnabled.Value = GUILayout.Toggle(HS2OrbitAndExciter.OrbitAutoActionEnabled.Value, " 環視開著時，自動幫你選下一個動作（少自己點）");
             if (HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds != null)
             {
-                GUILayout.Label("（僅在開啟「自動幫你選下一個動作」時有效；與「每繞幾圈換姿／換裝」無關。）", _labelStyle);
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("卡關幾秒後強制往下一階段（0＝不要強制）：", _labelStyle, GUILayout.Width(260));
+                GUILayout.Label("卡關超過幾秒就自動往下一階段（0＝不強制跳關）：", _labelStyle, GUILayout.Width(260));
                 GUI.SetNextControlName("OrbitCheckpointTimeout");
                 _checkpointTimeoutStr = GUILayout.TextField(_checkpointTimeoutStr, GUILayout.Width(60));
                 if (float.TryParse(_checkpointTimeoutStr, out float v) && v >= 0f && v <= 60f)

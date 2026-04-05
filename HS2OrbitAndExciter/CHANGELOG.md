@@ -2,6 +2,13 @@
 
 ## 2026-04-05
 
+### 滾輪繞過：1v1 與 Animator 閘門修正
+
+- **1v1**：新增 `Patches/OrbitBypassWheelPatches1v1.cs`，對 `Sonyu` / `Aibu` / `Houshi` 的 `Start*` / `AutoStart*` / `AfterTheInsideWaiting*` 等與 `MultiPlay_F2M1` 簽名不同的方法獨立 Prefix（避免與雙人 patch 混掛）。
+- **閘門**：`ChaInfo.animBody` 為 **屬性**，`Traverse.Field("animBody")` 會永遠為 null，導致誤判「無動畫」而擋繞過；改經 `OrbitHelpers.TryGetFemaleAnimBody`（`animBody`，必要時 `objAnim` 上取 `Animator`），閘門與 `OrbitController` 內讀取 layer0 狀態的邏輯一併改用 `AnimatorStateInfo`。
+- **建置**：`HS2OrbitAndExciter.csproj` 條件引用 `UnityEngine.AnimationModule.dll`（編譯期）。
+- **除錯**：曾用 NDJSON 驗證後已移除專用寫檔類別，避免量產外掛持續寫磁碟。
+
 ### Orbit assist 架構重整
 
 - 新增 `OrbitBehaviorHub`，集中處理環視自動協助的 suppress/grace/cooldown 與決策節流，避免條件散落在多檔案。
@@ -13,10 +20,6 @@
 - 新增設定 `AutoAssistMinIntervalSeconds`（預設 `1.0`）：同時套用於 assist flag push 與 checkpoint invoke 的最短間隔。
 - `ProcBase.Proc` 的 AfterProc Postfix 改為預設停用（no-op 路徑）；僅在 `EnableAfterProcAssistPostfixFallback=true` 時啟用，作為相容回退方案。
 - 補充相容提醒：本插件仍採 Harmony patch，與其他同類 H 流程插件可能存在相互覆蓋或順序競爭風險；若觀察到自動推進異常，優先檢查上述 fallback 與插件組合。
-
-### 行為調整（卡關推進）
-
-- `TryAutoAdvancePastCheckpoint`（預設約每 2 秒可觸發的強制過關）改為**僅在** `OrbitAutoActionEnabled` 開啟時執行，與「每繞幾圈換姿／換裝」分離；關閉自動動作後不再出現數秒一換段的體感。
 
 ## 已知問題
 
