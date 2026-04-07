@@ -12,7 +12,11 @@ namespace HS2OrbitAndExciter
     {
         private static readonly string[] AllowedStateNames =
         {
-            "Idle", "D_Idle", "WIdle", "SIdle", "Insert", "D_Insert"
+            // HScene.IsIdle
+            "Idle", "D_Idle", "WIdle", "SIdle", "Insert", "D_Insert",
+            // HScene.IsAfterIdle (post-orgasm / after states)
+            "Orgasm_A", "Orgasm_IN_A", "Orgasm_OUT_A", "Drink_A", "Vomit_A", "OrgasmM_OUT_A",
+            "D_Orgasm_A", "D_Orgasm_OUT_A", "D_Orgasm_IN_A", "D_OrgasmM_OUT_A"
         };
 
         /// <summary>True if current H scene exists and first female animator is in an allowed state for wheel bypass.</summary>
