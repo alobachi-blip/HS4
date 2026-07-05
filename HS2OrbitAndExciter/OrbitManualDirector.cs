@@ -304,5 +304,44 @@ namespace HS2OrbitAndExciter
             }
             return added;
         }
+
+        internal readonly struct ManualHudStats
+        {
+            internal readonly int CharaPool;
+            internal readonly int Disliked;
+            internal readonly int Excluded;
+            internal readonly float OnStageSeconds;
+            internal readonly bool OnStageTracked;
+
+            internal ManualHudStats(int charaPool, int disliked, int excluded, float onStageSeconds, bool onStageTracked)
+            {
+                CharaPool = charaPool;
+                Disliked = disliked;
+                Excluded = excluded;
+                OnStageSeconds = onStageSeconds;
+                OnStageTracked = onStageTracked;
+            }
+        }
+
+        /// <summary>Compact G-pool stats for HUD (no scan; uses existing cache).</summary>
+        internal static ManualHudStats GetHudStats()
+        {
+            int pool = 0;
+            if (_cachedCharas != null)
+            {
+                foreach (string path in _cachedCharas)
+                {
+                    if (!ExcludedCharas.Contains(path))
+                        pool++;
+                }
+            }
+
+            float onStage = -1f;
+            bool tracked = _activeCharaSinceUnscaled >= 0f && !string.IsNullOrEmpty(_activeCharaPath);
+            if (tracked)
+                onStage = Time.unscaledTime - _activeCharaSinceUnscaled;
+
+            return new ManualHudStats(pool, DislikedCharas.Count, ExcludedCharas.Count, onStage, tracked);
+        }
     }
 }

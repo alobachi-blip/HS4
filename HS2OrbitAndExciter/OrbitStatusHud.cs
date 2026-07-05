@@ -10,7 +10,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode ToggleHotkey = KeyCode.I;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 168f;
+        private const float AreaWidth = 178f;
         private const float Margin = 6f;
 
         private OrbitController? _orbit;
@@ -122,13 +122,32 @@ namespace HS2OrbitAndExciter
                 timer += " " + next;
 
             string assist = FormatAssistShort(snap.SuppressReasonKey);
+            string manual = FormatManualPoolLine();
             return new[]
             {
                 $"環視·{status} {timer}",
                 assist,
                 "⌃⇧O/I/P QWE",
-                OrbitManualHotkeys.HudLegend
+                OrbitManualHotkeys.HudLegend,
+                manual
             };
+        }
+
+        /// <summary>G pool: eligible count, strike-1 disliked, strike-2 excluded; on-stage seconds if &lt; 30s.</summary>
+        private static string FormatManualPoolLine()
+        {
+            var s = OrbitManualDirector.GetHudStats();
+            if (s.CharaPool <= 0 && !s.OnStageTracked)
+                return "G池·未掃";
+
+            string line = $"G池{s.CharaPool}";
+            if (s.Disliked > 0)
+                line += $" 降{s.Disliked}";
+            if (s.Excluded > 0)
+                line += $" 排{s.Excluded}";
+            if (s.OnStageTracked && s.OnStageSeconds >= 0f && s.OnStageSeconds < 30f)
+                line += $" ·{s.OnStageSeconds:F0}s";
+            return line;
         }
 
         private static string FormatAssistShort(string reasonKey)
