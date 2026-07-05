@@ -60,6 +60,7 @@ namespace HS2OrbitAndExciter
                 _lastCheckpointInvokeTimeUnscaled = -999f;
                 _selectionListStuckSinceUnscaled = -1f;
                 OrbitPoseDirector.Reset();
+                OrbitManualDirector.Reset();
                 OrbitStatusHud.NotifyOrbitActivated();
             }
             else
@@ -71,6 +72,7 @@ namespace HS2OrbitAndExciter
                 _lastCheckpointInvokeTimeUnscaled = -999f;
                 _selectionListStuckSinceUnscaled = -1f;
                 OrbitPoseDirector.Reset();
+                OrbitManualDirector.Reset();
             }
         }
 
@@ -79,6 +81,11 @@ namespace HS2OrbitAndExciter
             if (OrbitPoseDirector.IsTransitionActive)
             {
                 reason = "poseTransition";
+                return true;
+            }
+            if (OrbitManualDirector.IsBusy)
+            {
+                reason = "manualBusy";
                 return true;
             }
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())

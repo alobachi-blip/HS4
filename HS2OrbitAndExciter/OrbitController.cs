@@ -143,6 +143,40 @@ namespace HS2OrbitAndExciter
                 OrbitBehaviorHub.NotifyOrbitToggled(active);
                 OnOrbitToggled(active);
             }
+
+            TryManualHotkeys(hProbe);
+        }
+
+        private void TryManualHotkeys(HScene? hScene)
+        {
+            if (hScene == null)
+                return;
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+                return;
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                return;
+            if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
+                return;
+            if (Time.unscaledTime - _lastHotkeyTime < HotkeyCooldownSeconds)
+                return;
+
+            if (Input.GetKeyDown(OrbitManualHotkeys.CharaKey))
+            {
+                if (OrbitManualDirector.TrySwapFemale0(hScene, this))
+                    _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.CoordinateKey))
+            {
+                if (OrbitManualDirector.TrySwapCoordinate(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.WearKey))
+            {
+                if (OrbitManualDirector.TryRandomWear(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
+            }
         }
 
         private void LateUpdate()
@@ -175,7 +209,7 @@ namespace HS2OrbitAndExciter
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
             if (_waitingForPrepStart)
             {
-                if (OrbitPoseDirector.IsTransitionActive)
+                if (OrbitPoseDirector.IsTransitionActive || OrbitManualDirector.IsCameraPaused)
                 {
                     if (_prepFrozenElapsed < 0f)
                         _prepFrozenElapsed = Time.unscaledTime - _prepCountdownStart;
@@ -225,7 +259,7 @@ namespace HS2OrbitAndExciter
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
 
-            if (!OrbitPoseDirector.IsCameraPaused)
+            if (!OrbitPoseDirector.IsCameraPaused && !OrbitManualDirector.IsCameraPaused)
             {
                 if (_orbitPhase == 0)
                 {
@@ -327,7 +361,7 @@ namespace HS2OrbitAndExciter
                 faint,
                 orbitTimePer360,
                 roundTripSec,
-                OrbitPoseDirector.IsCameraPaused);
+                OrbitPoseDirector.IsCameraPaused || OrbitManualDirector.IsCameraPaused);
             _hudSnapshotValid = true;
         }
 

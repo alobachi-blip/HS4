@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using AIChara;
 using HarmonyLib;
 using IllusionUtility.GetUtility;
+using Illusion;
 using Manager;
 using UnityEngine;
 
@@ -231,6 +233,89 @@ namespace HS2OrbitAndExciter
             }
             if (candidates.Count == 0) return null;
             return candidates[Random.Range(0, candidates.Count)];
+        }
+
+        /// <summary>List *.png under UserData (e.g. chara/female/, coordinate/female/).</summary>
+        public static List<string> ListUserDataPngFiles(string relativeDir)
+        {
+            var list = new List<string>();
+            string dir = UserData.Path + relativeDir;
+            if (!Directory.Exists(dir))
+                return list;
+            Utils.File.GetAllFiles(dir, "*.png", ref list);
+            return list;
+        }
+
+        /// <summary>Full path to female card in UserData from loaded character, if file name is known.</summary>
+        public static string? GetUserDataFemaleCharaPath(ChaControl? cha)
+        {
+            if (cha?.chaFile == null)
+                return null;
+            string? name = cha.chaFile.charaFileName;
+            if (string.IsNullOrEmpty(name))
+                return null;
+            return UserData.Path + "chara/female/" + name + ".png";
+        }
+
+        /// <summary>Match current coordinate name to a path in the cached list.</summary>
+        public static string? GetCurrentCoordinatePath(ChaControl? cha, IReadOnlyList<string> paths)
+        {
+            if (cha?.nowCoordinate == null || paths == null || paths.Count == 0)
+                return null;
+            string currentName = cha.nowCoordinate.coordinateName;
+            if (string.IsNullOrEmpty(currentName))
+                return null;
+            foreach (string path in paths)
+            {
+                var coord = new ChaFileCoordinate();
+                if (!coord.LoadFile(path))
+                    continue;
+                if (coord.coordinateName == currentName)
+                    return path;
+            }
+            return null;
+        }
+
+        /// <summary>Randomly advance wear state on 1..N active slots per character.</summary>
+        public static bool ApplyRandomWearSlots(ChaControl[]? chaFemales, ChaControl[]? chaMales)
+        {
+            bool any = false;
+            if (chaFemales != null)
+            {
+                foreach (var c in chaFemales)
+                    any |= ApplyRandomWearSlotsTo(c);
+            }
+            if (chaMales != null)
+            {
+                foreach (var c in chaMales)
+                    any |= ApplyRandomWearSlotsTo(c);
+            }
+            return any;
+        }
+
+        private static bool ApplyRandomWearSlotsTo(ChaControl? c)
+        {
+            if (c == null || c.objBodyBone == null || !c.visibleAll)
+                return false;
+
+            var slots = new List<int>();
+            for (int i = 0; i < 8; i++)
+            {
+                if (c.IsClothesStateKind(i))
+                    slots.Add(i);
+            }
+            if (slots.Count == 0)
+                return false;
+
+            int count = Random.Range(1, slots.Count + 1);
+            for (int n = 0; n < count; n++)
+            {
+                int idx = Random.Range(0, slots.Count);
+                int slot = slots[idx];
+                slots.RemoveAt(idx);
+                c.SetClothesStateNext(slot);
+            }
+            return true;
         }
 
         /// <summary>Set H scene faintness state (ctrlFlag.isFaintness) and request orbit camera reapply. No-op when not in H scene.</summary>

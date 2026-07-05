@@ -104,7 +104,11 @@ namespace HS2OrbitAndExciter
 
         private static string[] BuildLines(in OrbitHudSnapshot snap)
         {
-            string status = snap.CameraPaused ? "換姿中" : "運轉";
+            string status;
+            if (snap.CameraPaused)
+                status = OrbitManualDirector.IsBusy ? "換角中" : "換姿中";
+            else
+                status = "運轉";
             if (snap.IsFaintness)
                 status += "·虛脫";
 
@@ -122,7 +126,8 @@ namespace HS2OrbitAndExciter
             {
                 $"環視·{status} {timer}",
                 assist,
-                "⌃⇧O/I/P QWE"
+                "⌃⇧O/I/P QWE",
+                OrbitManualHotkeys.HudLegend
             };
         }
 
@@ -145,6 +150,7 @@ namespace HS2OrbitAndExciter
                         return u > 0.01f ? $"自動·UI{u:F0}s" : "自動·UI";
                     }
                 case "poseTransition": return "自動·換姿";
+                case "manualBusy": return "自動·換角";
                 case "assistInterval": return "自動·節流";
                 case "checkpointInterval": return "自動·節流";
                 default: return "自動·就緒";

@@ -35,7 +35,8 @@ namespace HS2OrbitAndExciter
         internal static bool IsCameraPaused =>
             _state == DirectorState.PoseTransition || _state == DirectorState.Rebinding;
 
-        internal static bool ShouldFreezeCycleCounters => IsCameraPaused;
+        internal static bool ShouldFreezeCycleCounters =>
+            IsCameraPaused || OrbitManualDirector.IsCameraPaused;
 
         internal static void Reset()
         {
