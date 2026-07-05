@@ -11,13 +11,17 @@ namespace HS2OrbitAndExciter
     internal static class OrbitManualDirector
     {
         private const float ShortLivedOnStageSeconds = 30f;
+        private const float LongStayBonusSeconds = 60f;
         private const float DislikedCharaWeight = 0.15f;
+        private const float PreferredCharaWeight = 2.5f;
         private const float CharaReloadTimeoutSeconds = 15f;
 
         private static readonly HashSet<string> UsedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> UsedCoordinates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Quick-swap strike 1: reduced weight for rest of session.</summary>
         private static readonly HashSet<string> DislikedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Stayed on stage ≥60s before swap: boosted weight in G pool for rest of session.</summary>
+        private static readonly HashSet<string> PreferredCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Quick-swap strike 2+: excluded from G pool for rest of session.</summary>
         private static readonly HashSet<string> ExcludedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> QuickSwapStrikes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -83,6 +87,7 @@ namespace HS2OrbitAndExciter
             var paths = GetEligibleCharaPaths();
             string? current = OrbitHelpers.GetUserDataFemaleCharaPath(cha);
             EnsureActiveCharaTracked(current);
+            RewardIfLongStay(current);
             string? next = OrbitShufflePool.Pick(paths, UsedCharas, current, GetCharaWeight);
             if (next == null)
             {
@@ -129,6 +134,25 @@ namespace HS2OrbitAndExciter
 
             HS2OrbitAndExciter.Log?.LogInfo("Orbit: J 亂數穿著");
             OrbitController.NotifyManualHotkeyCompleted(hScene);
+            return true;
+        }
+
+        internal static bool TryChangePose(HScene hScene)
+        {
+            if (!CanAcceptHotkey(hScene))
+                return false;
+
+            if (!OrbitPoseDirector.RequestHotkeyPoseChange(hScene))
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L 無可換姿");
+                return false;
+            }
+
+            var next = hScene.ctrlFlag?.selectAnimationListInfo;
+            string label = next == null || string.IsNullOrEmpty(next.nameAnimation)
+                ? "?"
+                : next.nameAnimation;
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 換姿 {label}");
             return true;
         }
 
@@ -187,6 +211,8 @@ namespace HS2OrbitAndExciter
         {
             if (DislikedCharas.Contains(path))
                 return DislikedCharaWeight;
+            if (PreferredCharas.Contains(path))
+                return PreferredCharaWeight;
             return 1f;
         }
 
@@ -218,12 +244,30 @@ namespace HS2OrbitAndExciter
             {
                 ExcludedCharas.Add(oldPath!);
                 DislikedCharas.Remove(oldPath!);
+                PreferredCharas.Remove(oldPath!);
                 HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 排除 {System.IO.Path.GetFileName(oldPath)}（快換×{strikes}）");
             }
             else
             {
                 DislikedCharas.Add(oldPath!);
             }
+        }
+
+        private static void RewardIfLongStay(string? path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return;
+            if (!string.Equals(path, _activeCharaPath, StringComparison.OrdinalIgnoreCase))
+                return;
+            if (_activeCharaSinceUnscaled < 0f)
+                return;
+            if (Time.unscaledTime - _activeCharaSinceUnscaled < LongStayBonusSeconds)
+                return;
+            if (!PreferredCharas.Add(path!))
+                return;
+
+            DislikedCharas.Remove(path!);
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 加權 {System.IO.Path.GetFileName(path)}（停留≥{LongStayBonusSeconds:F0}s）");
         }
 
         private static void SetActiveCharaAfterSwap(string newPath)
@@ -414,14 +458,16 @@ namespace HS2OrbitAndExciter
             internal readonly int CharaPool;
             internal readonly int Disliked;
             internal readonly int Excluded;
+            internal readonly int Preferred;
             internal readonly float OnStageSeconds;
             internal readonly bool OnStageTracked;
 
-            internal ManualHudStats(int charaPool, int disliked, int excluded, float onStageSeconds, bool onStageTracked)
+            internal ManualHudStats(int charaPool, int disliked, int excluded, int preferred, float onStageSeconds, bool onStageTracked)
             {
                 CharaPool = charaPool;
                 Disliked = disliked;
                 Excluded = excluded;
+                Preferred = preferred;
                 OnStageSeconds = onStageSeconds;
                 OnStageTracked = onStageTracked;
             }
@@ -445,7 +491,7 @@ namespace HS2OrbitAndExciter
             if (tracked)
                 onStage = Time.unscaledTime - _activeCharaSinceUnscaled;
 
-            return new ManualHudStats(pool, DislikedCharas.Count, ExcludedCharas.Count, onStage, tracked);
+            return new ManualHudStats(pool, DislikedCharas.Count, ExcludedCharas.Count, PreferredCharas.Count, onStage, tracked);
         }
     }
 }

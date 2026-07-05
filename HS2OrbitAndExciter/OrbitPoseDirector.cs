@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace HS2OrbitAndExciter
 {
-    internal enum PoseChangeSource { Cycle, External }
+    internal enum PoseChangeSource { Cycle, External, Hotkey }
 
     internal enum DirectorState
     {
@@ -16,7 +16,7 @@ namespace HS2OrbitAndExciter
 
     /// <summary>
     /// Single coordinator for orbit pose changes: queue, transition detection, rebind.
-    /// Cycle + UI manual are the only pose-change sources; auto/checkpoint do not invoke here (B1).
+    /// Cycle, L hotkey, and UI manual are pose-change sources; auto/checkpoint do not invoke here (B1).
     /// </summary>
     internal static class OrbitPoseDirector
     {
@@ -106,7 +106,7 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            if (!CanAcceptRequest(hScene))
+            if (!CanAcceptRequestForSource(hScene, source))
             {
                 if (source == PoseChangeSource.Cycle)
                 {
@@ -118,6 +118,10 @@ namespace HS2OrbitAndExciter
 
             return TryQueuePoseChange(hScene, explicitNext);
         }
+
+        /// <summary>L hotkey: random next pose (same pool as cycle pose change).</summary>
+        internal static bool RequestHotkeyPoseChange(HScene hScene) =>
+            RequestPoseChange(hScene, PoseChangeSource.Hotkey);
 
         internal static void NotifyExternalPoseChange(HScene hScene)
         {
@@ -162,6 +166,14 @@ namespace HS2OrbitAndExciter
 
             if (TryQueuePoseChange(hScene, null))
                 _pendingCycleRequest = false;
+        }
+
+        private static bool CanAcceptRequestForSource(HScene hScene, PoseChangeSource source)
+        {
+            if (source == PoseChangeSource.Hotkey)
+                return OrbitManualDirector.CanAcceptHotkey(hScene);
+
+            return CanAcceptRequest(hScene);
         }
 
         private static bool CanAcceptRequest(HScene hScene)

@@ -234,6 +234,12 @@ namespace HS2OrbitAndExciter
             {
                 if (OrbitManualDirector.TryCyclePoseCamera(hScene, this))
                     _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.PoseKey))
+            {
+                if (OrbitManualDirector.TryChangePose(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
             }
         }
 

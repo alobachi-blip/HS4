@@ -133,7 +133,7 @@ namespace HS2OrbitAndExciter
             };
         }
 
-        /// <summary>G pool: eligible count, strike-1 disliked, strike-2 excluded; on-stage seconds if &lt; 30s.</summary>
+        /// <summary>G pool: eligible count, strike-1 disliked, strike-2 excluded, long-stay preferred; on-stage timer.</summary>
         private static string FormatManualPoolLine()
         {
             var s = OrbitManualDirector.GetHudStats();
@@ -145,8 +145,15 @@ namespace HS2OrbitAndExciter
                 line += $" 降{s.Disliked}";
             if (s.Excluded > 0)
                 line += $" 排{s.Excluded}";
-            if (s.OnStageTracked && s.OnStageSeconds >= 0f && s.OnStageSeconds < 30f)
-                line += $" ·{s.OnStageSeconds:F0}s";
+            if (s.Preferred > 0)
+                line += $" 優{s.Preferred}";
+            if (s.OnStageTracked && s.OnStageSeconds >= 0f)
+            {
+                if (s.OnStageSeconds < 30f)
+                    line += $" ·{s.OnStageSeconds:F0}s";
+                else if (s.OnStageSeconds >= 60f)
+                    line += $" ·{s.OnStageSeconds:F0}s久";
+            }
             return line;
         }
 
