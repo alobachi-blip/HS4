@@ -30,8 +30,14 @@ namespace HS2OrbitAndExciter
         private static PropertyInfo? _isAutoActionChangeProp;
         private static float _wheelBypassStartUnscaled = -1f;
 
+        private static bool _pendingCyclePoseChange;
+        private static float _cyclePoseAssistQuietUntilUnscaled = -1f;
+        private static float _selectionListStuckSinceUnscaled = -1f;
+
         internal const float WheelBypassValue = 0.10f;
         internal const float WheelBypassDelaySeconds = 2f;
+        internal const float CyclePoseAssistQuietSeconds = 15f;
+        internal const float StaleSelectionClearSeconds = 8f;
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
 
@@ -59,6 +65,9 @@ namespace HS2OrbitAndExciter
                 _autoActionNullSelectionSinceUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
+                ClearPendingCyclePoseChange();
+                _cyclePoseAssistQuietUntilUnscaled = -1f;
+                _selectionListStuckSinceUnscaled = -1f;
                 OrbitStatusHud.NotifyOrbitActivated();
             }
             else
@@ -68,7 +77,30 @@ namespace HS2OrbitAndExciter
                 _checkpointInvokeCooldownUntilUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
+                ClearPendingCyclePoseChange();
+                _cyclePoseAssistQuietUntilUnscaled = -1f;
+                _selectionListStuckSinceUnscaled = -1f;
             }
+        }
+
+        internal static void MarkPendingCyclePoseChange() => _pendingCyclePoseChange = true;
+
+        internal static bool IsPendingCyclePoseChange() => _pendingCyclePoseChange;
+
+        internal static void ClearPendingCyclePoseChange() => _pendingCyclePoseChange = false;
+
+        internal static void NotifyCyclePoseChangeQueued()
+        {
+            _pendingCyclePoseChange = false;
+            _cyclePoseAssistQuietUntilUnscaled = Time.unscaledTime + CyclePoseAssistQuietSeconds;
+            _selectionListStuckSinceUnscaled = -1f;
+        }
+
+        internal static bool ShouldDeferAutoAssistForCyclePose()
+        {
+            if (_pendingCyclePoseChange)
+                return true;
+            return Time.unscaledTime < _cyclePoseAssistQuietUntilUnscaled;
         }
 
         internal static bool ShouldSuppressAssist(HSceneFlagCtrl? ctrlFlag, out string reason)
@@ -208,6 +240,8 @@ namespace HS2OrbitAndExciter
         {
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
                 return false;
+            if (ShouldDeferAutoAssistForCyclePose())
+                return false;
             if (ctrlFlag == null)
                 return false;
             if (ShouldSuppressAssist(ctrlFlag, out _))
@@ -251,6 +285,8 @@ namespace HS2OrbitAndExciter
         {
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f || hScene == null) return;
+            if (ShouldDeferAutoAssistForCyclePose())
+                return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
 
@@ -333,6 +369,44 @@ namespace HS2OrbitAndExciter
             _wheelBypassStartUnscaled = -1f;
             wheel = WheelBypassValue;
             return true;
+        }
+
+        /// <summary>
+        /// Clear a stuck <see cref="HSceneFlagCtrl.selectAnimationListInfo"/> when the game never started ChangeAnimation
+        /// (common after duplicate-id picks or interrupted coroutines). Prevents permanent assist suppress.
+        /// </summary>
+        internal static void TickStaleSelectionRecovery(HScene? hScene)
+        {
+            if (hScene == null)
+            {
+                _selectionListStuckSinceUnscaled = -1f;
+                return;
+            }
+            var ctrlFlag = hScene.ctrlFlag;
+            if (ctrlFlag == null)
+            {
+                _selectionListStuckSinceUnscaled = -1f;
+                return;
+            }
+            if (ctrlFlag.selectAnimationListInfo == null)
+            {
+                _selectionListStuckSinceUnscaled = -1f;
+                return;
+            }
+            if (hScene.NowChangeAnim)
+            {
+                _selectionListStuckSinceUnscaled = -1f;
+                return;
+            }
+
+            if (_selectionListStuckSinceUnscaled < 0f)
+                _selectionListStuckSinceUnscaled = Time.unscaledTime;
+            else if (Time.unscaledTime - _selectionListStuckSinceUnscaled >= StaleSelectionClearSeconds)
+            {
+                ctrlFlag.selectAnimationListInfo = null;
+                ctrlFlag.isAutoActionChange = false;
+                _selectionListStuckSinceUnscaled = -1f;
+            }
         }
     }
 }

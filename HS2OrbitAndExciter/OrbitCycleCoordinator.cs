@@ -42,19 +42,54 @@ namespace HS2OrbitAndExciter
             int m = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
             if (m <= 0)
                 return;
-            var ctrlFlag = hScene.ctrlFlag;
-            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
-                return;
             if (roundTripCount % m != 0)
                 return;
 
+            if (!TryQueueCyclePoseChange(hScene))
+                OrbitBehaviorHub.MarkPendingCyclePoseChange();
+        }
+
+        /// <summary>Retry a cycle pose change that was skipped due to suppress / busy animation state.</summary>
+        internal static void RetryPendingCyclePoseChange(HScene hScene)
+        {
+            if (!OrbitBehaviorHub.IsPendingCyclePoseChange())
+                return;
+            if (HS2OrbitAndExciter.ChangePoseOnCycle?.Value != true)
+            {
+                OrbitBehaviorHub.ClearPendingCyclePoseChange();
+                return;
+            }
+            if (TryQueueCyclePoseChange(hScene))
+                OrbitBehaviorHub.ClearPendingCyclePoseChange();
+        }
+
+        /// <summary>
+        /// Queue pose via <see cref="HSceneFlagCtrl.selectAnimationListInfo"/> so HScene.Update runs the same
+        /// ChangeAnimation path as vanilla auto-action. Do not StartCoroutine(ChangeAnimation) directly.
+        /// </summary>
+        internal static bool TryQueueCyclePoseChange(HScene hScene)
+        {
+            var ctrlFlag = hScene.ctrlFlag;
+            if (ctrlFlag == null)
+                return false;
+            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
+                return false;
+            if (hScene.NowChangeAnim)
+                return false;
+            if (ctrlFlag.selectAnimationListInfo != null)
+                return false;
+
             var all = OrbitHelpers.GetAllPoseList();
             if (all.Count == 0)
-                return;
-            var current = hScene.ctrlFlag?.nowAnimationInfo;
+                return false;
+            var current = ctrlFlag.nowAnimationInfo;
             var next = OrbitHelpers.PickNextPose(current, all);
-            if (next != null)
-                hScene.StartCoroutine(hScene.ChangeAnimation(next, _isForceResetCamera: false, _isForceLoopAction: false, _UseFade: true));
+            if (next == null)
+                return false;
+
+            ctrlFlag.selectAnimationListInfo = next;
+            OrbitBehaviorHub.NotifyCyclePoseChangeQueued();
+            return true;
         }
     }
 }

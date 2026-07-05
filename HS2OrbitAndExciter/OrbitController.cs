@@ -496,6 +496,8 @@ namespace HS2OrbitAndExciter
         internal void RunLateHSceneAssist(HScene hScene)
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
+            OrbitBehaviorHub.TickStaleSelectionRecovery(hScene);
+            OrbitCycleCoordinator.RetryPendingCyclePoseChange(hScene);
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
             OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }

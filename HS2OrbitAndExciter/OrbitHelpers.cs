@@ -218,15 +218,19 @@ namespace HS2OrbitAndExciter
             return list;
         }
 
-        /// <summary>Pick a random pose different from current (exclude current, no repeat).</summary>
+        /// <summary>Pick a random pose different from current (exclude by animation id, not reference).</summary>
         public static HScene.AnimationListInfo? PickNextPose(HScene.AnimationListInfo? current, List<HScene.AnimationListInfo> all)
         {
             if (all == null || all.Count == 0) return null;
-            var exclude = new List<HScene.AnimationListInfo>(all);
-            if (current != null)
-                exclude.RemoveAll(x => x == current);
-            if (exclude.Count == 0) return null;
-            return exclude[Random.Range(0, exclude.Count)];
+            var candidates = new List<HScene.AnimationListInfo>();
+            foreach (var item in all)
+            {
+                if (item == null) continue;
+                if (current != null && item.id == current.id) continue;
+                candidates.Add(item);
+            }
+            if (candidates.Count == 0) return null;
+            return candidates[Random.Range(0, candidates.Count)];
         }
 
         /// <summary>Set H scene faintness state (ctrlFlag.isFaintness) and request orbit camera reapply. No-op when not in H scene.</summary>
