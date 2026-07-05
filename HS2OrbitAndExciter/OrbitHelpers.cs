@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -394,6 +395,47 @@ namespace HS2OrbitAndExciter
             t.Field("FaintnessType").SetValue(value ? 1 : -1);
             t.Field("isFaintnessVoice").SetValue(value);
             OrbitController.RequestViewReapply();
+        }
+
+        /// <summary>Rebind H voice / feel-hit after female[0] card swap (matches HScene startup path).</summary>
+        internal static IEnumerator ReinitFemale0VoiceAndFeel(HScene hScene, ChaControl cha)
+        {
+            if (hScene == null || cha == null)
+                yield break;
+
+            int personality = cha.fileParam2.personality;
+            float pitch = cha.fileParam2.voicePitch;
+
+            if (Singleton<HSceneManager>.IsInstance())
+                Singleton<HSceneManager>.Instance.Personality[0] = personality;
+
+            var feelHit = Traverse.Create(hScene).Field("ctrlFeelHit").GetValue() as FeelHit;
+            if (feelHit != null)
+            {
+                feelHit.FeelHitInit(personality);
+                feelHit.SetFeelCha(cha);
+            }
+
+            var ctrlVoice = Traverse.Create(hScene).Field("ctrlVoice").GetValue() as HVoiceCtrl;
+            if (ctrlVoice == null)
+                yield break;
+
+            var chaFemales = GetChaFemales(hScene);
+            ChaControl? sub = chaFemales != null && chaFemales.Length > 1 ? chaFemales[1] : null;
+            if (sub != null)
+            {
+                yield return ctrlVoice.Init(
+                    personality,
+                    pitch,
+                    cha,
+                    sub.fileParam2.personality,
+                    sub.fileParam2.voicePitch,
+                    sub);
+            }
+            else
+            {
+                yield return ctrlVoice.Init(personality, pitch, cha);
+            }
         }
     }
 }

@@ -95,14 +95,14 @@ namespace HS2OrbitAndExciter
                 UsedCharas,
                 current,
                 GetCharaWeight,
-                path => GetCharaPersonality(path) != currentPersonality);
+                path => TryGetKnownCharaPersonality(path, out int p) && p != currentPersonality);
             if (next == null)
             {
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: G 無不同性格女角");
                 return false;
             }
 
-            host.StartCoroutine(SwapFemale0Routine(hScene, host, cha, current, next));
+            host.StartCoroutine(SwapFemale0Routine(hScene, host, cha, current, next, currentPersonality));
             return true;
         }
 
@@ -288,7 +288,8 @@ namespace HS2OrbitAndExciter
             OrbitController host,
             ChaControl cha,
             string? oldPath,
-            string newPath)
+            string newPath,
+            int oldPersonality)
         {
             _busy = true;
             PenalizeIfQuickSwapAway(oldPath);
@@ -323,7 +324,10 @@ namespace HS2OrbitAndExciter
                 hm.pngFemales[0] = newPath;
             }
 
-            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 換角 {System.IO.Path.GetFileName(newPath)}");
+            yield return OrbitHelpers.ReinitFemale0VoiceAndFeel(hScene, cha);
+
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: G 換角 {System.IO.Path.GetFileName(newPath)}（性格 {oldPersonality}→{cha.chaFile.parameter2.personality}）");
             SetActiveCharaAfterSwap(newPath);
 
             if (OrbitBehaviorHub.IsOrbitAssistActive())
@@ -428,18 +432,23 @@ namespace HS2OrbitAndExciter
                 $"Orbit: 初掃女角 {_cachedCharas.Count}、coordinate {_cachedCoords.Count}");
         }
 
+        private static bool TryGetKnownCharaPersonality(string path, out int personality)
+        {
+            personality = 0;
+            if (_charaPersonalityByPath != null && _charaPersonalityByPath.TryGetValue(path, out personality))
+                return true;
+
+            if (!TryReadCharaPersonality(path, out personality))
+                return false;
+
+            _charaPersonalityByPath ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            _charaPersonalityByPath[path] = personality;
+            return true;
+        }
+
         private static int GetCharaPersonality(string path)
         {
-            if (_charaPersonalityByPath != null
-                && _charaPersonalityByPath.TryGetValue(path, out int cached))
-                return cached;
-
-            if (!TryReadCharaPersonality(path, out int personality))
-                return int.MinValue;
-
-            if (_charaPersonalityByPath != null)
-                _charaPersonalityByPath[path] = personality;
-            return personality;
+            return TryGetKnownCharaPersonality(path, out int personality) ? personality : -1;
         }
 
         private static void IndexCharaPersonality(string path)
