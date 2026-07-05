@@ -12,7 +12,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier2 = KeyCode.LeftControl;
         private bool _visible;
         private bool _needSyncFromConfig; // 每次打開視窗時從 config 同步顯示，確保看到的是已保存的值
-        private Rect _windowRect = new Rect(100, 100, 480, 620);
+        private Rect _windowRect = new Rect(100, 100, 480, 740);
         private GUIStyle? _labelStyle;
         private bool _stylesInitialized;
         // Per-field strings so TextField isn't reset from config every frame (which hides typing)
@@ -244,8 +244,22 @@ namespace HS2OrbitAndExciter
             }
 
             GUILayout.Space(8);
+            GUILayout.Label("H 場景熱鍵", GUI.skin.box);
+            GUILayout.Label("單鍵操作（勿同時按 Ctrl／Shift／Alt；環視開關不影響）：", _labelStyle);
+            GUILayout.Label(
+                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢",
+                _labelStyle);
+            GUILayout.Label(
+                "G 池排除同性格卡；<30 秒快換降權、≥60 秒久留優先；左下角面板顯示 G 池統計與上場秒數",
+                _labelStyle);
+            GUILayout.Label("Q／W／E 切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E 切第二女角", _labelStyle);
+            GUILayout.Label(
+                OrbitManualHotkeys.PregnancyHudLegend + " — PregnancyPlus 插件（非本插件）",
+                _labelStyle);
+
+            GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);
-            GUILayout.Label("熱鍵：左 Ctrl＋左 Shift＋O 開關環視；左 Ctrl＋左 Shift＋P 開本視窗；環視開著時左 Ctrl＋左 Shift＋I 切換狀態面板。頂端為版本對照資訊。", _labelStyle);
+            GUILayout.Label("環視：⌃⇧O 開關；⌃⇧I 狀態面板；⌃⇧P 本視窗。頂端為版本對照。", _labelStyle);
             if (GUILayout.Button("關閉"))
                 _visible = false;
 

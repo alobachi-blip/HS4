@@ -85,6 +85,7 @@ namespace HS2OrbitAndExciter
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
 
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
+            PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopSonyuProc));
