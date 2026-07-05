@@ -10,18 +10,26 @@ namespace HS2OrbitAndExciter
     /// <summary>G/H/J manual actions: swap female[0], random coordinate, random multi-slot wear.</summary>
     internal static class OrbitManualDirector
     {
-        private const float ShortLivedDepartSeconds = 30f;
-        private const float ShortLivedWeight = 0.15f;
-        private const float FileListCacheSeconds = 30f;
+        private const float ShortLivedOnStageSeconds = 30f;
+        private const float DislikedCharaWeight = 0.15f;
         private const float CharaReloadTimeoutSeconds = 15f;
 
         private static readonly HashSet<string> UsedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> UsedCoordinates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, float> DepartedAtUnscaled = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Quick-swap strike 1: reduced weight for rest of session.</summary>
+        private static readonly HashSet<string> DislikedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Quick-swap strike 2+: excluded from G pool for rest of session.</summary>
+        private static readonly HashSet<string> ExcludedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, int> QuickSwapStrikes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        private static string? _activeCharaPath;
+        private static float _activeCharaSinceUnscaled = -1f;
 
         private static List<string>? _cachedCharas;
         private static List<string>? _cachedCoords;
-        private static float _cacheBuiltAt = -999f;
+        private static Dictionary<string, string>? _coordNameToPath;
+        private static readonly HashSet<string> KnownCharaPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> KnownCoordPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _busy;
 
         internal static bool IsBusy => _busy;
@@ -30,6 +38,13 @@ namespace HS2OrbitAndExciter
         internal static void Reset()
         {
             _busy = false;
+        }
+
+        /// <summary>Called when a new H scene instance is detected: incremental scan for new UserData png only.</summary>
+        internal static void OnHSceneEntered()
+        {
+            EnsureFileCacheInitialized();
+            MergeNewUserDataFiles();
         }
 
         internal static bool CanAcceptHotkey(HScene? hScene)
@@ -54,8 +69,10 @@ namespace HS2OrbitAndExciter
             if (cha == null)
                 return false;
 
-            var paths = GetUserDataFemaleCharaPaths();
+            EnsureFileCacheInitialized();
+            var paths = GetEligibleCharaPaths();
             string? current = OrbitHelpers.GetUserDataFemaleCharaPath(cha);
+            EnsureActiveCharaTracked(current);
             string? next = OrbitShufflePool.Pick(paths, UsedCharas, current, GetCharaWeight);
             if (next == null)
             {
@@ -76,8 +93,9 @@ namespace HS2OrbitAndExciter
             if (cha == null)
                 return false;
 
+            EnsureFileCacheInitialized();
             var paths = GetUserDataFemaleCoordinatePaths();
-            string? current = OrbitHelpers.GetCurrentCoordinatePath(cha, paths);
+            string? current = OrbitHelpers.GetCurrentCoordinatePath(cha, _coordNameToPath ?? new Dictionary<string, string>());
             string? next = OrbitShufflePool.Pick(paths, UsedCoordinates, current);
             if (next == null)
             {
@@ -108,17 +126,51 @@ namespace HS2OrbitAndExciter
 
         private static float GetCharaWeight(string path)
         {
-            if (DepartedAtUnscaled.TryGetValue(path, out float departedAt)
-                && Time.unscaledTime - departedAt < ShortLivedDepartSeconds)
-                return ShortLivedWeight;
+            if (DislikedCharas.Contains(path))
+                return DislikedCharaWeight;
             return 1f;
         }
 
-        private static void MarkDeparted(string? path)
+        private static void EnsureActiveCharaTracked(string? path)
         {
             if (string.IsNullOrEmpty(path))
                 return;
-            DepartedAtUnscaled[path!] = Time.unscaledTime;
+            if (!string.Equals(path, _activeCharaPath, StringComparison.OrdinalIgnoreCase) || _activeCharaSinceUnscaled < 0f)
+            {
+                _activeCharaPath = path;
+                _activeCharaSinceUnscaled = Time.unscaledTime;
+            }
+        }
+
+        private static void PenalizeIfQuickSwapAway(string? oldPath)
+        {
+            if (string.IsNullOrEmpty(oldPath))
+                return;
+            if (!string.Equals(oldPath, _activeCharaPath, StringComparison.OrdinalIgnoreCase))
+                return;
+            if (_activeCharaSinceUnscaled < 0f)
+                return;
+            if (Time.unscaledTime - _activeCharaSinceUnscaled >= ShortLivedOnStageSeconds)
+                return;
+
+            int strikes = QuickSwapStrikes.TryGetValue(oldPath!, out int n) ? n + 1 : 1;
+            QuickSwapStrikes[oldPath!] = strikes;
+            if (strikes >= 2)
+            {
+                ExcludedCharas.Add(oldPath!);
+                DislikedCharas.Remove(oldPath!);
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 排除 {System.IO.Path.GetFileName(oldPath)}（快換×{strikes}）");
+            }
+            else
+            {
+                DislikedCharas.Add(oldPath!);
+            }
+        }
+
+        private static void SetActiveCharaAfterSwap(string newPath)
+        {
+            _activeCharaPath = newPath;
+            _activeCharaSinceUnscaled = Time.unscaledTime;
         }
 
         private static IEnumerator SwapFemale0Routine(
@@ -129,7 +181,7 @@ namespace HS2OrbitAndExciter
             string newPath)
         {
             _busy = true;
-            MarkDeparted(oldPath);
+            PenalizeIfQuickSwapAway(oldPath);
 
             if (!cha.chaFile.LoadCharaFile(newPath, 1))
             {
@@ -162,6 +214,7 @@ namespace HS2OrbitAndExciter
             }
 
             HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 換角 {System.IO.Path.GetFileName(newPath)}");
+            SetActiveCharaAfterSwap(newPath);
 
             if (OrbitBehaviorHub.IsOrbitAssistActive())
             {
@@ -179,26 +232,77 @@ namespace HS2OrbitAndExciter
 
         private static readonly string[] EmptyPaths = Array.Empty<string>();
 
-        private static IReadOnlyList<string> GetUserDataFemaleCharaPaths()
+        private static IReadOnlyList<string> GetEligibleCharaPaths()
         {
-            RefreshFileCacheIfNeeded();
-            return _cachedCharas != null ? _cachedCharas : EmptyPaths;
+            if (_cachedCharas == null || _cachedCharas.Count == 0)
+                return EmptyPaths;
+            if (ExcludedCharas.Count == 0)
+                return _cachedCharas;
+            var list = new List<string>(_cachedCharas.Count);
+            foreach (string path in _cachedCharas)
+            {
+                if (!ExcludedCharas.Contains(path))
+                    list.Add(path);
+            }
+            return list;
         }
 
         private static IReadOnlyList<string> GetUserDataFemaleCoordinatePaths()
         {
-            RefreshFileCacheIfNeeded();
             return _cachedCoords != null ? _cachedCoords : EmptyPaths;
         }
 
-        private static void RefreshFileCacheIfNeeded()
+        private static void EnsureFileCacheInitialized()
         {
-            if (_cachedCharas != null && Time.unscaledTime - _cacheBuiltAt < FileListCacheSeconds)
+            if (_cachedCharas != null)
                 return;
-
             _cachedCharas = OrbitHelpers.ListUserDataPngFiles("chara/female/");
             _cachedCoords = OrbitHelpers.ListUserDataPngFiles("coordinate/female/");
-            _cacheBuiltAt = Time.unscaledTime;
+            _coordNameToPath = OrbitHelpers.BuildCoordinateNameIndex(_cachedCoords);
+            KnownCharaPaths.Clear();
+            KnownCoordPaths.Clear();
+            foreach (string p in _cachedCharas)
+                KnownCharaPaths.Add(p);
+            foreach (string p in _cachedCoords)
+                KnownCoordPaths.Add(p);
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: 初掃女角 {_cachedCharas.Count}、coordinate {_cachedCoords.Count}");
+        }
+
+        private static void MergeNewUserDataFiles()
+        {
+            if (_cachedCharas == null || _cachedCoords == null || _coordNameToPath == null)
+                return;
+
+            int newCharas = MergeNewPaths("chara/female/", _cachedCharas, KnownCharaPaths);
+            int newCoords = 0;
+            foreach (string path in OrbitHelpers.ListUserDataPngFiles("coordinate/female/"))
+            {
+                if (!KnownCoordPaths.Add(path))
+                    continue;
+                _cachedCoords.Add(path);
+                OrbitHelpers.TryIndexCoordinatePath(path, _coordNameToPath);
+                newCoords++;
+            }
+
+            if (newCharas > 0 || newCoords > 0)
+            {
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: H 場景新增 女角 {newCharas}、coordinate {newCoords}（現共 {_cachedCharas.Count}/{_cachedCoords.Count}）");
+            }
+        }
+
+        private static int MergeNewPaths(string relativeDir, List<string> cache, HashSet<string> known)
+        {
+            int added = 0;
+            foreach (string path in OrbitHelpers.ListUserDataPngFiles(relativeDir))
+            {
+                if (!known.Add(path))
+                    continue;
+                cache.Add(path);
+                added++;
+            }
+            return added;
         }
     }
 }

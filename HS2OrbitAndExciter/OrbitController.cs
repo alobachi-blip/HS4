@@ -32,6 +32,7 @@ namespace HS2OrbitAndExciter
         private const float PreferGameDefaultCameraChance = 0.8f;
 
         private float _lastHotkeyTime = -999f;
+        private int _manualDirectorHSceneId = -1;
 
         private float _startOrbitY;
         private int _orbitPhase;
@@ -120,6 +121,20 @@ namespace HS2OrbitAndExciter
         private void Update()
         {
             var hProbe = TryGetHScene();
+            if (hProbe != null)
+            {
+                int hId = hProbe.GetInstanceID();
+                if (hId != _manualDirectorHSceneId)
+                {
+                    _manualDirectorHSceneId = hId;
+                    OrbitManualDirector.OnHSceneEntered();
+                }
+            }
+            else
+            {
+                _manualDirectorHSceneId = -1;
+            }
+
             if (hProbe != null && Input.GetMouseButtonDown(0))
             {
                 bool overUi = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();

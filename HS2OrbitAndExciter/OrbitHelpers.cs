@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -232,7 +233,7 @@ namespace HS2OrbitAndExciter
                 candidates.Add(item);
             }
             if (candidates.Count == 0) return null;
-            return candidates[Random.Range(0, candidates.Count)];
+            return candidates[UnityEngine.Random.Range(0, candidates.Count)];
         }
 
         /// <summary>List *.png under UserData (e.g. chara/female/, coordinate/female/).</summary>
@@ -257,23 +258,40 @@ namespace HS2OrbitAndExciter
             return UserData.Path + "chara/female/" + name + ".png";
         }
 
-        /// <summary>Match current coordinate name to a path in the cached list.</summary>
-        public static string? GetCurrentCoordinatePath(ChaControl? cha, IReadOnlyList<string> paths)
+        /// <summary>One-time index: coordinateName → full path (built when file list is cached).</summary>
+        public static Dictionary<string, string> BuildCoordinateNameIndex(IReadOnlyList<string> paths)
         {
-            if (cha?.nowCoordinate == null || paths == null || paths.Count == 0)
+            var index = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (paths == null)
+                return index;
+            foreach (string path in paths)
+                TryIndexCoordinatePath(path, index);
+            return index;
+        }
+
+        /// <summary>Add one coordinate file to name→path index (returns false if load failed).</summary>
+        public static bool TryIndexCoordinatePath(string path, Dictionary<string, string> nameToPath)
+        {
+            if (string.IsNullOrEmpty(path))
+                return false;
+            var coord = new ChaFileCoordinate();
+            if (!coord.LoadFile(path))
+                return false;
+            string name = coord.coordinateName;
+            if (string.IsNullOrEmpty(name))
+                return false;
+            nameToPath[name] = path;
+            return true;
+        }
+
+        public static string? GetCurrentCoordinatePath(ChaControl? cha, Dictionary<string, string> nameToPath)
+        {
+            if (cha?.nowCoordinate == null || nameToPath.Count == 0)
                 return null;
             string currentName = cha.nowCoordinate.coordinateName;
             if (string.IsNullOrEmpty(currentName))
                 return null;
-            foreach (string path in paths)
-            {
-                var coord = new ChaFileCoordinate();
-                if (!coord.LoadFile(path))
-                    continue;
-                if (coord.coordinateName == currentName)
-                    return path;
-            }
-            return null;
+            return nameToPath.TryGetValue(currentName, out string? path) ? path : null;
         }
 
         /// <summary>Randomly advance wear state on 1..N active slots per character.</summary>
@@ -307,10 +325,10 @@ namespace HS2OrbitAndExciter
             if (slots.Count == 0)
                 return false;
 
-            int count = Random.Range(1, slots.Count + 1);
+            int count = UnityEngine.Random.Range(1, slots.Count + 1);
             for (int n = 0; n < count; n++)
             {
-                int idx = Random.Range(0, slots.Count);
+                int idx = UnityEngine.Random.Range(0, slots.Count);
                 int slot = slots[idx];
                 slots.RemoveAt(idx);
                 c.SetClothesStateNext(slot);
