@@ -11,7 +11,8 @@ namespace HS2OrbitAndExciter
             IReadOnlyList<string> all,
             HashSet<string> used,
             string? excludePath,
-            Func<string, float>? getWeight = null)
+            Func<string, float>? getWeight = null,
+            Func<string, bool>? includePath = null)
         {
             if (all == null || all.Count == 0)
                 return null;
@@ -22,6 +23,8 @@ namespace HS2OrbitAndExciter
                 if (string.IsNullOrEmpty(path))
                     continue;
                 if (excludePath != null && string.Equals(path, excludePath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (includePath != null && !includePath(path))
                     continue;
                 candidates.Add(path);
             }

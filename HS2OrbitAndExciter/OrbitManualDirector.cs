@@ -32,6 +32,7 @@ namespace HS2OrbitAndExciter
         private static List<string>? _cachedCharas;
         private static List<string>? _cachedCoords;
         private static Dictionary<string, string>? _coordNameToPath;
+        private static Dictionary<string, int>? _charaPersonalityByPath;
         private static readonly HashSet<string> KnownCharaPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> KnownCoordPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _busy;
@@ -88,10 +89,16 @@ namespace HS2OrbitAndExciter
             string? current = OrbitHelpers.GetUserDataFemaleCharaPath(cha);
             EnsureActiveCharaTracked(current);
             RewardIfLongStay(current);
-            string? next = OrbitShufflePool.Pick(paths, UsedCharas, current, GetCharaWeight);
+            int currentPersonality = cha.chaFile.parameter2.personality;
+            string? next = OrbitShufflePool.Pick(
+                paths,
+                UsedCharas,
+                current,
+                GetCharaWeight,
+                path => GetCharaPersonality(path) != currentPersonality);
             if (next == null)
             {
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: G 無可換女角");
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: G 無不同性格女角");
                 return false;
             }
 
@@ -407,14 +414,54 @@ namespace HS2OrbitAndExciter
             _cachedCharas = OrbitHelpers.ListUserDataPngFiles("chara/female/");
             _cachedCoords = OrbitHelpers.ListUserDataPngFiles("coordinate/female/");
             _coordNameToPath = OrbitHelpers.BuildCoordinateNameIndex(_cachedCoords);
+            _charaPersonalityByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             KnownCharaPaths.Clear();
             KnownCoordPaths.Clear();
             foreach (string p in _cachedCharas)
+            {
                 KnownCharaPaths.Add(p);
+                IndexCharaPersonality(p);
+            }
             foreach (string p in _cachedCoords)
                 KnownCoordPaths.Add(p);
             HS2OrbitAndExciter.Log?.LogInfo(
                 $"Orbit: 初掃女角 {_cachedCharas.Count}、coordinate {_cachedCoords.Count}");
+        }
+
+        private static int GetCharaPersonality(string path)
+        {
+            if (_charaPersonalityByPath != null
+                && _charaPersonalityByPath.TryGetValue(path, out int cached))
+                return cached;
+
+            if (!TryReadCharaPersonality(path, out int personality))
+                return int.MinValue;
+
+            if (_charaPersonalityByPath != null)
+                _charaPersonalityByPath[path] = personality;
+            return personality;
+        }
+
+        private static void IndexCharaPersonality(string path)
+        {
+            if (_charaPersonalityByPath == null)
+                return;
+            if (TryReadCharaPersonality(path, out int personality))
+                _charaPersonalityByPath[path] = personality;
+        }
+
+        private static bool TryReadCharaPersonality(string path, out int personality)
+        {
+            personality = 0;
+            if (string.IsNullOrEmpty(path))
+                return false;
+
+            var chaFile = new ChaFileControl();
+            if (!chaFile.LoadCharaFile(path, 1))
+                return false;
+
+            personality = chaFile.parameter2.personality;
+            return true;
         }
 
         private static void MergeNewUserDataFiles()
@@ -448,6 +495,8 @@ namespace HS2OrbitAndExciter
                 if (!known.Add(path))
                     continue;
                 cache.Add(path);
+                if (relativeDir.StartsWith("chara/female", StringComparison.OrdinalIgnoreCase))
+                    IndexCharaPersonality(path);
                 added++;
             }
             return added;
