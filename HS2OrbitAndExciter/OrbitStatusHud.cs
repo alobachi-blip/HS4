@@ -129,6 +129,7 @@ namespace HS2OrbitAndExciter
                 assist,
                 "⌃⇧O/I/P QWE",
                 OrbitManualHotkeys.HudLegend,
+                OrbitManualHotkeys.PregnancyHudLegend,
                 manual
             };
         }

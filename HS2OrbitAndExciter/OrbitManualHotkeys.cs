@@ -13,5 +13,8 @@ namespace HS2OrbitAndExciter
 
         /// <summary>Ultra-compact HUD legend: 角=換角, 套=換衣, 著=穿著, 鏡=姿勢鏡頭, 姿=換姿勢.</summary>
         internal const string HudLegend = "G角·H套·J著·K鏡·L姿";
+
+        /// <summary>PregnancyPlus Live Inflation Shortcuts (KK_PregnancyPlus.cfg).</summary>
+        internal const string PregnancyHudLegend = "Y膨+·U膨-·R清腹";
     }
 }
