@@ -39,6 +39,36 @@ namespace HS2OrbitAndExciter
             _manualSelectionSuppressUntilUnscaled = Time.unscaledTime + ManualSelectionSuppressSeconds;
         }
 
+        /// <summary>After G/H/J hotkey: reset assist timers and one-shot kick auto-action (not a UI click suppress).</summary>
+        internal static void NotifyManualHotkeyCompleted(HScene? hScene)
+        {
+            ResetNullSelectionTracking();
+            _autoActionNullSelectionSinceUnscaled = Time.unscaledTime - AutoActionNullSelectionMinSeconds;
+            _checkpointIdleTime = 0f;
+            ResetCheckpointInvokeCooldown();
+
+            if (hScene?.ctrlFlag == null)
+                return;
+            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
+                return;
+            TryKickAutoActionAfterManualHotkey(hScene.ctrlFlag);
+        }
+
+        private static void TryKickAutoActionAfterManualHotkey(HSceneFlagCtrl ctrlFlag)
+        {
+            if (ShouldSuppressAssist(ctrlFlag, out _))
+                return;
+            if (ctrlFlag.selectAnimationListInfo != null)
+                return;
+
+            ctrlFlag.isAutoActionChange = true;
+            try
+            {
+                Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
+            }
+            catch { }
+        }
+
         internal static void NotifyUiHoverWhileOrbit()
         {
             float hoverUntil = Time.unscaledTime + 0.25f;

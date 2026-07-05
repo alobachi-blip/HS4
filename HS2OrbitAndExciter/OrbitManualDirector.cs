@@ -31,6 +31,8 @@ namespace HS2OrbitAndExciter
         private static readonly HashSet<string> KnownCharaPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> KnownCoordPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _busy;
+        private static int _lastTrackedPoseId = -1;
+        private static string? _activeBorrowedCameraName;
 
         internal static bool IsBusy => _busy;
         internal static bool IsCameraPaused => _busy;
@@ -38,6 +40,13 @@ namespace HS2OrbitAndExciter
         internal static void Reset()
         {
             _busy = false;
+            ResetPoseCameraCycle();
+        }
+
+        private static void ResetPoseCameraCycle()
+        {
+            _lastTrackedPoseId = -1;
+            _activeBorrowedCameraName = null;
         }
 
         /// <summary>Called when a new H scene instance is detected: incremental scan for new UserData png only.</summary>
@@ -45,6 +54,7 @@ namespace HS2OrbitAndExciter
         {
             EnsureFileCacheInitialized();
             MergeNewUserDataFiles();
+            ResetPoseCameraCycle();
         }
 
         internal static bool CanAcceptHotkey(HScene? hScene)
@@ -84,7 +94,7 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        internal static bool TrySwapCoordinate(HScene hScene)
+        internal static bool TrySwapCoordinate(HScene hScene, OrbitController host)
         {
             if (!CanAcceptHotkey(hScene))
                 return false;
@@ -103,10 +113,7 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            cha.ChangeNowCoordinate(next, reload: true);
-            cha.SetClothesStateAll(0);
-            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: H 換衣 {System.IO.Path.GetFileName(next)}");
-            OrbitController.RequestViewReapply();
+            host.StartCoroutine(SwapCoordinateRoutine(hScene, host, cha, next));
             return true;
         }
 
@@ -121,7 +128,59 @@ namespace HS2OrbitAndExciter
                 return false;
 
             HS2OrbitAndExciter.Log?.LogInfo("Orbit: J 亂數穿著");
+            OrbitController.NotifyManualHotkeyCompleted(hScene);
             return true;
+        }
+
+        internal static bool TryCyclePoseCamera(HScene hScene, OrbitController host)
+        {
+            if (!CanAcceptCameraHotkey(hScene))
+                return false;
+
+            SyncPoseCameraAnchor(hScene);
+
+            var all = OrbitHelpers.GetAllPoseList();
+            var cameras = OrbitHelpers.GetDistinctPoseCameraList(all);
+            if (cameras.Count == 0)
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: K 無可用姿勢鏡頭");
+                return false;
+            }
+
+            string? anchor = _activeBorrowedCameraName ?? hScene.ctrlFlag?.nowAnimationInfo?.nameCamera;
+            var next = OrbitHelpers.PickNextPoseCamera(cameras, anchor);
+            if (next == null)
+                return false;
+
+            host.ApplyBorrowedPoseCamera(hScene, next);
+            _activeBorrowedCameraName = next.nameCamera;
+
+            string label = string.IsNullOrEmpty(next.nameAnimation) ? next.nameCamera : next.nameAnimation;
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: K 鏡頭 {label}");
+            return true;
+        }
+
+        private static bool CanAcceptCameraHotkey(HScene? hScene)
+        {
+            if (hScene == null || _busy)
+                return false;
+            if (hScene.NowChangeAnim)
+                return false;
+            if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
+                return false;
+            return true;
+        }
+
+        private static void SyncPoseCameraAnchor(HScene hScene)
+        {
+            var now = hScene.ctrlFlag?.nowAnimationInfo;
+            if (now == null)
+                return;
+            if (now.id != _lastTrackedPoseId)
+            {
+                _lastTrackedPoseId = now.id;
+                _activeBorrowedCameraName = null;
+            }
         }
 
         private static float GetCharaWeight(string path)
@@ -227,6 +286,51 @@ namespace HS2OrbitAndExciter
                 OrbitController.RequestViewReapply();
             }
 
+            OrbitController.NotifyManualHotkeyCompleted(hScene);
+            _busy = false;
+        }
+
+        private static IEnumerator SwapCoordinateRoutine(
+            HScene hScene,
+            OrbitController host,
+            ChaControl cha,
+            string nextPath)
+        {
+            _busy = true;
+
+            if (!cha.ChangeNowCoordinate(nextPath, reload: true))
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: H ChangeNowCoordinate 失敗 {nextPath}");
+                _busy = false;
+                yield break;
+            }
+
+            float deadline = Time.unscaledTime + CharaReloadTimeoutSeconds;
+            while (!cha.loadEnd && Time.unscaledTime < deadline)
+                yield return null;
+
+            if (!cha.loadEnd)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: H Reload 逾時");
+                _busy = false;
+                yield break;
+            }
+
+            cha.SetClothesStateAll(0);
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: H 換衣 {System.IO.Path.GetFileName(nextPath)}");
+
+            if (OrbitBehaviorHub.IsOrbitAssistActive())
+            {
+                var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
+                if (ctrl != null)
+                    host.InternalRebindAfterPoseChange(hScene, ctrl);
+            }
+            else
+            {
+                OrbitController.RequestViewReapply();
+            }
+
+            OrbitController.NotifyManualHotkeyCompleted(hScene);
             _busy = false;
         }
 

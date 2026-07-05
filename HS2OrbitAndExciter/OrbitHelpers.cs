@@ -221,6 +221,50 @@ namespace HS2OrbitAndExciter
             return list;
         }
 
+        /// <summary>Distinct pose entries that have a camera preset (by <see cref="HScene.AnimationListInfo.nameCamera"/>).</summary>
+        public static List<HScene.AnimationListInfo> GetDistinctPoseCameraList(List<HScene.AnimationListInfo> all)
+        {
+            var list = new List<HScene.AnimationListInfo>();
+            if (all == null || all.Count == 0)
+                return list;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in all)
+            {
+                if (item == null || string.IsNullOrEmpty(item.nameCamera))
+                    continue;
+                if (!seen.Add(item.nameCamera))
+                    continue;
+                list.Add(item);
+            }
+            return list;
+        }
+
+        /// <summary>Next pose camera preset after <paramref name="currentCameraName"/> in cycle order.</summary>
+        public static HScene.AnimationListInfo? PickNextPoseCamera(
+            List<HScene.AnimationListInfo> distinctCameras,
+            string? currentCameraName)
+        {
+            if (distinctCameras == null || distinctCameras.Count == 0)
+                return null;
+
+            int idx = -1;
+            if (!string.IsNullOrEmpty(currentCameraName))
+            {
+                for (int i = 0; i < distinctCameras.Count; i++)
+                {
+                    if (string.Equals(distinctCameras[i].nameCamera, currentCameraName, StringComparison.Ordinal))
+                    {
+                        idx = i;
+                        break;
+                    }
+                }
+            }
+
+            int nextIdx = (idx + 1) % distinctCameras.Count;
+            return distinctCameras[nextIdx];
+        }
+
         /// <summary>Pick a random pose different from current (exclude by animation id, not reference).</summary>
         public static HScene.AnimationListInfo? PickNextPose(HScene.AnimationListInfo? current, List<HScene.AnimationListInfo> all)
         {

@@ -49,6 +49,7 @@ namespace HS2OrbitAndExciter
         private object? _lastNowAnimationInfoRef;
         /// <summary>When true, next LateUpdate will call ApplyCurrentViewOption once (e.g. after faintness toggle).</summary>
         private static bool _requestViewReapplyNextFrame;
+        private static OrbitController? _activeInstance;
 
         private static FieldInfo? _feelFField;
         /// <summary>When orbit started in preparation (Idle + speed 0): wait this many seconds then set speed=1 to start; excitement only accumulates after start.</summary>
@@ -71,6 +72,42 @@ namespace HS2OrbitAndExciter
 
         /// <summary>Whether orbit is currently active (for Harmony patches). Authoritative state is <see cref="OrbitBehaviorHub.IsOrbitAssistActive"/>.</summary>
         public static bool IsOrbitActive() => OrbitBehaviorHub.IsOrbitAssistActive();
+
+        private void OnEnable() => _activeInstance = this;
+
+        private void OnDisable()
+        {
+            if (_activeInstance == this)
+                _activeInstance = null;
+        }
+
+        /// <summary>After G/H/J manual hotkey completes: restart motion and auto-advance assist.</summary>
+        internal static void NotifyManualHotkeyCompleted(HScene hScene)
+        {
+            if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null || _activeInstance == null)
+                return;
+            OrbitBehaviorHub.NotifyManualHotkeyCompleted(hScene);
+            _activeInstance.ResumeMotionAfterManualHotkey(hScene);
+        }
+
+        private void ResumeMotionAfterManualHotkey(HScene hScene)
+        {
+            var ctrlFlag = hScene.ctrlFlag;
+            if (ctrlFlag == null)
+                return;
+
+            var speedField = Traverse.Create(ctrlFlag).Field("speed");
+            if (!speedField.FieldExists())
+                return;
+
+            float speed = (float)(speedField.GetValue() ?? 0f);
+            if (IsInPreparationState(hScene) || (speed <= 0.01f && !OrbitHelpers.IsFirstFemaleInActionLoop(hScene)))
+            {
+                _waitingForPrepStart = false;
+                _prepFrozenElapsed = -1f;
+                speedField.SetValue(1f);
+            }
+        }
 
         /// <summary>True when in preparation state: Idle/D_Idle and speed &lt;= 0.</summary>
         private static bool IsInPreparationState(HScene hScene)
@@ -183,13 +220,19 @@ namespace HS2OrbitAndExciter
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.CoordinateKey))
             {
-                if (OrbitManualDirector.TrySwapCoordinate(hScene))
+                if (OrbitManualDirector.TrySwapCoordinate(hScene, this))
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.WearKey))
             {
                 if (OrbitManualDirector.TryRandomWear(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.PoseCameraKey))
+            {
+                if (OrbitManualDirector.TryCyclePoseCamera(hScene, this))
                     _lastHotkeyTime = Time.unscaledTime;
             }
         }
@@ -507,6 +550,25 @@ namespace HS2OrbitAndExciter
         internal void InternalRandomizeStartOrbitY()
         {
             _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
+        }
+
+        /// <summary>Load another pose's default camera preset without changing the active pose.</summary>
+        internal void ApplyBorrowedPoseCamera(HScene hScene, HScene.AnimationListInfo info)
+        {
+            var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
+            if (ctrl == null)
+                return;
+
+            hScene.setCameraLoad(info, true);
+
+            if (!OrbitBehaviorHub.IsOrbitAssistActive())
+                return;
+
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
+            _currentViewOption = maxFocus;
+            _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
+            _orbitAccumulatedDegrees = 0f;
         }
 
         /// <summary>Rebind camera after pose transition completes (called by <see cref="OrbitPoseDirector"/>).</summary>
