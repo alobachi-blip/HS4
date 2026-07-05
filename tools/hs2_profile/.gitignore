@@ -1,0 +1,30 @@
+# HS2 執行環境 profile repo — 只追 BepInEx overlay，不追遊戲本體
+
+# 執行期雜訊
+BepInEx/LogOutput.log
+BepInEx/cache/
+BepInEx/patchers/
+BepInEx/_snapshots/
+
+# 備份目錄（由 hs2_bepinex_backup.py 產生，不進版控）
+BepInEx/config/_hs4_backups/
+
+# 大型 / 第三方插件（依需要取消註解或改為白名單）
+# BepInEx/plugins/*
+# !BepInEx/plugins/HS2OrbitAndExciter_*.dll
+# !BepInEx/plugins/HS2UnlockAllPoses.dll
+# !BepInEx/plugins/HS2.PhotoToCard.dll
+
+# 遊戲本體（若 profile 目錄在 HS2 根下時）
+HoneySelect2.exe
+HoneySelect2_Data/
+abdata/
+mods/
+Saves/
+UserData/
+cache/
+LogOutput.log
+
+# Windows
+Thumbs.db
+Desktop.ini
