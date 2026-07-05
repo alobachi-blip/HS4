@@ -53,6 +53,8 @@ namespace HS2OrbitAndExciter
         /// <summary>When orbit started in preparation (Idle + speed 0): wait this many seconds then set speed=1 to start; excitement only accumulates after start.</summary>
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
+        /// <summary>Elapsed prep seconds frozen while pose transition is active.</summary>
+        private float _prepFrozenElapsed = -1f;
         private const float PrepWaitSeconds = 3f;
 
         private bool _hudSnapshotValid;
@@ -168,16 +170,32 @@ namespace HS2OrbitAndExciter
 
             ApplyOrbitFocusHotkeys(hScene, ctrl);
 
+            OrbitPoseDirector.Tick(hScene, this, ctrl);
+
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
             if (_waitingForPrepStart)
             {
-                float elapsed = Time.unscaledTime - _prepCountdownStart;
-                if (elapsed >= PrepWaitSeconds)
+                if (OrbitPoseDirector.IsTransitionActive)
                 {
-                    _waitingForPrepStart = false;
-                    var ctrlFlag = hScene.ctrlFlag;
-                    if (ctrlFlag != null)
-                        Traverse.Create(ctrlFlag).Field("speed").SetValue(1f);
+                    if (_prepFrozenElapsed < 0f)
+                        _prepFrozenElapsed = Time.unscaledTime - _prepCountdownStart;
+                }
+                else
+                {
+                    if (_prepFrozenElapsed >= 0f)
+                    {
+                        _prepCountdownStart = Time.unscaledTime - _prepFrozenElapsed;
+                        _prepFrozenElapsed = -1f;
+                    }
+                    float elapsed = Time.unscaledTime - _prepCountdownStart;
+                    if (elapsed >= PrepWaitSeconds)
+                    {
+                        _waitingForPrepStart = false;
+                        _prepFrozenElapsed = -1f;
+                        var ctrlFlag = hScene.ctrlFlag;
+                        if (ctrlFlag != null)
+                            Traverse.Create(ctrlFlag).Field("speed").SetValue(1f);
+                    }
                 }
             }
 
@@ -189,13 +207,10 @@ namespace HS2OrbitAndExciter
             // Re-apply camera takeover every frame (e.g. after ChangeAnimation sets camera flag)
             ctrl.NoCtrlCondition = NoCtrlOrbit;
 
-            // When pose changes (plugin or game), reapply current view so character stays in frame
+            // When pose changes (UI manual / game), defer rebind to Director instead of immediate ApplyCurrentViewOption
             var nowInfo = hScene.ctrlFlag?.nowAnimationInfo;
             if (nowInfo != null && !ReferenceEquals(nowInfo, _lastNowAnimationInfoRef))
-            {
-                _lastNowAnimationInfoRef = nowInfo;
-                ApplyCurrentViewOption(hScene, ctrl);
-            }
+                OrbitPoseDirector.NotifyExternalPoseChange(hScene);
 
             // After faintness toggle or other state change: reapply view once
             if (_requestViewReapplyNextFrame)
@@ -210,28 +225,31 @@ namespace HS2OrbitAndExciter
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
 
-            if (_orbitPhase == 0)
+            if (!OrbitPoseDirector.IsCameraPaused)
             {
-                _orbitAccumulatedDegrees += speedDegPerSec * dt;
-                if (_orbitAccumulatedDegrees >= 360f)
+                if (_orbitPhase == 0)
                 {
-                    _orbitAccumulatedDegrees = 360f;
-                    _orbitPhase = 1;
-                    _rotationCount++;
-                    OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
+                    _orbitAccumulatedDegrees += speedDegPerSec * dt;
+                    if (_orbitAccumulatedDegrees >= 360f)
+                    {
+                        _orbitAccumulatedDegrees = 360f;
+                        _orbitPhase = 1;
+                        _rotationCount++;
+                        OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
+                    }
                 }
-            }
-            else
-            {
-                _orbitAccumulatedDegrees -= speedDegPerSec * dt;
-                if (_orbitAccumulatedDegrees <= 0f)
+                else
                 {
-                    _orbitAccumulatedDegrees = 0f;
-                    _orbitPhase = 0;
-                    _rotationCount++;
-                    _roundTripCount++;
-                    OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
-                    OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
+                    _orbitAccumulatedDegrees -= speedDegPerSec * dt;
+                    if (_orbitAccumulatedDegrees <= 0f)
+                    {
+                        _orbitAccumulatedDegrees = 0f;
+                        _orbitPhase = 0;
+                        _rotationCount++;
+                        _roundTripCount++;
+                        OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
+                        OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
+                    }
                 }
             }
 
@@ -270,7 +288,12 @@ namespace HS2OrbitAndExciter
 
             float prepRemain = 0f;
             if (_waitingForPrepStart)
-                prepRemain = Mathf.Max(0f, PrepWaitSeconds - (Time.unscaledTime - _prepCountdownStart));
+            {
+                float prepElapsed = _prepFrozenElapsed >= 0f
+                    ? _prepFrozenElapsed
+                    : Time.unscaledTime - _prepCountdownStart;
+                prepRemain = Mathf.Max(0f, PrepWaitSeconds - prepElapsed);
+            }
 
             int nRandom = HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0;
             int mPose = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
@@ -303,7 +326,8 @@ namespace HS2OrbitAndExciter
                 reason,
                 faint,
                 orbitTimePer360,
-                roundTripSec);
+                roundTripSec,
+                OrbitPoseDirector.IsCameraPaused);
             _hudSnapshotValid = true;
         }
 
@@ -436,6 +460,18 @@ namespace HS2OrbitAndExciter
             _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
         }
 
+        /// <summary>Rebind camera after pose transition completes (called by <see cref="OrbitPoseDirector"/>).</summary>
+        internal void InternalRebindAfterPoseChange(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
+            if (_currentViewOption > maxFocus)
+                _currentViewOption = maxFocus;
+            ApplyCurrentViewOption(hScene, ctrl);
+            _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
+            _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
+        }
+
         private void OnOrbitToggled(bool active)
         {
             var hScene = GetHScene();
@@ -477,6 +513,8 @@ namespace HS2OrbitAndExciter
             else
             {
                 _waitingForPrepStart = false;
+                _prepFrozenElapsed = -1f;
+                OrbitPoseDirector.Reset();
                 // Restoring saved delegate can evaluate false after orbit stop and keep UI unclickable; keep permissive after orbit off.
                 ctrl.NoCtrlCondition = () => true;
             }
@@ -497,7 +535,6 @@ namespace HS2OrbitAndExciter
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
             OrbitBehaviorHub.TickStaleSelectionRecovery(hScene);
-            OrbitCycleCoordinator.RetryPendingCyclePoseChange(hScene);
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
             OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }

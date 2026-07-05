@@ -1,4 +1,3 @@
-using System.Reflection;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
@@ -25,18 +24,12 @@ namespace HS2OrbitAndExciter
 
         private static bool _orbitAssistActive;
         private static float _checkpointIdleTime;
-        private static MethodInfo? _getAutoAnimationMethod;
-        private static FieldInfo? _isAutoActionChangeField;
-        private static PropertyInfo? _isAutoActionChangeProp;
         private static float _wheelBypassStartUnscaled = -1f;
 
-        private static bool _pendingCyclePoseChange;
-        private static float _cyclePoseAssistQuietUntilUnscaled = -1f;
         private static float _selectionListStuckSinceUnscaled = -1f;
 
         internal const float WheelBypassValue = 0.10f;
         internal const float WheelBypassDelaySeconds = 2f;
-        internal const float CyclePoseAssistQuietSeconds = 15f;
         internal const float StaleSelectionClearSeconds = 8f;
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
@@ -65,9 +58,8 @@ namespace HS2OrbitAndExciter
                 _autoActionNullSelectionSinceUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
-                ClearPendingCyclePoseChange();
-                _cyclePoseAssistQuietUntilUnscaled = -1f;
                 _selectionListStuckSinceUnscaled = -1f;
+                OrbitPoseDirector.Reset();
                 OrbitStatusHud.NotifyOrbitActivated();
             }
             else
@@ -77,34 +69,18 @@ namespace HS2OrbitAndExciter
                 _checkpointInvokeCooldownUntilUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
-                ClearPendingCyclePoseChange();
-                _cyclePoseAssistQuietUntilUnscaled = -1f;
                 _selectionListStuckSinceUnscaled = -1f;
+                OrbitPoseDirector.Reset();
             }
-        }
-
-        internal static void MarkPendingCyclePoseChange() => _pendingCyclePoseChange = true;
-
-        internal static bool IsPendingCyclePoseChange() => _pendingCyclePoseChange;
-
-        internal static void ClearPendingCyclePoseChange() => _pendingCyclePoseChange = false;
-
-        internal static void NotifyCyclePoseChangeQueued()
-        {
-            _pendingCyclePoseChange = false;
-            _cyclePoseAssistQuietUntilUnscaled = Time.unscaledTime + CyclePoseAssistQuietSeconds;
-            _selectionListStuckSinceUnscaled = -1f;
-        }
-
-        internal static bool ShouldDeferAutoAssistForCyclePose()
-        {
-            if (_pendingCyclePoseChange)
-                return true;
-            return Time.unscaledTime < _cyclePoseAssistQuietUntilUnscaled;
         }
 
         internal static bool ShouldSuppressAssist(HSceneFlagCtrl? ctrlFlag, out string reason)
         {
+            if (OrbitPoseDirector.IsTransitionActive)
+            {
+                reason = "poseTransition";
+                return true;
+            }
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
                 reason = "pointerOverUi";
@@ -235,12 +211,10 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        /// <summary>Single path for auto-action assist: config, suppress, null-selection wait, interval, then set flags.</summary>
+        /// <summary>B1: auto-action assist no longer sets isAutoActionChange (no pose change via GetAutoAnimation).</summary>
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-                return false;
-            if (ShouldDeferAutoAssistForCyclePose())
                 return false;
             if (ctrlFlag == null)
                 return false;
@@ -256,37 +230,14 @@ namespace HS2OrbitAndExciter
                 ResetNullSelectionTracking();
                 return false;
             }
-            if (!IsNullSelectionReadyForAssist())
-                return false;
-            if (!TryConsumeAssistFlagPush(out _))
-                return false;
-
-            var flagType = ctrlFlag.GetType();
-            if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
-            {
-                _isAutoActionChangeField = flagType.GetField("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_isAutoActionChangeField == null)
-                    _isAutoActionChangeProp = flagType.GetProperty("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            }
-            try
-            {
-                if (_isAutoActionChangeField != null)
-                    _isAutoActionChangeField.SetValue(ctrlFlag, true);
-                else
-                    _isAutoActionChangeProp?.SetValue(ctrlFlag, true, null);
-            }
-            catch { }
-            Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            return true;
+            return false;
         }
 
-        /// <summary>When orbit is on and not in action loop: accumulate idle time then invoke <c>GetAutoAnimation</c> after timeout.</summary>
+        /// <summary>B1: checkpoint only bumps speed when idle-stuck; no GetAutoAnimation pose change.</summary>
         internal static void TickOrbitCheckpointAssist(HScene? hScene, float deltaTime)
         {
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
             if (timeout <= 0f || hScene == null) return;
-            if (ShouldDeferAutoAssistForCyclePose())
-                return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
 
@@ -321,31 +272,13 @@ namespace HS2OrbitAndExciter
             if (!TryConsumeCheckpointInvoke(out _))
                 return;
 
-            if (_getAutoAnimationMethod == null)
-            {
-                _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_getAutoAnimationMethod == null)
-                    return;
-            }
             try
             {
-                _getAutoAnimationMethod.Invoke(hScene, new object[] { false });
-                if (Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() == null)
-                    _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
+                const float FallbackSpeedBump = 1.2f;
+                Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
             }
             catch { }
             MarkCheckpointInvokeLegacyCooldown(timeout);
-
-            bool hasSelAfter = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue() != null;
-            if (!hasSelAfter)
-            {
-                try
-                {
-                    const float FallbackSpeedBump = 1.2f;
-                    Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
-                }
-                catch { }
-            }
         }
 
         /// <summary>Orbit wheel bypass: delay then inject small wheel value when animator gate allows.</summary>

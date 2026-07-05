@@ -18,7 +18,8 @@ namespace HS2OrbitAndExciter
             string suppressReasonKey,
             bool isFaintness,
             float singleRotationSeconds,
-            float roundTripSeconds)
+            float roundTripSeconds,
+            bool cameraPaused)
         {
             WaitingPrep = waitingPrep;
             PrepRemainSeconds = prepRemainSeconds;
@@ -32,6 +33,7 @@ namespace HS2OrbitAndExciter
             IsFaintness = isFaintness;
             SingleRotationSeconds = singleRotationSeconds;
             RoundTripSeconds = roundTripSeconds;
+            CameraPaused = cameraPaused;
         }
 
         internal bool WaitingPrep { get; }
@@ -47,5 +49,6 @@ namespace HS2OrbitAndExciter
         internal bool IsFaintness { get; }
         internal float SingleRotationSeconds { get; }
         internal float RoundTripSeconds { get; }
+        internal bool CameraPaused { get; }
     }
 }

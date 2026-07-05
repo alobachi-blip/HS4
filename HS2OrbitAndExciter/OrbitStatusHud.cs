@@ -95,8 +95,11 @@ namespace HS2OrbitAndExciter
         private void DrawSnapshot(in OrbitHudSnapshot snap)
         {
             var label = _smallLabel ?? GUI.skin.label;
+            string header = snap.CameraPaused
+                ? "環視中 · 鏡頭暫停（換姿勢中）"
+                : "環視中 · 相機運轉中";
             string assistLine = FormatAssistStatus(snap.SuppressReasonKey);
-            GUILayout.Label($"環視中 · 相機運轉中\n{assistLine}", label);
+            GUILayout.Label($"{header}\n{assistLine}", label);
 
             if (snap.WaitingPrep)
                 GUILayout.Label($"準備倒數：約 {snap.PrepRemainSeconds:F1} 秒後開始動作", label);
@@ -140,6 +143,8 @@ namespace HS2OrbitAndExciter
                             ? $"自動操作：剛點過 UI，約 {u:F1} 秒後恢復"
                             : "自動操作：剛點過 UI";
                     }
+                case "poseTransition":
+                    return "自動操作：換姿過渡，已暫停";
                 case "none":
                 default:
                     return "自動操作：就緒";
