@@ -3,16 +3,15 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Compact Traditional-Chinese status overlay when orbit is on: Ctrl+Shift+I toggles; Ctrl+Shift+O turns orbit on and shows panel by default.
+    /// Minimal orbit status overlay (Traditional Chinese). Ctrl+Shift+I toggles while orbit is on.
     /// </summary>
     public class OrbitStatusHud : MonoBehaviour
     {
         private const KeyCode ToggleHotkey = KeyCode.I;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 360f;
-        private const float AreaMaxHeight = 220f;
-        private const float Margin = 8f;
+        private const float AreaWidth = 168f;
+        private const float Margin = 6f;
 
         private OrbitController? _orbit;
         private bool _panelVisible = true;
@@ -25,7 +24,6 @@ namespace HS2OrbitAndExciter
             _orbit = GetComponent<OrbitController>();
         }
 
-        /// <summary>Called when orbit assist is toggled on (from hub).</summary>
         internal static void NotifyOrbitActivated()
         {
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == false)
@@ -55,9 +53,16 @@ namespace HS2OrbitAndExciter
             _smallLabel = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 11,
-                wordWrap = true
+                wordWrap = false,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0)
             };
-            _smallBox = new GUIStyle(GUI.skin.box) { padding = new RectOffset(6, 6, 4, 4) };
+            _smallBox = new GUIStyle(GUI.skin.box)
+            {
+                padding = new RectOffset(4, 4, 2, 2),
+                margin = new RectOffset(0, 0, 0, 0)
+            };
             _stylesReady = true;
         }
 
@@ -83,99 +88,101 @@ namespace HS2OrbitAndExciter
                 return;
 
             InitStyles();
-            float areaH = Mathf.Min(AreaMaxHeight, Screen.height * 0.35f);
+            var label = _smallLabel ?? GUI.skin.label;
+            var box = _smallBox ?? GUI.skin.box;
+            var lines = BuildLines(snap);
+            float lineH = label.lineHeight;
+            float areaH = box.padding.vertical + lineH * lines.Length;
             var area = new Rect(Margin, Screen.height - areaH - Margin, AreaWidth, areaH);
             GUILayout.BeginArea(area);
-            GUILayout.BeginVertical(_smallBox ?? GUI.skin.box);
-            DrawSnapshot(snap);
+            GUILayout.BeginVertical(box);
+            for (int i = 0; i < lines.Length; i++)
+                GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
 
-        private void DrawSnapshot(in OrbitHudSnapshot snap)
+        private static string[] BuildLines(in OrbitHudSnapshot snap)
         {
-            var label = _smallLabel ?? GUI.skin.label;
-            string header = snap.CameraPaused
-                ? "環視中 · 鏡頭暫停（換姿勢中）"
-                : "環視中 · 相機運轉中";
-            string assistLine = FormatAssistStatus(snap.SuppressReasonKey);
-            GUILayout.Label($"{header}\n{assistLine}", label);
-
-            if (snap.WaitingPrep)
-                GUILayout.Label($"準備倒數：約 {snap.PrepRemainSeconds:F1} 秒後開始動作", label);
-
-            string leg = snap.Phase == 0 ? "去程" : "回程";
-            GUILayout.Label($"{leg} · 本段旋轉剩餘約 {snap.TimeToCompleteCurrentRotation:F0} 秒（估算）", label);
-
-            string next = FormatNextCycleHints(snap);
-            if (!string.IsNullOrEmpty(next))
-                GUILayout.Label(next, label);
-
+            string status = snap.CameraPaused ? "換姿中" : "運轉";
             if (snap.IsFaintness)
-                GUILayout.Label("狀態：虛脫", label);
+                status += "·虛脫";
 
-            GUILayout.Label("Ctrl+Shift+I 切換本面板 · 單向 360°＝一次旋轉；去程＋回程＝一次迴轉 · 秒數為估算", label);
+            string leg = snap.Phase == 0 ? "去" : "回";
+            string timer = snap.WaitingPrep
+                ? $"準 {snap.PrepRemainSeconds:F0}s"
+                : $"{leg} {snap.TimeToCompleteCurrentRotation:F0}s";
+
+            string next = FormatNextHint(snap);
+            if (!string.IsNullOrEmpty(next))
+                timer += " " + next;
+
+            string assist = FormatAssistShort(snap.SuppressReasonKey);
+            return new[]
+            {
+                $"環視·{status} {timer}",
+                assist,
+                "⌃⇧O/I/P QWE"
+            };
         }
 
-        private static string FormatAssistStatus(string reasonKey)
+        private static string FormatAssistShort(string reasonKey)
         {
             switch (reasonKey)
             {
-                case "pointerOverUi":
-                    return "自動操作：滑鼠在 UI 上，已暫停（相機仍轉）";
+                case "pointerOverUi": return "自動·UI";
                 case "orbitStartGrace":
                     {
                         float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
-                        return g > 0.01f
-                            ? $"自動操作：啟動緩衝約 {g:F1} 秒"
-                            : "自動操作：啟動緩衝";
+                        return g > 0.01f ? $"自動·緩衝{g:F0}s" : "自動·緩衝";
                     }
-                case "inputForcus":
-                    return "自動操作：輸入焦點在 UI";
-                case "selectionListPresent":
-                    return "自動操作：選單開啟中";
-                case "mouseHolding":
-                    return "自動操作：滑鼠按住中";
+                case "inputForcus": return "自動·輸入";
+                case "selectionListPresent": return "自動·選單";
+                case "mouseHolding": return "自動·按住";
                 case "recentUiClick":
                     {
                         float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
-                        return u > 0.01f
-                            ? $"自動操作：剛點過 UI，約 {u:F1} 秒後恢復"
-                            : "自動操作：剛點過 UI";
+                        return u > 0.01f ? $"自動·UI{u:F0}s" : "自動·UI";
                     }
-                case "poseTransition":
-                    return "自動操作：換姿過渡，已暫停";
-                case "none":
-                default:
-                    return "自動操作：就緒";
+                case "poseTransition": return "自動·換姿";
+                case "assistInterval": return "自動·節流";
+                case "checkpointInterval": return "自動·節流";
+                default: return "自動·就緒";
             }
         }
 
-        private static string FormatNextCycleHints(in OrbitHudSnapshot snap)
+        /// <summary>Only show the nearest upcoming cycle event, ultra-compact.</summary>
+        private static string FormatNextHint(in OrbitHudSnapshot snap)
         {
             float rotT = snap.SingleRotationSeconds;
             float rtT = snap.RoundTripSeconds;
             if (rotT <= 0f) return "";
 
-            var parts = new System.Collections.Generic.List<string>(4);
-            if (snap.RotationsUntilRandom >= 1)
+            float bestSec = float.MaxValue;
+            string best = "";
+
+            if (snap.RotationsUntilRandom == 1)
             {
-                float sec = snap.TimeToCompleteCurrentRotation + (snap.RotationsUntilRandom - 1) * rotT;
-                parts.Add($"亂數焦點／水平角：再 {snap.RotationsUntilRandom} 次旋轉（約 {sec:F0} 秒）");
+                float sec = snap.TimeToCompleteCurrentRotation;
+                if (sec < bestSec) { bestSec = sec; best = "亂"; }
             }
             if (snap.RotationsUntilClothes == OrbitHudSnapshot.ClothesHintNextRoundTrip)
-                parts.Add($"換裝階段：本迴轉結束時（約 {snap.TimeToCompleteCurrentRoundTrip:F0} 秒）");
-            else if (snap.RotationsUntilClothes >= 1)
             {
-                float sec = snap.TimeToCompleteCurrentRotation + (snap.RotationsUntilClothes - 1) * rotT;
-                parts.Add($"換裝階段：再 {snap.RotationsUntilClothes} 次旋轉（約 {sec:F0} 秒）");
+                float sec = snap.TimeToCompleteCurrentRoundTrip;
+                if (sec < bestSec) { bestSec = sec; best = "衣"; }
             }
-            if (snap.RoundTripsUntilPose >= 1)
+            else if (snap.RotationsUntilClothes == 1)
             {
-                float sec = snap.TimeToCompleteCurrentRoundTrip + (snap.RoundTripsUntilPose - 1) * rtT;
-                parts.Add($"換姿勢：再 {snap.RoundTripsUntilPose} 次迴轉（約 {sec:F0} 秒）");
+                float sec = snap.TimeToCompleteCurrentRotation;
+                if (sec < bestSec) { bestSec = sec; best = "衣"; }
             }
-            return parts.Count == 0 ? "" : string.Join("\n", parts);
+            if (snap.RoundTripsUntilPose == 1)
+            {
+                float sec = snap.TimeToCompleteCurrentRoundTrip;
+                if (sec < bestSec) { bestSec = sec; best = "姿"; }
+            }
+
+            return best.Length == 0 ? "" : $"次·{best}";
         }
     }
 }
