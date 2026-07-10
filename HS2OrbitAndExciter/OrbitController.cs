@@ -240,6 +240,18 @@ namespace HS2OrbitAndExciter
             {
                 if (OrbitManualDirector.TryChangePose(hScene))
                     _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.TattooKey))
+            {
+                OrbitOrgasmTattoo.Toggle();
+                _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.BellyResetKey))
+            {
+                if (PregnancyPlusAssist.TryResetBelly(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
             }
         }
 

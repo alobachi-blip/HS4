@@ -10,7 +10,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode ToggleHotkey = KeyCode.I;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 178f;
+        private const float AreaWidth = 200f;
         private const float Margin = 6f;
 
         private OrbitController? _orbit;
@@ -123,12 +123,18 @@ namespace HS2OrbitAndExciter
 
             string assist = FormatAssistShort(snap.SuppressReasonKey);
             string manual = FormatManualPoolLine();
+            string tattooLine = OrbitOrgasmTattoo.Enabled
+                ? (OrbitOrgasmTattoo.Count > 0
+                    ? $"刺青×{OrbitOrgasmTattoo.Count} 剛加:{OrbitOrgasmTattoo.LastSiteLabel}"
+                    : "刺青開·尚未加")
+                : "刺青關(T)";
             return new[]
             {
                 $"環視·{status} {timer}",
                 assist,
                 "⌃⇧O/I/P QWE",
-                OrbitManualHotkeys.HudLegend,
+                OrbitManualHotkeys.HudLegend + "·" + OrbitOrgasmTattoo.HudStatus,
+                tattooLine,
                 OrbitManualHotkeys.PregnancyHudLegend,
                 manual
             };

@@ -1,5 +1,12 @@
 # HS2OrbitAndExciter 變更紀錄
 
+## 2026-07-11
+
+### R 清腹＋高潮刺青
+
+- **R**：環視／H 場景中由本插件強制呼叫 PregnancyPlus `HS2Inflation(true)`／`ResetInflation`（並清 `_currentInflationLevel`），修正僅依賴 Preg+ Live Shortcut 時 HS2 H 膨脹清不掉的問題。
+- **T**：開關高潮刺青：使用製作模式 **st_paint 刺青貼圖** 做成透明貼花，掛在身體掛點（大腿→臉），不再誤用飾品目錄。大小 `OrgasmTattooScaleMin/Max`，上限 `OrgasmTattooMaxCount`。
+
 ## 2026-04-05
 
 ### 環視：回程真正反向＋旋轉／迴轉雙計數

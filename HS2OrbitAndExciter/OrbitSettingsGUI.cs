@@ -247,15 +247,26 @@ namespace HS2OrbitAndExciter
             GUILayout.Label("H 場景熱鍵", GUI.skin.box);
             GUILayout.Label("單鍵操作（勿同時按 Ctrl／Shift／Alt；環視開關不影響）：", _labelStyle);
             GUILayout.Label(
-                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢",
+                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢、T 高潮刺青開關",
                 _labelStyle);
             GUILayout.Label(
                 "G 池排除同性格卡；<30 秒快換降權、≥60 秒久留優先；左下角面板顯示 G 池統計與上場秒數",
                 _labelStyle);
             GUILayout.Label("Q／W／E 切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E 切第二女角", _labelStyle);
             GUILayout.Label(
-                OrbitManualHotkeys.PregnancyHudLegend + " — PregnancyPlus 插件（非本插件）",
+                OrbitManualHotkeys.PregnancyHudLegend + " — Y/U 為 PregnancyPlus；R 由本插件強制清腹（含 HS2 H 膨脹）",
                 _labelStyle);
+            if (HS2OrbitAndExciter.OrgasmTattooEnabled != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("高潮刺青", GUILayout.Width(100));
+                bool tattooOn = HS2OrbitAndExciter.OrgasmTattooEnabled.Value;
+                bool next = GUILayout.Toggle(tattooOn, tattooOn ? $"開（T）×{OrbitOrgasmTattoo.Count}" : "關（T）");
+                if (next != tattooOn)
+                    HS2OrbitAndExciter.OrgasmTattooEnabled.Value = next;
+                GUILayout.EndHorizontal();
+                GUILayout.Label("st_paint 刺青：寫入皮膚 paint＋3D 貼花（非飾品欄）；T 開啟會立刻加一枚；大腿→臉", _labelStyle);
+            }
 
             GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);

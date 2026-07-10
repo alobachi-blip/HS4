@@ -37,6 +37,14 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? OverrideFaintness;
         /// <summary>When false, the compact orbit status HUD is disabled entirely.</summary>
         internal static ConfigEntry<bool>? OrbitStatusHudEnabled;
+        /// <summary>When true, each female orgasm spawns a st_paint tattoo decal on a body attach point (thigh→face). Toggle with T in H.</summary>
+        internal static ConfigEntry<bool>? OrgasmTattooEnabled;
+        /// <summary>Max accumulated orgasm tattoo decals (1–64).</summary>
+        internal static ConfigEntry<int>? OrgasmTattooMaxCount;
+        /// <summary>Minimum size multiplier for orgasm tattoo decals.</summary>
+        internal static ConfigEntry<float>? OrgasmTattooScaleMin;
+        /// <summary>Maximum size multiplier for orgasm tattoo decals.</summary>
+        internal static ConfigEntry<float>? OrgasmTattooScaleMax;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -80,12 +88,21 @@ namespace HS2OrbitAndExciter
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,
                 "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle visibility with Ctrl+Shift+I while orbit is on.");
+            OrgasmTattooEnabled = Config.Bind("Orbit", "OrgasmTattooEnabled", true,
+                "When true, each female orgasm adds a st_paint tattoo (body paint + visible decal, thigh→face). Toggle in H with T; turning ON places one sample immediately.");
+            OrgasmTattooMaxCount = Config.Bind("Orbit", "OrgasmTattooMaxCount", 24,
+                new ConfigDescription("Max orgasm tattoo decals before oldest is removed.", new AcceptableValueRange<int>(1, 64)));
+            OrgasmTattooScaleMin = Config.Bind("Orbit", "OrgasmTattooScaleMin", 2.5f,
+                new ConfigDescription("Minimum size multiplier for tattoo decals.", new AcceptableValueRange<float>(1f, 20f)));
+            OrgasmTattooScaleMax = Config.Bind("Orbit", "OrgasmTattooScaleMax", 4.5f,
+                new ConfigDescription("Maximum size multiplier for tattoo decals.", new AcceptableValueRange<float>(1f, 20f)));
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
 
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
+            PatchSafe(harmony, typeof(Patches.OrgasmTattooPatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopSonyuProc));

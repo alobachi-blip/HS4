@@ -60,6 +60,7 @@ namespace HS2OrbitAndExciter
             EnsureFileCacheInitialized();
             MergeNewUserDataFiles();
             ResetPoseCameraCycle();
+            OrbitOrgasmTattoo.OnHSceneEntered();
         }
 
         internal static bool CanAcceptHotkey(HScene? hScene)
@@ -329,6 +330,8 @@ namespace HS2OrbitAndExciter
             HS2OrbitAndExciter.Log?.LogInfo(
                 $"Orbit: G 換角 {System.IO.Path.GetFileName(newPath)}（性格 {oldPersonality}→{cha.chaFile.parameter2.personality}）");
             SetActiveCharaAfterSwap(newPath);
+
+            OrbitOrgasmTattoo.ClearStamps();
 
             if (OrbitBehaviorHub.IsOrbitAssistActive())
             {
