@@ -128,14 +128,26 @@ def load_card_face_bundle(card: Path):
     }
 
 
+def _part_main_tex(core: FaceCore, part_name: str) -> Optional[np.ndarray]:
+    """Load material `_MainTex` exported by extract_skeleton.export_real_head_rig."""
+    info = core.real_parts.get(part_name) or {}
+    path = info.get("main_tex")
+    if not path:
+        return None
+    return load_rgba(str(path))
+
+
 def apply_makeup_and_eyes(core: FaceCore, card: dict, tex_dir: Path) -> list[str]:
     """Set per-part albedo+flags on `core` (real mode). Geometry/skinning is
-    handled entirely by FaceCore.deform_real_all(); we only supply textures."""
-    mk = card["makeup"]
+    handled entirely by FaceCore.deform_real_all(); we only supply textures.
+
+    Draw-order intent (FACE_DRAW_PARTS): tooth/tang → eyebase → eyeshadow → eyelashes.
+    """
     pupils = card["pupils"] or []
     p0 = pupils[0] if pupils else {}
     p1 = pupils[1] if len(pupils) > 1 else p0
 
+    # Prefer shared eye_white exported by export_real_head_rig; else eyebase MainTex.
     white = None
     for part_meshdir in tex_dir.parent.glob("_fo_head*"):
         cand = part_meshdir / "eye_white_c_t_eye_white_01.png"
@@ -143,9 +155,29 @@ def apply_makeup_and_eyes(core: FaceCore, card: dict, tex_dir: Path) -> list[str
             white = load_rgba(str(cand))
             break
     if white is None:
+        white = _part_main_tex(core, "o_eyebase_L") or _part_main_tex(core, "o_eyebase_R")
+    if white is None:
         white = np.ones((64, 64, 4), dtype=np.float32)
 
     applied: list[str] = []
+
+    # Mouth interior: material MainTex from fo_head (c_tooth_t / c_tang_t).
+    # skip_side: closed-mouth side views otherwise show tooth/tang punching through jaw.
+    for part in ("o_tooth", "o_tang"):
+        if part not in core.real_parts:
+            continue
+        tex = _part_main_tex(core, part)
+        if tex is None:
+            continue
+        core.set_part_render(
+            part,
+            albedo=tex,
+            skin_tint=(1.0, 1.0, 1.0),
+            skip_ao=True,
+            skip_side=True,
+        )
+        applied.append(part)
+
     hl_layer = export_addtex_layer("st_eye_hl_", int(card["hl_id"]), tex_dir / "eyes", label="hl")
     hl_tex = load_rgba(hl_layer.get("path") if hl_layer else None)
 
@@ -174,9 +206,28 @@ def apply_makeup_and_eyes(core: FaceCore, card: dict, tex_dir: Path) -> list[str
         core.set_part_render(part, albedo=alb, skin_tint=(1.0, 1.0, 1.0), skip_ao=True)
         applied.append(part)
 
+    # Eyelid / eyekage mesh: MainTex * material _Color (c_m_eyekage defaults ~0.15 gray).
+    # Makeup st_eyeshadow_ is a separate CreateFaceTexture layer on o_head albedo.
+    if "o_eyeshadow" in core.real_parts:
+        tex = _part_main_tex(core, "o_eyeshadow")
+        if tex is not None:
+            col = (core.real_parts["o_eyeshadow"].get("main_color") or [0.15, 0.15, 0.15, 1.0])
+            alb = tinted_alpha_albedo(tex, col)
+            core.set_part_render(
+                "o_eyeshadow",
+                albedo=alb,
+                use_alpha=True,
+                double_sided=True,
+                skip_ao=True,
+            )
+            applied.append("o_eyeshadow")
+
     if "o_eyelashes" in core.real_parts:
         layer = export_addtex_layer("st_eyelash_", int(card["eyelashes_id"]), tex_dir / "lash", label="lash")
         tex = load_rgba(layer.get("path") if layer else None)
+        if tex is None:
+            # Fall back to the fo_head material MainTex if ChaList id is missing (mod).
+            tex = _part_main_tex(core, "o_eyelashes")
         if tex is None:
             tex = np.zeros((64, 64, 4), dtype=np.float32)
             tex[..., 3] = 1
@@ -190,12 +241,6 @@ def apply_makeup_and_eyes(core: FaceCore, card: dict, tex_dir: Path) -> list[str
             skip_ao=True,
         )
         applied.append("o_eyelashes")
-
-    if "o_eyeshadow" in core.real_parts:
-        # eyeshadow mesh MainTex comes from its own material; skipped here for
-        # now (needs a separate per-part texture export — see extract_skeleton
-        # REAL_RIG_PARTS; TODO: export material MainTex like extract_eyes did).
-        pass
 
     return applied
 

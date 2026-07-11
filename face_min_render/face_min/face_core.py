@@ -167,6 +167,9 @@ class FaceCore:
                 "bone_indices": np.asarray(data["bone_indices"], dtype=np.int32),
                 "bone_weights": np.asarray(data["bone_weights"], dtype=np.float64),
                 "bind_world_inv": {k: np.asarray(v, dtype=np.float64) for k, v in info["bind_world_inv"].items()},
+                "main_tex": info.get("main_tex"),
+                "main_color": list(info.get("main_color") or [1.0, 1.0, 1.0, 1.0]),
+                "tex_paths": dict(info.get("tex_paths") or {}),
             }
         if "o_head" not in self.real_parts:
             raise RuntimeError(f"o_head missing from real rig for headId={head_id}")
@@ -322,7 +325,7 @@ class FaceCore:
                     "albedo": render_info["albedo"],
                     "skin_tint": render_info.get("skin_tint", (1.0, 1.0, 1.0)),
                 }
-                for k in ("use_alpha", "double_sided", "unlit", "skip_ao", "occlusion"):
+                for k in ("use_alpha", "double_sided", "unlit", "skip_ao", "occlusion", "skip_side"):
                     if k in render_info:
                         item[k] = render_info[k]
                 extras.append(item)
@@ -336,6 +339,9 @@ class FaceCore:
         for view, path in (("front", out_front), ("side", out_side)):
             if path is None:
                 continue
+            view_extras = extras
+            if view == "side" and extras:
+                view_extras = [e for e in extras if not e.get("skip_side")]
             img = render_textured(
                 verts,
                 faces,
@@ -345,7 +351,7 @@ class FaceCore:
                 view=view,  # type: ignore[arg-type]
                 size=size,
                 skin_tint=self.skin_tint,
-                extra_meshes=extras or None,
+                extra_meshes=view_extras or None,
             )
             save_image(img, path)
             result[view] = str(path)

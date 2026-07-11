@@ -15,7 +15,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .extract_eyes import resolve_fo_head_entry, _parent_prefab_name
+from .extract_eyes import (
+    _export_texture_from_env,
+    _mat_tex_map,
+    _parent_prefab_name,
+    resolve_fo_head_entry,
+)
 from .hs2_abdata import resolve_ab
 from .obj_io import load_obj_from_text
 
@@ -181,6 +186,20 @@ def _bind_pose_dict(bone_names: List[str], bind_pose_raw) -> Dict[str, np.ndarra
     return out
 
 
+def _mat_color_map(mat) -> Dict[str, list]:
+    out: Dict[str, list] = {}
+    props = getattr(mat, "m_SavedProperties", None)
+    if not props:
+        return out
+    for c in props.m_Colors or []:
+        try:
+            pname, col = c[0], c[1]
+            out[str(pname)] = [float(col.r), float(col.g), float(col.b), float(col.a)]
+        except Exception:
+            continue
+    return out
+
+
 def _find_smr(env, go_name: str, prefab: str):
     for obj in env.objects:
         if obj.type.name != "SkinnedMeshRenderer":
@@ -252,6 +271,25 @@ def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object
         bone_indices, bone_weights = decode_blend_weights(mesh)
         bind_world_inv = _bind_pose_dict(bone_names, mesh.m_BindPose)
 
+        mat_name = None
+        tex_map: Dict[str, str] = {}
+        tex_paths: Dict[str, str] = {}
+        color_map: Dict[str, list] = {}
+        mats = getattr(smr, "m_Materials", None) or []
+        if mats:
+            try:
+                mat = mats[0].read()
+                mat_name = mat.m_Name
+                tex_map = _mat_tex_map(mat)
+                color_map = _mat_color_map(mat)
+            except Exception:
+                pass
+        for prop, tex_name in tex_map.items():
+            safe = prop.replace(" ", "_").lstrip("_")
+            dest = out_dir / f"{part_name}_{safe}_{tex_name}.png"
+            if _export_texture_from_env(env, tex_name, dest):
+                tex_paths[prop] = str(dest)
+
         npz_path = out_dir / f"{part_name}_real.npz"
         np.savez_compressed(
             npz_path,
@@ -268,7 +306,25 @@ def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object
             "n_bones_skin": len(bone_names),
             "bind_world_inv": {k: v.tolist() for k, v in bind_world_inv.items()},
             "weight_sum_check": float(bone_weights.sum(axis=1).mean()),
+            "material": mat_name,
+            "tex_map": tex_map,
+            "tex_paths": tex_paths,
+            "color_map": color_map,
+            "main_tex": tex_paths.get("_MainTex"),
+            "main_color": color_map.get("_Color") or [1.0, 1.0, 1.0, 1.0],
         }
+
+    # Shared eye textures used by compose_eye_albedo (also live on eyebase mats).
+    shared_tex: Dict[str, str] = {}
+    for tex_name, label in (
+        ("c_t_eye_white_01", "eye_white"),
+        ("c_t_eye_o_01", "eye_occlusion"),
+        ("c_t_eye_n", "eye_normal"),
+        ("c_t_eyeblack_00", "eye_black"),
+    ):
+        dest = out_dir / f"{label}_{tex_name}.png"
+        if _export_texture_from_env(env, tex_name, dest):
+            shared_tex[label] = str(dest)
 
     meta = {
         "head_id": head_id,
@@ -278,6 +334,7 @@ def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object
         "parents": parents,
         "rest_local": {k: v.tolist() for k, v in rest_local.items()},
         "parts": parts,
+        "shared_tex": shared_tex,
     }
     (out_dir / "real_head_rig_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
