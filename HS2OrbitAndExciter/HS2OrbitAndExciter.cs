@@ -49,27 +49,29 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? OrgasmBustGrowEnabled;
         /// <summary>Relative bust size increase per orgasm (percent), e.g. 15 = ×1.15.</summary>
         internal static ConfigEntry<float>? OrgasmBustGrowPercent;
-        /// <summary>When true, each female orgasm plays semen (射精) fluid/particles from both nipples.</summary>
+        /// <summary>When true, each female orgasm sprays urine/潮吹 from both nipples.</summary>
         internal static ConfigEntry<bool>? OrgasmNippleSprayEnabled;
+        /// <summary>True = Play(-1,height) urine splitInfos; false = custom Bursts/Speed/Amount.</summary>
+        internal static ConfigEntry<bool>? OrgasmNippleSprayUseNativeUrineRhythm;
         internal static ConfigEntry<float>? OrgasmNippleSprayOffsetX;
         internal static ConfigEntry<float>? OrgasmNippleSprayOffsetY;
         internal static ConfigEntry<float>? OrgasmNippleSprayOffsetZ;
         internal static ConfigEntry<float>? OrgasmNippleSprayRotX;
         internal static ConfigEntry<float>? OrgasmNippleSprayRotY;
         internal static ConfigEntry<float>? OrgasmNippleSprayRotZ;
-        /// <summary>How many nipple spray bursts per orgasm (like urine multi-pulse).</summary>
+        /// <summary>Custom-rhythm pulse count (when UseNativeUrineRhythm is false).</summary>
         internal static ConfigEntry<int>? OrgasmNippleSprayBursts;
-        /// <summary>Seconds between bursts.</summary>
+        /// <summary>Seconds between custom pulses.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayBurstInterval;
-        /// <summary>First-burst speed multiplier vs emitter base (stronger than single Play).</summary>
+        /// <summary>First custom pulse speed vs base.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSpraySpeedStart;
-        /// <summary>Last-burst speed multiplier vs emitter base.</summary>
+        /// <summary>Last custom pulse speed vs base.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSpraySpeedEnd;
-        /// <summary>Overall particle volume scale across all bursts (1 = default full tank share).</summary>
+        /// <summary>Overall custom-rhythm volume (1 = default).</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmount;
-        /// <summary>First-burst volume weight (relative; higher = more fluid on first pulse).</summary>
+        /// <summary>First custom pulse volume weight.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountStart;
-        /// <summary>Last-burst volume weight (relative; each pulse volume leans toward this).</summary>
+        /// <summary>Last custom pulse volume weight.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
@@ -127,7 +129,9 @@ namespace HS2OrbitAndExciter
             OrgasmBustGrowPercent = Config.Bind("Orbit", "OrgasmBustGrowPercent", 15f,
                 new ConfigDescription("Relative bust growth per orgasm (percent). 15 = +15% of current size.", new AcceptableValueRange<float>(0f, 100f)));
             OrgasmNippleSprayEnabled = Config.Bind("Orbit", "OrgasmNippleSprayEnabled", true,
-                "When true, each female orgasm reuses male semen (射精) Obi/particle emitters on both nipples.");
+                "When true, each female orgasm sprays from both nipples using female urine/潮吹 Obi (or urine particles).");
+            OrgasmNippleSprayUseNativeUrineRhythm = Config.Bind("Orbit", "OrgasmNippleSprayUseNativeUrineRhythm", true,
+                "When true, use urine EmitterPtn splitInfos via Play(-1,height). When false, use custom Bursts/Interval/Speed/Amount.");
             OrgasmNippleSprayOffsetX = Config.Bind("Orbit", "OrgasmNippleSprayOffsetX", 0f,
                 new ConfigDescription("Nipple spray local position X.", new AcceptableValueRange<float>(-0.2f, 0.2f)));
             OrgasmNippleSprayOffsetY = Config.Bind("Orbit", "OrgasmNippleSprayOffsetY", 0f,
@@ -141,19 +145,19 @@ namespace HS2OrbitAndExciter
             OrgasmNippleSprayRotZ = Config.Bind("Orbit", "OrgasmNippleSprayRotZ", 0f,
                 new ConfigDescription("Nipple spray local euler Z (degrees).", new AcceptableValueRange<float>(-180f, 180f)));
             OrgasmNippleSprayBursts = Config.Bind("Orbit", "OrgasmNippleSprayBursts", 5,
-                new ConfigDescription("Nipple spray pulses per orgasm (urine-like multi burst).", new AcceptableValueRange<int>(2, 20)));
+                new ConfigDescription("Custom-rhythm pulse count (when UseNativeUrineRhythm is false).", new AcceptableValueRange<int>(2, 20)));
             OrgasmNippleSprayBurstInterval = Config.Bind("Orbit", "OrgasmNippleSprayBurstInterval", 0.35f,
-                new ConfigDescription("Seconds between nipple spray pulses.", new AcceptableValueRange<float>(0.1f, 1.5f)));
+                new ConfigDescription("Seconds between custom pulses.", new AcceptableValueRange<float>(0.1f, 1.5f)));
             OrgasmNippleSpraySpeedStart = Config.Bind("Orbit", "OrgasmNippleSpraySpeedStart", 1.8f,
-                new ConfigDescription("First pulse speed vs base (higher = stronger than old single spray).", new AcceptableValueRange<float>(0.5f, 4f)));
+                new ConfigDescription("First custom pulse speed vs base.", new AcceptableValueRange<float>(0.5f, 4f)));
             OrgasmNippleSpraySpeedEnd = Config.Bind("Orbit", "OrgasmNippleSpraySpeedEnd", 0.4f,
-                new ConfigDescription("Last pulse speed vs base (each pulse gets weaker toward this).", new AcceptableValueRange<float>(0.05f, 2f)));
+                new ConfigDescription("Last custom pulse speed vs base.", new AcceptableValueRange<float>(0.05f, 2f)));
             OrgasmNippleSprayAmount = Config.Bind("Orbit", "OrgasmNippleSprayAmount", 1f,
-                new ConfigDescription("Overall nipple spray volume (1 = default; higher = more fluid total).", new AcceptableValueRange<float>(0.2f, 8f)));
+                new ConfigDescription("Overall custom-rhythm volume (1 = default).", new AcceptableValueRange<float>(0.2f, 8f)));
             OrgasmNippleSprayAmountStart = Config.Bind("Orbit", "OrgasmNippleSprayAmountStart", 1.5f,
-                new ConfigDescription("First pulse volume weight (relative to later pulses).", new AcceptableValueRange<float>(0.2f, 8f)));
+                new ConfigDescription("First custom pulse volume weight.", new AcceptableValueRange<float>(0.2f, 8f)));
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
-                new ConfigDescription("Last pulse volume weight (each pulse volume decreases toward this).", new AcceptableValueRange<float>(0.1f, 5f)));
+                new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 5f)));
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;

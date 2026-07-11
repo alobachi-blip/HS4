@@ -10,9 +10,10 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Female orgasm: reuse male semen (射精) Obi emitters on left/right nipple bones.
-    /// Multi-burst like urine (潮吹): several pulses, first stronger than a single Play, each weaker.
-    /// Falls back to cloning HParticleCtrl siru ParticleSystems when Obi is unavailable.
+    /// Female orgasm: reuse female urine / 潮吹 Obi emitters on left/right nipple bones.
+    /// Default rhythm: ObiEmitterCtrl.Play(-1, height) (urine LoadFile splitInfos).
+    /// Optional override: custom multi-burst (Bursts / Interval / Speed / Amount).
+    /// Falls back to cloning female urine emitters, then HParticleCtrl urine ParticleSystems.
     /// </summary>
     internal static class OrbitOrgasmNippleSpray
     {
@@ -32,6 +33,9 @@ namespace HS2OrbitAndExciter
             "cf_J_Mune01_R",
         };
 
+        /// <summary>HParticleCtrl urine pattern ids (game default).</summary>
+        private static readonly int[] UrineParticleIds = { 2, 3, 4, 5 };
+
         private static readonly List<ObiEmitterCtrl> ObiEmitters = new List<ObiEmitterCtrl>(4);
         private static readonly List<ObiFluidCtrl> OwnedFluidCtrls = new List<ObiFluidCtrl>(4);
         private static readonly List<ParticleSystem> ParticleClones = new List<ParticleSystem>(4);
@@ -41,13 +45,17 @@ namespace HS2OrbitAndExciter
 
         private static int _boundFemaleId = -1;
         private static int _boundHSceneId = -1;
-        private static string _lastStatus = "乳噴待命";
+        private static string _lastStatus = "乳潮待命";
         private static Coroutine? _burstRoutine;
         private static int _burstGen;
 
         internal static bool Enabled => HS2OrbitAndExciter.OrgasmNippleSprayEnabled?.Value ?? true;
 
-        internal static string HudStatus => !Enabled ? "乳噴關" : _lastStatus;
+        /// <summary>True = Play(-1,height) urine splitInfos; false = custom Bursts/Speed/Amount.</summary>
+        internal static bool UseNativeUrineRhythm =>
+            HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm?.Value ?? true;
+
+        internal static string HudStatus => !Enabled ? "乳潮關" : _lastStatus;
 
         private static int BurstCount
         {
@@ -82,7 +90,7 @@ namespace HS2OrbitAndExciter
             ReleaseOwned();
             _boundFemaleId = -1;
             _boundHSceneId = -1;
-            _lastStatus = Enabled ? "乳噴待命" : "乳噴關";
+            _lastStatus = Enabled ? "乳潮待命" : "乳潮關";
         }
 
         /// <summary>Drop and rebuild nipple emitters (after Offset/Rot change in settings).</summary>
@@ -94,7 +102,7 @@ namespace HS2OrbitAndExciter
             _boundHSceneId = -1;
             if (!Enabled)
             {
-                _lastStatus = "乳噴關";
+                _lastStatus = "乳潮關";
                 return;
             }
 
@@ -102,17 +110,17 @@ namespace HS2OrbitAndExciter
             var cha = hScene != null ? OrbitHelpers.GetChaFemales(hScene)?[0] : null;
             if (hScene == null || cha == null || cha.objBodyBone == null)
             {
-                _lastStatus = "乳噴待命";
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 重建乳頭噴口需要在 H 場景且有女主");
+                _lastStatus = "乳潮待命";
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 重建乳頭潮吹噴口需要在 H 場景且有女主");
                 return;
             }
 
             if (EnsureEmitters(hScene, cha))
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭噴口已重建（{_lastStatus}）");
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭潮吹噴口已重建（{_lastStatus}）");
             else
             {
-                _lastStatus = "乳噴失敗";
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭噴口重建失敗");
+                _lastStatus = "乳潮失敗";
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭潮吹噴口重建失敗");
             }
         }
 
@@ -128,17 +136,17 @@ namespace HS2OrbitAndExciter
             var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
             if (cha == null || cha.objBodyBone == null)
             {
-                _lastStatus = "乳噴無女";
+                _lastStatus = "乳潮無女";
                 return;
             }
 
             if (!EnsureEmitters(hScene, cha))
             {
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭射精特效無法建立（無射精 emitter／粒子）");
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭潮吹特效無法建立（無 urine emitter／粒子）");
                 return;
             }
 
-            StartBurstSequence(hScene, cha);
+            StartSpray(hScene, cha);
         }
 
         private static bool EnsureEmitters(HScene hScene, ChaControl female)
@@ -152,39 +160,75 @@ namespace HS2OrbitAndExciter
             _boundHSceneId = hId;
             _boundFemaleId = fId;
 
-            if (TryBuildObiFromMaleSiru(hScene, female))
+            if (TryBuildObiFromFemaleUrine(hScene, female))
                 return true;
 
-            if (TryBuildObiByCloningMaleEmitter(hScene, female))
+            if (TryBuildObiByCloningFemaleUrine(hScene, female))
                 return true;
 
             return TryBuildParticleClones(hScene, female);
         }
 
-        private static bool TryBuildObiFromMaleSiru(HScene hScene, ChaControl female)
+        private static bool TryGetFemaleUrineSiru(
+            HScene hScene,
+            out ObiCtrl? obiCtrl,
+            out ObiCtrl.SiruObiInfo? chosen,
+            out int urineSlotId)
         {
-            if (!Singleton<ObiFluidManager>.IsInstance())
-                return false;
+            obiCtrl = null;
+            chosen = null;
+            urineSlotId = -1;
 
-            var obiCtrl = Traverse.Create(hScene).Field("ctrlObi").GetValue() as ObiCtrl;
+            obiCtrl = Traverse.Create(hScene).Field("ctrlObi").GetValue() as ObiCtrl;
             if (obiCtrl == null)
                 return false;
 
             var siruInfos = Traverse.Create(obiCtrl).Field("siruInfos").GetValue()
                 as Dictionary<int, Dictionary<int, ObiCtrl.SiruObiInfo>>;
-            if (siruInfos == null || !siruInfos.TryGetValue(0, out var maleSlots) || maleSlots == null || maleSlots.Count == 0)
+            // First female key = 1 (second female = 3)
+            if (siruInfos == null || !siruInfos.TryGetValue(1, out var femaleSlots) || femaleSlots == null || femaleSlots.Count == 0)
                 return false;
 
             var urineIds = hScene.ctrlFlag?.UrineIDs;
-            ObiCtrl.SiruObiInfo? chosen = null;
-            foreach (var kv in maleSlots)
+            if (urineIds != null)
             {
-                if (urineIds != null && urineIds.Contains(kv.Key))
-                    continue;
-                chosen = kv.Value;
-                break;
+                for (int i = 0; i < urineIds.Count; i++)
+                {
+                    int id = urineIds[i];
+                    if (femaleSlots.TryGetValue(id, out var info) && info != null)
+                    {
+                        chosen = info;
+                        urineSlotId = id;
+                        return true;
+                    }
+                }
             }
 
+            // Fallback: common default urine slot 3
+            if (femaleSlots.TryGetValue(3, out var fallback) && fallback != null)
+            {
+                chosen = fallback;
+                urineSlotId = 3;
+                return true;
+            }
+
+            foreach (var kv in femaleSlots)
+            {
+                chosen = kv.Value;
+                urineSlotId = kv.Key;
+                return chosen != null;
+            }
+
+            return false;
+        }
+
+        private static bool TryBuildObiFromFemaleUrine(HScene hScene, ChaControl female)
+        {
+            if (!Singleton<ObiFluidManager>.IsInstance())
+                return false;
+
+            if (!TryGetFemaleUrineSiru(hScene, out _, out var chosen, out _))
+                return false;
             if (chosen == null)
                 return false;
 
@@ -221,39 +265,66 @@ namespace HS2OrbitAndExciter
 
             if (made > 0)
             {
-                _lastStatus = $"乳噴Obi×{made}";
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭射精 Obi×{made}（siru 設定）");
+                _lastStatus = $"乳潮Obi×{made}";
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭潮吹 Obi×{made}（女 siruInfos[1] Urine）");
                 return true;
             }
 
             return false;
         }
 
-        private static bool TryBuildObiByCloningMaleEmitter(HScene hScene, ChaControl female)
+        private static bool TryBuildObiByCloningFemaleUrine(HScene hScene, ChaControl female)
         {
-            var obiCtrl = Traverse.Create(hScene).Field("ctrlObi").GetValue() as ObiCtrl;
+            if (!TryGetFemaleUrineSiru(hScene, out var obiCtrl, out var chosen, out int urineSlotId))
+                return false;
             if (obiCtrl == null)
                 return false;
 
-            var maleCtrls = Traverse.Create(obiCtrl).Field("obiFluidCtrlMale").GetValue() as ObiFluidCtrl[];
-            if (maleCtrls == null || maleCtrls.Length == 0 || maleCtrls[0]?.ObiEmitterCtrls == null)
+            var femaleCtrls = Traverse.Create(obiCtrl).Field("obiFluidCtrlFemale").GetValue() as ObiFluidCtrl[];
+            if (femaleCtrls == null || femaleCtrls.Length == 0 || femaleCtrls[0]?.ObiEmitterCtrls == null)
                 return false;
 
+            var emitters = femaleCtrls[0].ObiEmitterCtrls;
             ObiEmitterCtrl? source = null;
-            var urineIds = hScene.ctrlFlag?.UrineIDs;
-            var emitters = maleCtrls[0].ObiEmitterCtrls;
-            for (int i = 0; i < emitters.Length; i++)
+            if (urineSlotId >= 0 && urineSlotId < emitters.Length && emitters[urineSlotId] != null)
+                source = emitters[urineSlotId];
+
+            if (source == null)
             {
-                if (emitters[i] == null)
-                    continue;
-                if (urineIds != null && urineIds.Contains(i))
-                    continue;
-                source = emitters[i];
-                break;
+                var urineIds = hScene.ctrlFlag?.UrineIDs;
+                if (urineIds != null)
+                {
+                    for (int i = 0; i < urineIds.Count; i++)
+                    {
+                        int id = urineIds[i];
+                        if (id >= 0 && id < emitters.Length && emitters[id] != null)
+                        {
+                            source = emitters[id];
+                            urineSlotId = id;
+                            break;
+                        }
+                    }
+                }
             }
 
             if (source == null)
                 return false;
+
+            // EmitterPtn for re-LoadFile after Instantiate (ensures splitInfos)
+            string? ptnBundle = null, ptnAsset = null, ptnManifest = null;
+            if (chosen?.Info != null)
+            {
+                int state = hScene.ctrlFlag != null && hScene.ctrlFlag.isFaintness ? 1 : 0;
+                if (state >= chosen.Info.Length || chosen.Info[state] == null)
+                    state = 0;
+                if (state < chosen.Info.Length && chosen.Info[state] != null)
+                {
+                    var ptn = chosen.Info[state].EmitterPtn;
+                    ptnBundle = ptn.assetbundle;
+                    ptnAsset = ptn.asset;
+                    ptnManifest = ptn.manifest ?? "";
+                }
+            }
 
             var solver = Traverse.Create(obiCtrl).Field("solver").GetValue() as Component;
             float srcSpeed = ReadObiSpeed(source, 1f);
@@ -261,7 +332,7 @@ namespace HS2OrbitAndExciter
             foreach (var parent in ResolveNippleParents(female))
             {
                 var go = Object.Instantiate(source.gameObject, parent);
-                go.name = "OrbitNippleSiru_" + parent.name;
+                go.name = "OrbitNippleUrine_" + parent.name;
                 go.transform.localPosition = LocalPos;
                 go.transform.localRotation = Quaternion.Euler(LocalEuler);
                 go.transform.localScale = Vector3.one;
@@ -273,6 +344,9 @@ namespace HS2OrbitAndExciter
                     Object.Destroy(go);
                     continue;
                 }
+
+                if (!string.IsNullOrEmpty(ptnBundle) && !string.IsNullOrEmpty(ptnAsset))
+                    clone.LoadFile(ptnBundle, ptnAsset, ptnManifest ?? "");
 
                 TryRegisterParticleRenderer(source, clone);
                 OwnedObjects.Add(go);
@@ -286,8 +360,8 @@ namespace HS2OrbitAndExciter
 
             if (made > 0)
             {
-                _lastStatus = $"乳噴Clone×{made}";
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭射精 clone Obi×{made}");
+                _lastStatus = $"乳潮Clone×{made}";
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭潮吹 clone Obi×{made}（female urine slot {urineSlotId}）");
                 return true;
             }
 
@@ -315,7 +389,7 @@ namespace HS2OrbitAndExciter
             }
             catch (System.Exception ex)
             {
-                HS2OrbitAndExciter.Log?.LogDebug($"Orbit: 乳頭射精 renderer 註冊略過: {ex.Message}");
+                HS2OrbitAndExciter.Log?.LogDebug($"Orbit: 乳頭潮吹 renderer 註冊略過: {ex.Message}");
             }
         }
 
@@ -333,9 +407,18 @@ namespace HS2OrbitAndExciter
             GameObject? srcGo = null;
             ParticleSystem? srcPs = null;
 
-            int preferId = TryGetMalePlayParticleId(hScene);
+            int preferId = TryGetFemaleUrinePlayParticleId(hScene);
             if (preferId >= 0 && preferId < lstParticle.Count)
                 TryReadParticleEntry(lstParticle[preferId], out srcGo, out srcPs);
+
+            if (srcPs == null)
+            {
+                foreach (int id in UrineParticleIds)
+                {
+                    if (id < lstParticle.Count && TryReadParticleEntry(lstParticle[id], out srcGo, out srcPs) && srcPs != null)
+                        break;
+                }
+            }
 
             if (srcPs == null)
             {
@@ -353,7 +436,7 @@ namespace HS2OrbitAndExciter
             foreach (var parent in ResolveNippleParents(female))
             {
                 var go = Object.Instantiate(srcGo, parent);
-                go.name = "OrbitNippleSiruPs_" + parent.name;
+                go.name = "OrbitNippleUrinePs_" + parent.name;
                 go.transform.localPosition = LocalPos;
                 go.transform.localRotation = Quaternion.Euler(LocalEuler);
                 go.transform.localScale = Vector3.one;
@@ -375,33 +458,22 @@ namespace HS2OrbitAndExciter
 
             if (made > 0)
             {
-                _lastStatus = $"乳噴粒子×{made}";
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭射精粒子×{made}");
+                _lastStatus = $"乳潮粒子×{made}";
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 乳頭潮吹粒子×{made}");
                 return true;
             }
 
             return false;
         }
 
-        private static int TryGetMalePlayParticleId(HScene hScene)
+        private static int TryGetFemaleUrinePlayParticleId(HScene hScene)
         {
             try
             {
-                var obiCtrl = Traverse.Create(hScene).Field("ctrlObi").GetValue() as ObiCtrl;
-                if (obiCtrl == null)
+                if (!TryGetFemaleUrineSiru(hScene, out _, out var chosen, out _))
                     return -1;
-                var siruInfos = Traverse.Create(obiCtrl).Field("siruInfos").GetValue()
-                    as Dictionary<int, Dictionary<int, ObiCtrl.SiruObiInfo>>;
-                if (siruInfos == null || !siruInfos.TryGetValue(0, out var maleSlots) || maleSlots == null)
-                    return -1;
-                var urineIds = hScene.ctrlFlag?.UrineIDs;
-                foreach (var kv in maleSlots)
-                {
-                    if (urineIds != null && urineIds.Contains(kv.Key))
-                        continue;
-                    if (kv.Value.PlayParticleID >= 0)
-                        return kv.Value.PlayParticleID;
-                }
+                if (chosen != null && chosen.PlayParticleID >= 0)
+                    return chosen.PlayParticleID;
             }
             catch
             {
@@ -470,24 +542,108 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private static void StartBurstSequence(HScene hScene, ChaControl female)
+        private static void StartSpray(HScene hScene, ChaControl female)
         {
             var host = FindHost();
             if (host == null)
             {
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭連噴無 Coroutine host");
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭潮吹無 Coroutine host");
                 return;
             }
 
             StopBurstRoutine();
             EnsureSolverActive(hScene);
 
-            int gen = ++_burstGen;
+            // Prefer native urine Play(-1,height) when Obi emitters exist.
+            if (UseNativeUrineRhythm && ObiEmitters.Count > 0)
+            {
+                int gen = ++_burstGen;
+                _lastStatus = $"乳潮吹×{ObiEmitters.Count}";
+                _burstRoutine = host.StartCoroutine(NativeUrinePlayRoutine(hScene, female, gen));
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 高潮乳頭潮吹（原生 urine Play/-1 splitInfos）");
+                return;
+            }
+
             int bursts = BurstCount;
-            _lastStatus = $"乳噴連×{bursts}";
-            _burstRoutine = host.StartCoroutine(BurstRoutine(hScene, female, bursts, gen));
+            int genCustom = ++_burstGen;
+            _lastStatus = $"乳潮連×{bursts}";
+            _burstRoutine = host.StartCoroutine(BurstRoutine(hScene, female, bursts, genCustom));
             HS2OrbitAndExciter.Log?.LogInfo(
-                $"Orbit: 高潮乳頭連噴 {bursts} 次（速 {SpeedStartMult:F1}→{SpeedEndMult:F1}，量 {AmountOverall:F1}×{AmountStartWeight:F1}→{AmountEndWeight:F1}，間隔 {BurstInterval:F2}s）");
+                $"Orbit: 高潮乳頭潮吹自訂連噴 {bursts} 次（速 {SpeedStartMult:F1}→{SpeedEndMult:F1}，量 {AmountOverall:F1}×{AmountStartWeight:F1}→{AmountEndWeight:F1}，間隔 {BurstInterval:F2}s）");
+        }
+
+        private static IEnumerator NativeUrinePlayRoutine(HScene hScene, ChaControl female, int gen)
+        {
+            var parents = new List<Transform>();
+            foreach (var p in ResolveNippleParents(female))
+                parents.Add(p);
+
+            float height = 0.5f;
+            try
+            {
+                height = female.GetShapeBodyValue(0);
+            }
+            catch
+            {
+                // keep default
+            }
+
+            int boneIdx = 0;
+            for (int i = 0; i < ObiEmitters.Count; i++)
+            {
+                var ctrl = ObiEmitters[i];
+                if (ctrl == null)
+                    continue;
+                try
+                {
+                    ApplyLocalXform(ctrl.transform, parents, ref boneIdx);
+                    ctrl.Play(-1, height);
+                }
+                catch (System.Exception ex)
+                {
+                    HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭潮吹 Play 失敗: {ex.Message}");
+                }
+            }
+
+            // Also pulse particle fallback if any (no splitInfos there).
+            if (ParticleClones.Count > 0)
+            {
+                boneIdx = 0;
+                for (int i = 0; i < ParticleClones.Count; i++)
+                {
+                    var ps = ParticleClones[i];
+                    if (ps == null)
+                        continue;
+                    try
+                    {
+                        ApplyLocalXform(ps.transform, parents, ref boneIdx);
+                        if (!ps.gameObject.activeSelf)
+                            ps.gameObject.SetActive(true);
+                        ps.Emit(Mathf.Max(4, Mathf.RoundToInt(16f * AmountOverall)));
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+
+            _lastStatus = $"乳潮吹中×{ObiEmitters.Count}";
+            // Wait roughly for urine multi-burst to finish (splitInfos vary; ~3s covers typical).
+            float wait = 3.5f;
+            while (wait > 0f)
+            {
+                if (gen != _burstGen)
+                    yield break;
+                wait -= Time.deltaTime;
+                yield return null;
+            }
+
+            if (gen == _burstGen)
+            {
+                _lastStatus = "乳潮吹完";
+                _burstRoutine = null;
+            }
         }
 
         private static float[] BuildAmountRateSteps(int bursts)
@@ -516,7 +672,6 @@ namespace HS2OrbitAndExciter
             foreach (var p in ResolveNippleParents(female))
                 parents.Add(p);
 
-            // Stop any vanilla Play coroutine on emitters; KillAll once like urine timing sheet.
             for (int i = 0; i < ObiEmitters.Count; i++)
             {
                 try { ObiEmitters[i]?.Stop(); } catch { /* ignore */ }
@@ -566,7 +721,7 @@ namespace HS2OrbitAndExciter
                     }
                     catch (System.Exception ex)
                     {
-                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭 Obi 連噴失敗: {ex.Message}");
+                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭潮吹 Obi 連噴失敗: {ex.Message}");
                     }
                 }
 
@@ -626,11 +781,11 @@ namespace HS2OrbitAndExciter
                     }
                     catch (System.Exception ex)
                     {
-                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭粒子連噴失敗: {ex.Message}");
+                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭潮吹粒子連噴失敗: {ex.Message}");
                     }
                 }
 
-                _lastStatus = $"乳噴{b + 1}/{bursts}·速{speedMult:F1}·量{amountMult:F1}";
+                _lastStatus = $"乳潮{b + 1}/{bursts}·速{speedMult:F1}·量{amountMult:F1}";
 
                 if (b + 1 < bursts)
                     yield return new WaitForSeconds(interval);
@@ -638,7 +793,7 @@ namespace HS2OrbitAndExciter
 
             if (gen == _burstGen)
             {
-                _lastStatus = $"乳噴連×{bursts}完";
+                _lastStatus = $"乳潮連×{bursts}完";
                 _burstRoutine = null;
             }
         }
@@ -699,12 +854,19 @@ namespace HS2OrbitAndExciter
             {
                 try
                 {
-                    if (ctrl?.ObiEmitter != null)
-                        ctrl.ObiEmitter.playMode = ObiEmitter.PlayMode.Stop;
+                    ctrl?.Stop();
                 }
                 catch
                 {
-                    // ignore
+                    try
+                    {
+                        if (ctrl?.ObiEmitter != null)
+                            ctrl.ObiEmitter.playMode = ObiEmitter.PlayMode.Stop;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
                 }
             }
         }

@@ -2,13 +2,15 @@
 
 ## 2026-07-11
 
-### 高潮乳頭射精
+### 高潮乳頭潮吹（urine）
 
-- 女高潮時複用男性**射精** Obi emitter（失敗則退回 siru 粒子），掛到左右乳頭骨（`cf_J_Mune_Nip01_s_*` 等）並播放。
-- 設定：`OrgasmNippleSprayEnabled`（預設開）；局部偏移／旋轉 `OrgasmNippleSprayOffset*`／`Rot*`（方向不對時可調）。
-- **HUD／選單**：⌃⇧O 左下角「高潮 刺·胸·乳噴」列；⌃⇧P「高潮特效」區塊含刺青／胸／乳頭射精開關與旋轉滑桿、「重建乳頭噴口」。
-- **連噴**：預設 5 段（如潮吹），首噴力道 ×1.8、末噴 ×0.4 遞減；可調次數／間隔／首末力道。
-- H 進場／G 換角會重建 emitter。
+- 女高潮乳頭噴改為複用女 **潮吹／噴尿（urine）**：`siruInfos[1]` + `UrineIDs`（失敗則 clone `obiFluidCtrlFemale` urine slot，再退回 urine 粒子 2–5）。
+- **預設節奏**：`ObiEmitterCtrl.Play(-1, height)`（跟遊戲潮吹 splitInfos）；⌃⇧P 可關「潮吹節奏」改自訂連噴（Bursts／間隔／力道／量）。
+- 文案：HUD「乳潮…」；選單「乳頭潮吹」。掛點／Offset／Rot／重建噴口不變。
+
+### 高潮乳頭射精（舊，已改為潮吹）
+
+- （歷史）曾複用男性射精 Obi；見上節。
 
 ### R 清腹＋高潮刺青
 
