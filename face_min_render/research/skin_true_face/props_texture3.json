@@ -1,0 +1,122 @@
+[
+  {
+    "m_Name": "_Color2",
+    "m_Description": "Color 2 nip",
+    "m_Attributes": [],
+    "m_Type": 0,
+    "m_Flags": 0,
+    "m_DefValue[0]": 1.0,
+    "m_DefValue[1]": 0.9338235259056091,
+    "m_DefValue[2]": 0.9338235259056091,
+    "m_DefValue[3]": 1.0,
+    "m_DefTexture": {
+      "m_DefaultName": "",
+      "m_TexDim": 1
+    }
+  },
+  {
+    "m_Name": "_Color3",
+    "m_Description": "Color 3 mnpk",
+    "m_Attributes": [],
+    "m_Type": 0,
+    "m_Flags": 0,
+    "m_DefValue[0]": 0.43382349610328674,
+    "m_DefValue[1]": 0.43382349610328674,
+    "m_DefValue[2]": 0.43382349610328674,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "",
+      "m_TexDim": 1
+    }
+  },
+  {
+    "m_Name": "_Texture2",
+    "m_Description": "Texture2(UV2nip)",
+    "m_Attributes": [],
+    "m_Type": 4,
+    "m_Flags": 4,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": 0.0,
+    "m_DefValue[2]": 0.0,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "black",
+      "m_TexDim": 2
+    }
+  },
+  {
+    "m_Name": "_Texture3",
+    "m_Description": "Texture3(UV3mnpk)",
+    "m_Attributes": [],
+    "m_Type": 4,
+    "m_Flags": 4,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": 0.0,
+    "m_DefValue[2]": 0.0,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "black",
+      "m_TexDim": 2
+    }
+  },
+  {
+    "m_Name": "_Texture5",
+    "m_Description": "Texture5(Hige)",
+    "m_Attributes": [],
+    "m_Type": 4,
+    "m_Flags": 4,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": 0.0,
+    "m_DefValue[2]": 0.0,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "black",
+      "m_TexDim": 2
+    }
+  },
+  {
+    "m_Name": "_Texture3Rotator",
+    "m_Description": "Texture3 Rotator",
+    "m_Attributes": [],
+    "m_Type": 3,
+    "m_Flags": 0,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": -1.0,
+    "m_DefValue[2]": 1.0,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "",
+      "m_TexDim": 1
+    }
+  },
+  {
+    "m_Name": "_Texture3UV",
+    "m_Description": "Texture3 UV (tx,ty,sx,sy)",
+    "m_Attributes": [],
+    "m_Type": 1,
+    "m_Flags": 0,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": 0.07999999821186066,
+    "m_DefValue[2]": 1.0,
+    "m_DefValue[3]": 1.0,
+    "m_DefTexture": {
+      "m_DefaultName": "",
+      "m_TexDim": 1
+    }
+  },
+  {
+    "m_Name": "_Texture5UV",
+    "m_Description": "Texture5 UV",
+    "m_Attributes": [],
+    "m_Type": 1,
+    "m_Flags": 0,
+    "m_DefValue[0]": 0.0,
+    "m_DefValue[1]": 0.0,
+    "m_DefValue[2]": 0.0,
+    "m_DefValue[3]": 0.0,
+    "m_DefTexture": {
+      "m_DefaultName": "",
+      "m_TexDim": 1
+    }
+  }
+]

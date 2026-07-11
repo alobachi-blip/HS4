@@ -309,6 +309,7 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
         eyebrow_color=card["eyebrow_color"],
         eyebrow_layout=card.get("eyebrow_layout") or DEFAULT_EYEBROW_LAYOUT,
         eyebrow_tilt=float(card.get("eyebrow_tilt", DEFAULT_EYEBROW_TILT)),
+        eyebrow_head_id=int(card.get("head_id") or 0),
         paint0=load_rgba(paint0.get("path") if paint0 else None),
         paint0_color=(paints[0] or {}).get("color", (1, 0, 0, 1)) if paints else (1, 0, 0, 1),
         paint1=load_rgba(paint1.get("path") if paint1 else None),

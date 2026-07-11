@@ -1,0 +1,19 @@
+{
+  "Texture3UV": [
+    0.01600022315979005,
+    0.09901998996734619,
+    1.206709861755371,
+    0.9981336891651154
+  ],
+  "Texture3Rotator": 0.029371440410614014,
+  "brow_verts": 550,
+  "stamp_in_unit_fraction": 0.9327272727272727,
+  "stamp_uv_bbox": [
+    0.03858225792646408,
+    0.14176079630851746,
+    1.1508572101593018,
+    0.9021580219268799
+  ],
+  "panels": "L=vanilla UV1 formula on sheet (green); M=brow verts in UV1; R=OLD UV0-centered formula (red) \u2014 band risk",
+  "spec": "EYEBROW_UV_SPEC.md"
+}

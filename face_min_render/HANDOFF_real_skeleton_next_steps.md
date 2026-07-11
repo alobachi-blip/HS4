@@ -40,17 +40,11 @@
   - `o_eyelashes`：仍走 ChaList `st_eyelash_`；若 id 缺失（mod）則回退到 fo_head material MainTex。
   - 繪製順序：`tooth/tang → eyebase L/R → eyeshadow → eyelashes`。
 
-- **眉毛 matDraw（已完成）**：
-  - 卡讀 `eyebrowLayout` / `eyebrowTilt`（缺省 `ChaFileFace`：`(0.5,0.375,0.666,0.666)` / `0.5`）。
-  - `compose_face_tex.blend_eyebrow_matdraw`：對齊 `ChaControl.ChangeEyebrowLayout/Tilt`
-    （`dll_decompiled/AIChara/ChaControl.cs` ≈4336）→ `_Texture3UV` / `_Texture3Rotator`
-    （`ChaShader.Eyebrow*`）。公式：`ox=Lerp(-0.2,0.2,x)`，`oy=Lerp(0.16,0,y)`，
-    `sx/sy=Lerp(2,0.5,z/w)`，`rot=Lerp(-0.15,0.15,tilt)`。
-  - UV：mesh 空間（`render._sample_tex` 的 `v_img=1-mesh_v`）→ 繞 0.5 旋轉 →
-    中心 scale → **減** offset；垂直位置用 `fo_head` brow-ridge UV（~mesh_v 0.52）對
-    `c_t_eyebrow_*` stamp 校過。覆蓋用 RGB 剪影（stock 灰階；`min(RGB)` 等於 R，並能容忍
-    部分 DLC 非黑 clear）。**不要**再走 `blend_addtex`（會把 UV clip 後的 A 誤當 coverage）。
-  - list-resolve 失敗（如 Kana brow 704）仍 skip，不 crash。
+- **眉毛 matDraw（進行中）**：已抽出 `AIT/Skin True Face` 並寫入
+  `research/skin_true_face/EYEBROW_UV_SPEC.md`（UV1 + offset→rotate(0.3,0.4)→scale(0.1,0.43)；
+  rotator×π；coverage=tex.g；無 shader U-mirror）。`blend_eyebrow_matdraw` 已改按該式
+  把 UV1 柵格化進 UV0 albedo。**Albedo 可見兩道眉**；3D 正面仍偏三角面塊（bake
+  解析度／應改 runtime 按 UV1 取樣）。見下「眉毛卡關」。
 
 - **驗證結果**：三張測試卡（Kawamoto_Nanako / Aragaki_Yoko / Kana）現在依各自
   `shapeValueFace` 產生**真的不同**頭型；`o_head` + `o_eyebase_L/R` + `o_eyelashes` +
@@ -63,6 +57,51 @@
   ```
   輸出在 `output/from_cards_textured/TEST_sheet_three_cards.png`。
 
+## 眉毛卡關（寫清楚，下一步別再猜）
+
+現象：舊實作（UV0 + 中心 0.5 scale）成眼上橫帶。現依 shader 原文改 UV1 公式後，
+**compose albedo 已有兩道眉形**；3D 正面仍偏 faceted 色塊（非整臉橫帶）。DoD「清楚眉」
+未完全過——品質債在 bake→UV0，不是再猜 offset 符號。
+
+### 已確認（有權威來源，可留）
+
+1. ChaControl 寫入公式（`ChaControl.cs` ≈4336）：
+   - layout xy → offset `Lerp(-0.2,0.2,*)` / `Lerp(0.16,0,*)`
+   - layout zw → scale `Lerp(2,0.5,*)`
+   - tilt → rotator `Lerp(-0.15,0.15,*)` → `_Texture3Rotator`
+2. 屬性名：`ChaShader` EyebrowTex/Color/Layout/Tilt = `_Texture3` / `_Color3` /
+   `_Texture3UV` / `_Texture3Rotator`；shader 註解 `_Texture3UV (tx,ty,sx,sy)`。
+3. 眉毛在 **matDraw**（執行期 face shader），**不在** `CreateFaceTexture` bake。
+4. stock `st_eyebrow` 多為 DXT1、A≡1、白描邊在黑底（灰階 RGB 剪影）；`c_t_eyebrow_17`
+   清成紅底（R 高），不能當純 R-mask。
+5. 離線 renderer：`render._sample_tex` 用 `v_img = 1 - mesh_v`。
+6. `fo_head` brow-ridge 附近 mesh UV0 ≈ `v 0.52`；**眉毛取樣基底是 UV1**（≠ UV0）。
+
+### 已鎖定（shader 原文 — 見 `research/skin_true_face/EYEBROW_UV_SPEC.md`）
+
+| 項 | 鎖定內容 | 引用 |
+|----|----------|------|
+| UV 精確式 | `uv = UV1 + (tx,ty)`；繞 **(0.3,0.4)** 旋轉；繞 **(0.1,0.43)** scale（`uv*s+(s-1)*(-0.1,-0.43)`）。**非** TRANSFORM_TEX，**非** 中心 0.5 | vanilla `dxbc/pass0_fp_32.hlsl` L158–170 |
+| Rotator | `sincos(rot * π)`；rotate 在 offset 後、scale 前 | 同上 L158–159 |
+| Color3U/V/Power | material 孤兒預設 1；**PropInfo／PS 未用** | `export.txt`；FP HLSL 無引用 |
+| Coverage | `tex.g`（Hanmen）；stock 灰階 ≡ R | Hanmen `hanmen_face/fp0.hlsl` L138–143 |
+| 左右兩眉 | **無** shader U-mirror；靠 mesh UV1 雙側展開同一 stamp 島 | vanilla/Hanmen 無 `abs(0.5-u)` 於 Texture3 路徑；`inspect_head_uvs` |
+| V 方向 | mesh V 向上；UnityPy PNG 列=`1-v` | 與既有 renderer 一致 |
+
+旁證：Hanmen Next-Gen Face 替換 AIT 且保留同名 `_Texture3*` 屬性（Shader Helper）。
+
+### 曾踩的坑（不要再走）
+
+- 把 layout 後的圖丟回 `blend_addtex`：UV clip 讓 A 不再全 1 → 誤走 A-coverage → 整臉塗色。
+- 宣稱「已完成」但正面仍是眼上橫帶——**視覺 DoD 未過**。
+- 在沒有 shader 原文時用社群「mirrored eyebrows」發明 U 折疊——未採用，因無 DLL／shader 依據。
+- **用 UV0 + 中心 0.5 scale／減 offset 碰運氣**——已證明與 DXBC 不符。
+
+### 建議下一步（品質，非再猜 UV）
+
+1. Runtime／painter 按 **UV1** 取樣 `_Texture3`（勿再 bake 進 UV0），消除三角面塊。
+2. 紅紙 DLC 的 bake 閾值改為可選；权威路徑保持 `tex.g * Color3.a`。
+
 ## 還沒做的（依優先順序）
 
 1. ~~`o_eyeshadow` 真材質貼圖~~ **已完成**。
@@ -70,7 +109,8 @@
 3. **嘴巴內部穿模（側視）**：暫用 `skip_side=True` 讓側視不畫 `o_tooth`/`o_tang`（正面仍畫）。
    根因仍在（painter 深度 + 閉口內部 mesh）。之後可改成依嘴開合 shape 隱藏／裁切，
    或只畫落在口腔 AABB 內的面，再拿掉 skip_side。
-4. ~~**眉毛 `ChangeEyebrowLayout` UV**~~ **已完成**（見上；入口 `blend_eyebrow_matdraw`）。
+4. **眉毛 `ChangeEyebrowLayout` UV**：**式已鎖定**（`EYEBROW_UV_SPEC.md`）；albedo bake 已接 UV1。
+   3D 清楚度未完全過 DoD——下一步改 runtime UV1 取樣，勿再猜 offset。
 5. **mod 資源缺失**（Kana 的睫毛 id `666012`、眉毛 id `704` 在 `D:\HS2 - Copy` 裡查不到）：
    這不是 bug，是我們的清單解析器（`compose_face_tex.find_list_entry`）只掃
    `abdata/list/characustom/*.unity3d`，沒有合併 BepInEx/Sideloader 的 mod 清單。
