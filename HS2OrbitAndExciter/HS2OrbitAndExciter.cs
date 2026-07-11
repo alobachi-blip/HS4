@@ -73,6 +73,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountStart;
         /// <summary>Last custom pulse volume weight.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
+        /// <summary>When true, inside finish grows PregnancyPlus H-scene belly (cumflation).</summary>
+        internal static ConfigEntry<bool>? CumflationEnabled;
         /// <summary>Advance H voice banks by orgasm / houshi male finish (session overlay; card stats unchanged).</summary>
         internal static ConfigEntry<bool>? VoiceTourEnabled;
         /// <summary>Hits (female orgasm or houshi male finish) required per voice stage.</summary>
@@ -170,6 +172,8 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("First custom pulse volume weight.", new AcceptableValueRange<float>(0.2f, 24f)));
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
                 new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
+            CumflationEnabled = Config.Bind("Orbit", "CumflationEnabled", true,
+                "When true, each inside finish grows PregnancyPlus H-scene belly one level (HS2Inflation). R still clears.");
             VoiceTourEnabled = Config.Bind("VoiceTour", "VoiceTourEnabled", true,
                 "H voice tour: cycle Blank→Favor→…→Dependence→Broken by orgasm/houshi finish. Does not write card Favor/etc.");
             VoiceTourHitsPerStage = Config.Bind("VoiceTour", "VoiceTourHitsPerStage", 1,
@@ -215,6 +219,12 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AutoStartProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AfterTheInsideWaitingProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Sonyu_AutoAfterTheInsideWaitingProc));
+            PatchSafe(harmony, typeof(Patches.OrbitAutoAfterIdleRestartPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitAutoIdleStartPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitForceSonyuAutoAfterIdlePatch));
+            PatchSafe(harmony, typeof(Patches.OrbitForceSonyuManualAfterIdlePatch));
+            PatchSafe(harmony, typeof(Patches.OrbitForceF2M1AutoAfterIdlePatch));
+            PatchSafe(harmony, typeof(Patches.OrbitForceF1M2AutoAfterIdlePatch));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProcTrigger));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_FaintnessStartProcTrigger));

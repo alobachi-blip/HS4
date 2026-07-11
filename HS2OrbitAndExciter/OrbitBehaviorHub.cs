@@ -1,3 +1,4 @@
+using System.Reflection;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
@@ -6,14 +7,16 @@ using UnityEngine.EventSystems;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Centralized strategy, throttling, and gates for orbit assist writes to <see cref="HSceneFlagCtrl"/>.
-    /// Scene state queries live in <see cref="OrbitHelpers"/>; this class composes them with config and timers.
+    /// Assist strategy, throttling, selection sanitize/recovery.
+    /// <see cref="CanAutoAdvance"/> is the single gate for auto-action / checkpoint.
+    /// Only this class clears <c>selectAnimationListInfo</c> via <see cref="ClearSelection"/>.
     /// </summary>
     internal static class OrbitBehaviorHub
     {
         private const float ManualSelectionSuppressSeconds = 3.0f;
         private const float OrbitAutoActionGraceSeconds = 2.5f;
         private const float AutoActionNullSelectionMinSeconds = 1.5f;
+        private const float OrgasmAssistQuietSeconds = 2.0f;
 
         private static float _manualSelectionSuppressUntilUnscaled = -1f;
         private static float _orbitAutoActionGraceUntilUnscaled = -1f;
@@ -21,16 +24,27 @@ namespace HS2OrbitAndExciter
         private static float _checkpointInvokeCooldownUntilUnscaled = -1f;
         private static float _lastAssistFlagPushTimeUnscaled = -999f;
         private static float _lastCheckpointInvokeTimeUnscaled = -999f;
+        private static float _orgasmAssistQuietUntilUnscaled = -1f;
 
         private static bool _orbitAssistActive;
         private static float _checkpointIdleTime;
+        private static MethodInfo? _getAutoAnimationMethod;
+        private static FieldInfo? _isAutoActionChangeField;
+        private static PropertyInfo? _isAutoActionChangeProp;
         private static float _wheelBypassStartUnscaled = -1f;
 
         private static float _selectionListStuckSinceUnscaled = -1f;
+        private static float _nowChangeStuckSinceUnscaled = -1f;
+        /// <summary>User/cycle requested leave of AfterIdle/Idle; active until this unscaled time.</summary>
+        private static float _motionEscapeUntilUnscaled = -1f;
+        private static string _motionEscapeReason = "";
 
         internal const float WheelBypassValue = 0.10f;
         internal const float WheelBypassDelaySeconds = 2f;
         internal const float StaleSelectionClearSeconds = 8f;
+        /// <summary>How long L/wheel/cycle escape stays armed for IsStart/IsReStart patches.</summary>
+        internal const float MotionEscapeWindowSeconds = 1.5f;
+        internal const float IdleStaleSelectionClearSeconds = 2.0f;
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
 
@@ -39,7 +53,6 @@ namespace HS2OrbitAndExciter
             _manualSelectionSuppressUntilUnscaled = Time.unscaledTime + ManualSelectionSuppressSeconds;
         }
 
-        /// <summary>After G/H/J hotkey: reset assist timers and one-shot kick auto-action (not a UI click suppress).</summary>
         internal static void NotifyManualHotkeyCompleted(HScene? hScene)
         {
             ResetNullSelectionTracking();
@@ -56,7 +69,7 @@ namespace HS2OrbitAndExciter
 
         private static void TryKickAutoActionAfterManualHotkey(HSceneFlagCtrl ctrlFlag)
         {
-            if (ShouldSuppressAssist(ctrlFlag, out _))
+            if (!CanAutoAdvance(ctrlFlag, out _))
                 return;
             if (ctrlFlag.selectAnimationListInfo != null)
                 return;
@@ -66,7 +79,7 @@ namespace HS2OrbitAndExciter
             {
                 Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
             }
-            catch { }
+            catch { /* ignore */ }
         }
 
         internal static void NotifyUiHoverWhileOrbit()
@@ -76,11 +89,42 @@ namespace HS2OrbitAndExciter
                 _manualSelectionSuppressUntilUnscaled = hoverUntil;
         }
 
+        internal static void NotifyFemaleOrgasm(HSceneFlagCtrl? ctrlFlag)
+        {
+            if (ctrlFlag == null)
+                return;
+
+            BeginOrgasmAssistQuiet();
+            ResetNullSelectionTracking();
+
+            OrbitOrgasmTattoo.OnOrgasm(ctrlFlag);
+            OrbitOrgasmBustGrowth.OnOrgasm(ctrlFlag);
+            OrbitOrgasmNippleSpray.OnOrgasm(ctrlFlag);
+            OrbitVoiceTour.OnFemaleOrgasm();
+        }
+
+        internal static void NotifyVoiceTourHit(string triggerLabel)
+        {
+            BeginOrgasmAssistQuiet();
+            _ = triggerLabel;
+        }
+
+        private static void BeginOrgasmAssistQuiet()
+        {
+            _orgasmAssistQuietUntilUnscaled = Time.unscaledTime + OrgasmAssistQuietSeconds;
+            _checkpointIdleTime = 0f;
+        }
+
         internal static void NotifyOrbitToggled(bool active)
         {
             _orbitAssistActive = active;
             _checkpointIdleTime = 0f;
             _wheelBypassStartUnscaled = -1f;
+            _orgasmAssistQuietUntilUnscaled = -1f;
+            _selectionListStuckSinceUnscaled = -1f;
+            _nowChangeStuckSinceUnscaled = -1f;
+            _motionEscapeUntilUnscaled = -1f;
+            _motionEscapeReason = "";
             if (active)
             {
                 _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
@@ -88,7 +132,6 @@ namespace HS2OrbitAndExciter
                 _autoActionNullSelectionSinceUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
-                _selectionListStuckSinceUnscaled = -1f;
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitStatusHud.NotifyOrbitActivated();
@@ -100,77 +143,160 @@ namespace HS2OrbitAndExciter
                 _checkpointInvokeCooldownUntilUnscaled = -1f;
                 _lastAssistFlagPushTimeUnscaled = -999f;
                 _lastCheckpointInvokeTimeUnscaled = -999f;
-                _selectionListStuckSinceUnscaled = -1f;
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
             }
         }
 
-        internal static bool ShouldSuppressAssist(HSceneFlagCtrl? ctrlFlag, out string reason)
+        /// <summary>
+        /// Single gate for auto-action flag push and checkpoint GetAutoAnimation.
+        /// PosePending does NOT block. Does not clear initiative when false.
+        /// </summary>
+        internal static bool CanAutoAdvance(HSceneFlagCtrl? ctrlFlag, out string reason)
         {
-            if (OrbitPoseDirector.IsTransitionActive)
-            {
-                reason = "poseTransition";
-                return true;
-            }
             if (OrbitManualDirector.IsBusy)
             {
-                reason = "manualBusy";
-                return true;
+                reason = OrbitAssistReasons.ManualBusy;
+                return false;
+            }
+
+            var phase = OrbitPoseDirector.Phase;
+            if (phase == DirectorState.Changing)
+            {
+                reason = OrbitAssistReasons.Changing;
+                return false;
+            }
+            if (phase == DirectorState.Rebinding)
+            {
+                reason = OrbitAssistReasons.Rebinding;
+                return false;
+            }
+            if (phase == DirectorState.PoseQueued
+                || (ctrlFlag != null && ctrlFlag.selectAnimationListInfo != null))
+            {
+                reason = OrbitAssistReasons.PoseQueued;
+                return false;
+            }
+
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene != null && hScene.NowChangeAnim)
+            {
+                reason = OrbitAssistReasons.Changing;
+                return false;
+            }
+
+            if (ctrlFlag != null && ctrlFlag.nowOrgasm)
+            {
+                reason = OrbitAssistReasons.NowOrgasm;
+                return false;
+            }
+            if (Time.unscaledTime < _orgasmAssistQuietUntilUnscaled)
+            {
+                reason = OrbitAssistReasons.OrgasmQuiet;
+                return false;
             }
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
-                reason = "pointerOverUi";
-                return true;
+                reason = OrbitAssistReasons.PointerOverUi;
+                return false;
             }
             if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
             {
-                reason = "orbitStartGrace";
-                return true;
+                reason = OrbitAssistReasons.OrbitStartGrace;
+                return false;
             }
             if (ctrlFlag != null && ctrlFlag.inputForcus)
             {
-                reason = "inputForcus";
-                return true;
-            }
-            if (ctrlFlag != null && ctrlFlag.selectAnimationListInfo != null)
-            {
-                reason = "selectionListPresent";
-                return true;
+                reason = OrbitAssistReasons.InputForcus;
+                return false;
             }
             if (Input.GetMouseButton(0))
             {
-                reason = "mouseHolding";
-                return true;
+                reason = OrbitAssistReasons.MouseHolding;
+                return false;
             }
             if (Time.unscaledTime < _manualSelectionSuppressUntilUnscaled)
             {
-                reason = "recentUiClick";
-                return true;
+                reason = OrbitAssistReasons.RecentUiClick;
+                return false;
             }
-            reason = "none";
-            return false;
+
+            reason = OrbitAssistReasons.None;
+            return true;
         }
 
-        /// <summary>Seconds until orbit-start auto-action grace ends (0 if not in grace).</summary>
+        /// <summary>Cycle may write sel when UI/orgasm allow; PosePending does not block.</summary>
+        internal static bool CanQueueCyclePose(HSceneFlagCtrl? ctrlFlag, out string reason)
+        {
+            if (OrbitManualDirector.IsBusy)
+            {
+                reason = OrbitAssistReasons.ManualBusy;
+                return false;
+            }
+            if (ctrlFlag != null && ctrlFlag.nowOrgasm)
+            {
+                reason = OrbitAssistReasons.NowOrgasm;
+                return false;
+            }
+            if (Time.unscaledTime < _orgasmAssistQuietUntilUnscaled)
+            {
+                reason = OrbitAssistReasons.OrgasmQuiet;
+                return false;
+            }
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                reason = OrbitAssistReasons.PointerOverUi;
+                return false;
+            }
+            if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
+            {
+                reason = OrbitAssistReasons.OrbitStartGrace;
+                return false;
+            }
+            if (ctrlFlag != null && ctrlFlag.inputForcus)
+            {
+                reason = OrbitAssistReasons.InputForcus;
+                return false;
+            }
+            if (Input.GetMouseButton(0))
+            {
+                reason = OrbitAssistReasons.MouseHolding;
+                return false;
+            }
+            if (Time.unscaledTime < _manualSelectionSuppressUntilUnscaled)
+            {
+                reason = OrbitAssistReasons.RecentUiClick;
+                return false;
+            }
+            reason = OrbitAssistReasons.None;
+            return true;
+        }
+
+        /// <summary>Backward-compatible alias: true when auto-advance must not run.</summary>
+        internal static bool ShouldSuppressAssist(HSceneFlagCtrl? ctrlFlag, out string reason) =>
+            !CanAutoAdvance(ctrlFlag, out reason);
+
+        internal static float RemainingOrgasmQuietSeconds()
+        {
+            if (_orgasmAssistQuietUntilUnscaled < 0f) return 0f;
+            return Mathf.Max(0f, _orgasmAssistQuietUntilUnscaled - Time.unscaledTime);
+        }
+
         internal static float RemainingOrbitStartGraceSeconds()
         {
             if (_orbitAutoActionGraceUntilUnscaled < 0f) return 0f;
             return Mathf.Max(0f, _orbitAutoActionGraceUntilUnscaled - Time.unscaledTime);
         }
 
-        /// <summary>Seconds until post-UI-click suppress ends (0 if not active).</summary>
         internal static float RemainingManualUiSuppressSeconds()
         {
             if (_manualSelectionSuppressUntilUnscaled < 0f) return 0f;
             return Mathf.Max(0f, _manualSelectionSuppressUntilUnscaled - Time.unscaledTime);
         }
 
-        /// <summary>Defer orbit Q/W/E focus hotkeys when game uses the same keys (vanilla <c>HScene.ShortcutKey</c> path).</summary>
         internal static bool ShouldDeferOrbitFocusHotkeysToGame(HSceneFlagCtrl? ctrlFlag) =>
             ctrlFlag != null && ctrlFlag.inputForcus;
 
-        /// <summary>Whether orbit may add feel_f / speed this frame (prep countdown excludes; then action loop only).</summary>
         internal static bool CanAccumulateFeelDuringOrbit(HScene? hScene, bool waitingForPrepStart)
         {
             if (waitingForPrepStart) return false;
@@ -199,12 +325,12 @@ namespace HS2OrbitAndExciter
                 float elapsed = Time.unscaledTime - _lastAssistFlagPushTimeUnscaled;
                 if (elapsed < minInterval)
                 {
-                    reason = "assistInterval";
+                    reason = OrbitAssistReasons.AssistInterval;
                     return false;
                 }
             }
             _lastAssistFlagPushTimeUnscaled = Time.unscaledTime;
-            reason = "none";
+            reason = OrbitAssistReasons.None;
             return true;
         }
 
@@ -228,7 +354,7 @@ namespace HS2OrbitAndExciter
         {
             if (IsCheckpointInvokeOnLegacyCooldown())
             {
-                reason = "checkpointLegacyCooldown";
+                reason = OrbitAssistReasons.CheckpointLegacyCooldown;
                 return false;
             }
 
@@ -238,27 +364,75 @@ namespace HS2OrbitAndExciter
                 float elapsed = Time.unscaledTime - _lastCheckpointInvokeTimeUnscaled;
                 if (elapsed < minInterval)
                 {
-                    reason = "checkpointInterval";
+                    reason = OrbitAssistReasons.CheckpointInterval;
                     return false;
                 }
             }
 
             _lastCheckpointInvokeTimeUnscaled = Time.unscaledTime;
-            reason = "none";
+            reason = OrbitAssistReasons.None;
             return true;
         }
 
-        /// <summary>B1: auto-action assist no longer sets isAutoActionChange (no pose change via GetAutoAnimation).</summary>
+        /// <summary>
+        /// Sole owner of clearing selectAnimationListInfo (and optional NowChangeAnim stuck).
+        /// Notifies Director afterward. May clear isAutoActionChange on the selection only.
+        /// </summary>
+        internal static void ClearSelection(HScene? hScene, string reason, bool forceClearNowChangeAnim = false)
+        {
+            var ctrlFlag = hScene?.ctrlFlag;
+            int id = -1;
+            int down = -1;
+            if (ctrlFlag?.selectAnimationListInfo != null)
+            {
+                id = ctrlFlag.selectAnimationListInfo.id;
+                down = ctrlFlag.selectAnimationListInfo.nDownPtn;
+                ctrlFlag.selectAnimationListInfo = null;
+                ctrlFlag.isAutoActionChange = false;
+            }
+
+            if (forceClearNowChangeAnim && hScene != null)
+            {
+                try
+                {
+                    Traverse.Create(hScene).Field("nowChangeAnim").SetValue(false);
+                }
+                catch
+                {
+                    try { Traverse.Create(hScene).Property("NowChangeAnim").SetValue(false); }
+                    catch { /* ignore */ }
+                }
+            }
+
+            _selectionListStuckSinceUnscaled = -1f;
+            _nowChangeStuckSinceUnscaled = -1f;
+            OrbitPoseDirector.NotifySelectionCleared();
+            OrbitStateMachineLog.Event("stale_sel", reason,
+                "{\"id\":" + id + ",\"down\":" + down + "}");
+        }
+
+        /// <summary>P0: drop illegal faintness selection immediately. Returns true if cleared.</summary>
+        internal static bool SanitizeSelectedPose(HScene? hScene)
+        {
+            var ctrlFlag = hScene?.ctrlFlag;
+            if (ctrlFlag?.selectAnimationListInfo == null)
+                return false;
+            if (OrbitHelpers.IsPoseAllowedUnderFaintness(ctrlFlag.selectAnimationListInfo, ctrlFlag))
+                return false;
+
+            ClearSelection(hScene, OrbitAssistReasons.ClearedFaintnessInvalid);
+            return true;
+        }
+
+        /// <summary>Single path for auto-action assist. Does not clear initiative when gated off.</summary>
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
             if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
                 return false;
             if (ctrlFlag == null)
                 return false;
-            if (ShouldSuppressAssist(ctrlFlag, out _))
+            if (!CanAutoAdvance(ctrlFlag, out _))
             {
-                ctrlFlag.isAutoActionChange = false;
-                ctrlFlag.initiative = 0;
                 ResetNullSelectionTracking();
                 return false;
             }
@@ -267,10 +441,31 @@ namespace HS2OrbitAndExciter
                 ResetNullSelectionTracking();
                 return false;
             }
-            return false;
+            if (!IsNullSelectionReadyForAssist())
+                return false;
+            if (!TryConsumeAssistFlagPush(out _))
+                return false;
+
+            var flagType = ctrlFlag.GetType();
+            if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
+            {
+                _isAutoActionChangeField = flagType.GetField("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_isAutoActionChangeField == null)
+                    _isAutoActionChangeProp = flagType.GetProperty("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            }
+            try
+            {
+                if (_isAutoActionChangeField != null)
+                    _isAutoActionChangeField.SetValue(ctrlFlag, true);
+                else
+                    _isAutoActionChangeProp?.SetValue(ctrlFlag, true, null);
+            }
+            catch { /* ignore */ }
+            Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
+            OrbitStateMachineLog.Event("assist", "push_auto_action");
+            return true;
         }
 
-        /// <summary>B1: checkpoint only bumps speed when idle-stuck; no GetAutoAnimation pose change.</summary>
         internal static void TickOrbitCheckpointAssist(HScene? hScene, float deltaTime)
         {
             float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
@@ -283,13 +478,12 @@ namespace HS2OrbitAndExciter
                 _checkpointIdleTime = 0f;
                 return;
             }
-            if (ShouldSuppressAssist(ctrlFlag, out _))
+            if (!CanAutoAdvance(ctrlFlag, out _))
             {
                 _checkpointIdleTime = 0f;
                 return;
             }
-            var sel = Traverse.Create(ctrlFlag).Property("selectAnimationListInfo").GetValue();
-            if (sel != null)
+            if (ctrlFlag.selectAnimationListInfo != null)
             {
                 _checkpointIdleTime = 0f;
                 ResetCheckpointInvokeCooldown();
@@ -309,19 +503,62 @@ namespace HS2OrbitAndExciter
             if (!TryConsumeCheckpointInvoke(out _))
                 return;
 
+            if (_getAutoAnimationMethod == null)
+            {
+                _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_getAutoAnimationMethod == null)
+                    return;
+            }
             try
             {
-                const float FallbackSpeedBump = 1.2f;
-                Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
+                _getAutoAnimationMethod.Invoke(hScene, new object[] { false });
+                if (ctrlFlag.selectAnimationListInfo == null)
+                    _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
             }
-            catch { }
+            catch { /* ignore */ }
+
+            // P0: same-frame sanitize — never leave nDownPtn==0 under faintness.
+            if (SanitizeSelectedPose(hScene))
+            {
+                OrbitStateMachineLog.Event("checkpoint", "get_auto_sanitized_faint");
+                MarkCheckpointInvokeLegacyCooldown(timeout);
+                return;
+            }
+
             MarkCheckpointInvokeLegacyCooldown(timeout);
+
+            bool hasSelAfter = ctrlFlag.selectAnimationListInfo != null;
+            if (hasSelAfter)
+                OrbitPoseDirector.SyncFromGameFlags(hScene);
+
+            OrbitStateMachineLog.Event("checkpoint", hasSelAfter ? "get_auto_ok" : "get_auto_empty_speed_bump");
+            if (!hasSelAfter)
+            {
+                try
+                {
+                    const float FallbackSpeedBump = 1.2f;
+                    Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
+                }
+                catch { /* ignore */ }
+            }
         }
 
-        /// <summary>Orbit wheel bypass: delay then inject small wheel value when animator gate allows.</summary>
         internal static bool TryInjectOrbitWheelBypass(ref float wheel)
         {
             if (!IsOrbitAssistActive() || wheel != 0f)
+            {
+                _wheelBypassStartUnscaled = -1f;
+                return false;
+            }
+            // Long waits (bath/toilet/AfterIdle/Idle): never auto-fake-wheel by timer.
+            // Only after L / real scroll / cycle pose armed escape.
+            if (!IsMotionEscapeArmed())
+            {
+                _wheelBypassStartUnscaled = -1f;
+                return false;
+            }
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene?.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
             {
                 _wheelBypassStartUnscaled = -1f;
                 return false;
@@ -331,51 +568,179 @@ namespace HS2OrbitAndExciter
                 _wheelBypassStartUnscaled = -1f;
                 return false;
             }
-            if (_wheelBypassStartUnscaled < 0f)
-                _wheelBypassStartUnscaled = Time.unscaledTime;
-            float elapsed = Time.unscaledTime - _wheelBypassStartUnscaled;
-            if (elapsed < WheelBypassDelaySeconds)
-                return false;
+            // Armed: inject immediately (no 2s delay) so Manual AfterIdle advances same gesture.
             _wheelBypassStartUnscaled = -1f;
             wheel = WheelBypassValue;
             return true;
         }
 
         /// <summary>
-        /// Clear a stuck <see cref="HSceneFlagCtrl.selectAnimationListInfo"/> when the game never started ChangeAnimation
-        /// (common after duplicate-id picks or interrupted coroutines). Prevents permanent assist suppress.
+        /// Arm leave of long AfterIdle/Idle (bath/toilet etc.) so user can watch until
+        /// L, real mouse wheel, or cycle pose-change asks to advance.
         /// </summary>
+        internal static void RequestMotionEscape(string reason)
+        {
+            if (!_orbitAssistActive)
+                return;
+            _motionEscapeUntilUnscaled = Time.unscaledTime + MotionEscapeWindowSeconds;
+            _motionEscapeReason = reason ?? "";
+            OrbitStateMachineLog.Event("escape", "request",
+                "{\"reason\":\"" + (_motionEscapeReason.Replace("\"", "") ?? "") + "\"}");
+        }
+
+        internal static bool IsMotionEscapeArmed() =>
+            _orbitAssistActive && Time.unscaledTime < _motionEscapeUntilUnscaled;
+
+        /// <summary>True only when escape armed and female is in AfterIdle (bath/toilet/post-orgasm wait).</summary>
+        internal static bool ShouldForceAfterIdleEscape()
+        {
+            if (!IsMotionEscapeArmed())
+                return false;
+            var hScene = OrbitController.TryGetHScene();
+            return hScene != null && OrbitHelpers.IsFirstFemaleInAfterIdle(hScene);
+        }
+
+        /// <summary>True only when escape armed and female is in Idle (Auto IsStart gate).</summary>
+        internal static bool ShouldForceIdleEscape()
+        {
+            if (!IsMotionEscapeArmed())
+                return false;
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene))
+                return false;
+            if (hScene.NowChangeAnim)
+                return false;
+            return true;
+        }
+
+        /// <summary>If armed and still in AfterIdle, force WLoop/D_WLoop.</summary>
+        internal static void TickAfterIdleEscape(HScene? hScene)
+        {
+            if (hScene == null || !ShouldForceAfterIdleEscape())
+                return;
+
+            var ctrlFlag = hScene.ctrlFlag;
+            bool faint = ctrlFlag != null && ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2;
+            string anim = faint ? "D_WLoop" : "WLoop";
+
+            if (!TryForceFemaleAnim(hScene, anim))
+                return;
+
+            if (ctrlFlag != null)
+            {
+                ctrlFlag.speed = 1f;
+                ctrlFlag.nowOrgasm = false;
+                try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
+            }
+
+            OrbitStateMachineLog.Event("afteridle", "force_cha_setPlay",
+                "{\"anim\":\"" + anim + "\",\"reason\":\"" + _motionEscapeReason + "\"}");
+        }
+
+        /// <summary>If armed and still in Idle, force WLoop/D_WLoop.</summary>
+        internal static void TickIdleEscape(HScene? hScene)
+        {
+            if (hScene == null || !ShouldForceIdleEscape())
+                return;
+
+            var ctrlFlag = hScene.ctrlFlag;
+            bool faint = ctrlFlag != null && ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2;
+            string anim = faint ? "D_WLoop" : "WLoop";
+
+            if (!TryForceFemaleAnim(hScene, anim))
+                return;
+
+            if (ctrlFlag != null)
+            {
+                ctrlFlag.speed = 1f;
+                try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
+                ctrlFlag.isAutoActionChange = true;
+                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+            }
+
+            OrbitStateMachineLog.Event("idle", "force_cha_setPlay",
+                "{\"anim\":\"" + anim + "\",\"reason\":\"" + _motionEscapeReason + "\"}");
+        }
+
+        /// <summary>Real mouse wheel (not fake bypass) while orbit: arm escape from long waits.</summary>
+        internal static void TickUserWheelEscape()
+        {
+            if (!_orbitAssistActive)
+                return;
+            float axis = Input.GetAxis("Mouse ScrollWheel");
+            if (Mathf.Abs(axis) < 0.01f)
+                return;
+            RequestMotionEscape("wheel");
+        }
+
+        private static bool TryForceFemaleAnim(HScene hScene, string anim)
+        {
+            var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
+            if (cha == null) return false;
+            try
+            {
+                cha.setPlay(anim, 0);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Recovery entry: sanitize, stale sel, stuck NowChangeAnim.</summary>
         internal static void TickStaleSelectionRecovery(HScene? hScene)
         {
             if (hScene == null)
             {
                 _selectionListStuckSinceUnscaled = -1f;
+                _nowChangeStuckSinceUnscaled = -1f;
                 return;
             }
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
             {
                 _selectionListStuckSinceUnscaled = -1f;
+                _nowChangeStuckSinceUnscaled = -1f;
                 return;
             }
+
+            if (SanitizeSelectedPose(hScene))
+                return;
+
+            if (hScene.NowChangeAnim)
+            {
+                _selectionListStuckSinceUnscaled = -1f;
+                if (_nowChangeStuckSinceUnscaled < 0f)
+                    _nowChangeStuckSinceUnscaled = Time.unscaledTime;
+                else if (Time.unscaledTime - _nowChangeStuckSinceUnscaled
+                         >= OrbitPoseDirector.TransitionTimeoutSeconds)
+                {
+                    ClearSelection(hScene, OrbitAssistReasons.ClearedNowChangeStuck, forceClearNowChangeAnim: true);
+                }
+                return;
+            }
+
+            _nowChangeStuckSinceUnscaled = -1f;
+
             if (ctrlFlag.selectAnimationListInfo == null)
             {
                 _selectionListStuckSinceUnscaled = -1f;
                 return;
             }
-            if (hScene.NowChangeAnim)
-            {
-                _selectionListStuckSinceUnscaled = -1f;
-                return;
-            }
+
+            // Only accelerate clear while user/cycle asked to leave a wait state.
+            float clearSec = IsMotionEscapeArmed()
+                             && (OrbitHelpers.IsFirstFemaleInIdle(hScene)
+                                 || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+                ? IdleStaleSelectionClearSeconds
+                : StaleSelectionClearSeconds;
 
             if (_selectionListStuckSinceUnscaled < 0f)
                 _selectionListStuckSinceUnscaled = Time.unscaledTime;
-            else if (Time.unscaledTime - _selectionListStuckSinceUnscaled >= StaleSelectionClearSeconds)
+            else if (Time.unscaledTime - _selectionListStuckSinceUnscaled >= clearSec)
             {
-                ctrlFlag.selectAnimationListInfo = null;
-                ctrlFlag.isAutoActionChange = false;
-                _selectionListStuckSinceUnscaled = -1f;
+                ClearSelection(hScene, OrbitAssistReasons.ClearedAfterTimeout);
             }
         }
     }

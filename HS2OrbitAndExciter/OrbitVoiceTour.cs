@@ -206,6 +206,7 @@ namespace HS2OrbitAndExciter
                     _lastTrigger = "內射";
                     RegisterHit();
                 }
+                PregnancyPlusAssist.TryInflateOnInside(hScene);
             }
             else
                 _lastInsideSum = inside;
@@ -262,6 +263,8 @@ namespace HS2OrbitAndExciter
 
         private static void RegisterHit()
         {
+            OrbitBehaviorHub.NotifyVoiceTourHit(_lastTrigger);
+
             _hitsInStage++;
             if (_hitsInStage < HitsPerStage)
             {

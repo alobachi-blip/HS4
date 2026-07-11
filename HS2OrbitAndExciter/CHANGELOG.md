@@ -1,5 +1,60 @@
 # HS2OrbitAndExciter 變更紀錄
 
+## 2026-07-12
+
+### 行為：長動作可欣賞，按需才脫離
+
+- 洗澡／入廁／高潮後 AfterIdle、Idle 等長等待：**不再**用 2 秒假滾輪自動脫離。
+- 僅在下列條件 **armed** `RequestMotionEscape` 後才強制 `IsReStart`／`IsStart`／`setPlay`：
+  - **L** 換姿
+  - **真實滑鼠滾輪**
+  - **迴轉換姿**：`ChangePoseOnCycle` 且滿 `OrbitCountBeforePoseChange` 次完整迴轉（預設 2；非計時）
+- FSM log：`escape`/`request`（reason=`L`|`wheel`|`cycle`）。
+
+### 功能：內射肚子變大（選單，預設開）
+
+- `CumflationEnabled`（預設 true）：`numInside` 增加時呼叫 Preg+ `HS2Inflation(false)` 升一級。
+- 選單開關：「內射時肚子變大」；R 仍清腹。
+
+### 修復：虛脫後卡 D_Orgasm_IN_A（Auto AfterIdle）
+
+- **根因**：環視協助設 `initiative≠0` → 走 `AutoAfterTheInsideWaitingProc`，**不看滾輪**，只等 `HAutoCtrl.IsReStart()`；假滾輪對此無效 → 卡在高潮後等待，L／自動換姿全滅。
+- **第一版疏漏**：`OrbitAutoAfterIdleRestartPatch` 寫了但**未** `PatchSafe` 註冊 → log 完全沒有 `afteridle` 事件。
+- **修法**：註冊 Harmony；脫離改為按需 armed（見上）；Manual 強制 `nextPlay`＋wheel；Hub 再備援 `ChaControl.setPlay`。
+
+### 重整：環視行為 FSM 契約（四層）
+
+- **Director phase 可觀測**：`PoseQueued`≡合法 sel 且非 NowChangeAnim；`Changing`≡NowChangeAnim；`PosePending`／`Rebinding` 為插件態。
+- **`CanAutoAdvance`** 取代糊成一團的 `poseTransition` suppress；**PosePending 不擋**自動協助，但仍 **凍結 Cycle 計數觸發**。
+- **清 sel 唯一入口**：`OrbitBehaviorHub.ClearSelection`；Director 只 Notify。checkpoint `GetAutoAnimation` **當幀 sanitize** 虛脫非法姿（P0）。
+- **External 跟蹤**：見合法 sel／NowChangeAnim 即進 Queued／Changing（不再只靠 nowAnimationInfo）。
+- Cycle：Queued／Changing **排隊不搶**；`ShouldFreezeCycleCounters` 含 Pending。
+- `CanAutoAdvance==false` **不再清** `initiative`／`isAutoActionChange`。
+- 硬逾時可跳過 Rebinding（解卡優先；焦點歪一幀不算回歸）。
+- 封閉 reason：`OrbitAssistReasons`；HUD／FSM／L fail 共用。AfterProc fallback 仍走同一 `TryPush`。
+
+### 修復：HUD 上移＋虛脫換姿＋FSM log
+
+- HUD 底邊上移約 176px（避開 Finish／跳出鈕列），高度上限略降，避免蓋住底部 UI。
+- **虛脫**：`PickNextPose` 只抽 `nDownPtn!=0`；卡在非法選姿時立刻清 `selectAnimationListInfo`（原版 `ChangeAnimation` 會直接 abort）。
+- 狀態機 NDJSON：`BepInEx/LogOutput/HS2OrbitAndExciter_fsm.ndjson`（每 0.5s SNAP＋suppress／director／虛脫／熱鍵／checkpoint 事件）。
+
+### 修復：環視鏡頭換姿時停轉
+
+- `PoseDirector` 換姿過渡不再暫停 yaw（只凍結迴轉計數／換姿觸發）；僅 G/H 重載才停轉。
+- 過渡卡住硬逾時 6s（含 `NowChangeAnim` 黏住），避免協助永久 suppress。
+
+### 高潮特效併入行為中心（防搶切換）
+
+- 刺青／胸部／乳頭潮吹／語音巡禮改由 `OrbitBehaviorHub.NotifyFemaleOrgasm` 統一分派（`AddOrgasm` Postfix 只進 Hub）。
+- 高潮期間：`nowOrgasm`＋約 2s quiet → **抑制**自動選段／checkpoint `GetAutoAnimation`（避免高潮動畫中硬換姿把切換器弄亂）；假滾輪僅在 `nowOrgasm` 擋，AfterIdle 仍可 bypass。
+- 語音巡禮侍奉射精／內射 hit 同樣開 quiet；L 在 `nowOrgasm` 時不接受。
+
+### 修復：L 換姿／自動推進／Idle 卡關
+
+- **根因**：`OrbitPoseDirector`（8bac10a）把 `TryPushOrbitAutoActionAssist` 改成永遠不設 `isAutoActionChange`，checkpoint 也不再呼叫 `GetAutoAnimation`；過渡狀態若沒跑完會永久卡在 `poseTransition`，連帶 L、自動協助、體感上的滾輪推進都失效。
+- **修復**：恢復自動選段旗標與 checkpoint `GetAutoAnimation`；Director 加卡住逾時／stale 清列表後重置；環視關閉時 L 不再留下未完成過渡；H 場景每幀做 stuck recovery。
+
 ## 2026-07-11
 
 ### 高潮語音巡禮（VoiceTour）

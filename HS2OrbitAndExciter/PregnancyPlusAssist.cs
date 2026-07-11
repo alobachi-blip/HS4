@@ -9,6 +9,7 @@ namespace HS2OrbitAndExciter
     /// <summary>
     /// PregnancyPlus live shortcuts: Y/U are handled by Preg+ (step scaled by our patch).
     /// R reset often fails for HS2 H-scene belly (<c>HS2Inflation</c> level), so we force deflate.
+    /// Optional inside-finish belly grow via <c>HS2Inflation(false)</c> (menu default on).
     /// </summary>
     internal static class PregnancyPlusAssist
     {
@@ -20,6 +21,37 @@ namespace HS2OrbitAndExciter
         private static FieldInfo? _infConfig;
         private static FieldInfo? _inflationSize;
         private static bool _resolved;
+
+        /// <summary>Grow H-scene belly one level on inside finish (cumflation).</summary>
+        internal static bool TryInflateOnInside(HScene? hScene)
+        {
+            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
+                return false;
+            if (hScene == null)
+                return false;
+
+            EnsureResolved();
+            if (_controllerType == null || _hs2Inflation == null)
+                return false;
+
+            var females = OrbitHelpers.GetChaFemales(hScene);
+            if (females == null || females.Length == 0)
+                return false;
+
+            bool any = false;
+            for (int i = 0; i < females.Length; i++)
+            {
+                var cha = females[i];
+                if (cha == null)
+                    continue;
+                if (TryInflateOnCha(cha))
+                    any = true;
+            }
+
+            if (any)
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 內射肚子變大（PregnancyPlus HS2Inflation）");
+            return any;
+        }
 
         internal static bool TryResetBelly(HScene? hScene)
         {
@@ -47,6 +79,25 @@ namespace HS2OrbitAndExciter
             if (any)
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: R 清腹（PregnancyPlus）");
             return any;
+        }
+
+        private static bool TryInflateOnCha(ChaControl cha)
+        {
+            var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
+            if (ctrl == null)
+                return false;
+
+            try
+            {
+                // HS2Inflation(false) = +1 level (same as Preg+ Allow cumflation).
+                _hs2Inflation!.Invoke(ctrl, new object[] { false });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: HS2Inflation 失敗: {ex.Message}");
+                return false;
+            }
         }
 
         private static bool TryResetOnCha(ChaControl cha)
@@ -102,7 +153,7 @@ namespace HS2OrbitAndExciter
             _controllerType = AccessTools.TypeByName("KK_PregnancyPlus.PregnancyPlusCharaController");
             if (_controllerType == null)
             {
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus 未載入，R 清腹略過");
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus 未載入，肚子膨脹／清腹略過");
                 return;
             }
 

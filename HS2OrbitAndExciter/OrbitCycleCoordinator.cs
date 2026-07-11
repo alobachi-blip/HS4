@@ -17,11 +17,12 @@ namespace HS2OrbitAndExciter
             bool roundTripJustCompleted)
         {
             var ctrlFlag = hScene.ctrlFlag;
-            bool suppress = OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _);
+            // Clothes follow auto-advance gate (Pending does not block; Queued/Changing do).
+            bool canAssist = OrbitBehaviorHub.CanAutoAdvance(ctrlFlag, out _);
             int n = HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0;
             bool hitN = n > 0 && rotationCount % n == 0;
             bool clothesEnabled = HS2OrbitAndExciter.ClothesChangeEnabled?.Value ?? false;
-            bool clothesThisBoundary = clothesEnabled && !suppress && (hitN || (n == 0 && roundTripJustCompleted));
+            bool clothesThisBoundary = clothesEnabled && canAssist && (hitN || (n == 0 && roundTripJustCompleted));
 
             if (clothesThisBoundary)
                 orbit.InternalAdvanceClothesStage(hScene);

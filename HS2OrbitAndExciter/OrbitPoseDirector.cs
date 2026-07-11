@@ -6,37 +6,63 @@ namespace HS2OrbitAndExciter
 {
     internal enum PoseChangeSource { Cycle, External, Hotkey }
 
+    /// <summary>
+    /// Director phases. Observable mapping (game flags):
+    /// PoseQueued ≡ sel != null &amp;&amp; !NowChangeAnim (legal);
+    /// Changing ≡ NowChangeAnim;
+    /// PosePending / Rebinding ≡ plugin-only.
+    /// </summary>
     internal enum DirectorState
     {
         Orbitting,
         PosePending,
-        PoseTransition,
+        PoseQueued,
+        Changing,
         Rebinding
     }
 
     /// <summary>
     /// Single coordinator for orbit pose changes: queue, transition detection, rebind.
-    /// Cycle, L hotkey, and UI manual are pose-change sources; auto/checkpoint do not invoke here (B1).
+    /// Plugin-initiated writes go through <see cref="TryQueuePoseChange"/>;
+    /// game/checkpoint writes are tracked via <see cref="SyncFromGameFlags"/>.
+    /// Does not clear <c>selectAnimationListInfo</c> — Hub owns <see cref="OrbitBehaviorHub.ClearSelection"/>.
     /// </summary>
     internal static class OrbitPoseDirector
     {
         private const int StableReadyFramesRequired = 3;
+        internal const float TransitionTimeoutSeconds = 6f;
 
         private static DirectorState _state = DirectorState.Orbitting;
         private static bool _pendingCycleRequest;
         private static int _stableReadyFrames;
         private static object? _queuedAnimationRef;
-        /// <summary>True once NowChangeAnim was seen, or external pose already applied.</summary>
         private static bool _sawChangeAnim;
+        private static float _phaseEnteredUnscaled = -1f;
+        private static string _lastHotkeyFailReason = OrbitAssistReasons.None;
 
-        internal static bool IsTransitionActive =>
-            _state != DirectorState.Orbitting;
+        internal static string DebugStateName => _state.ToString();
+        internal static DirectorState Phase => _state;
+        internal static bool HasPendingCycleRequest => _pendingCycleRequest;
+        internal static string LastHotkeyFailReason => _lastHotkeyFailReason;
+        internal static float PhaseEnteredUnscaled => _phaseEnteredUnscaled;
 
-        internal static bool IsCameraPaused =>
-            _state == DirectorState.PoseTransition || _state == DirectorState.Rebinding;
+        /// <summary>Queued / Changing / Rebinding — blocks auto-advance and L overwrite.</summary>
+        internal static bool IsPoseChangeInFlight =>
+            _state == DirectorState.PoseQueued
+            || _state == DirectorState.Changing
+            || _state == DirectorState.Rebinding;
 
+        /// <summary>Legacy name: in-flight pose change (excludes PosePending).</summary>
+        internal static bool IsTransitionActive => IsPoseChangeInFlight;
+
+        internal static bool IsCameraPaused => false;
+
+        /// <summary>
+        /// Freeze rotation/round-trip side-effects and further Cycle pose triggers.
+        /// Includes PosePending (owe one pose; do not stack). Does NOT block CanAutoAdvance.
+        /// </summary>
         internal static bool ShouldFreezeCycleCounters =>
-            IsCameraPaused || OrbitManualDirector.IsCameraPaused;
+            _state != DirectorState.Orbitting || OrbitManualDirector.IsCameraPaused;
 
         internal static void Reset()
         {
@@ -45,6 +71,80 @@ namespace HS2OrbitAndExciter
             _stableReadyFrames = 0;
             _queuedAnimationRef = null;
             _sawChangeAnim = false;
+            _phaseEnteredUnscaled = -1f;
+            _lastHotkeyFailReason = OrbitAssistReasons.None;
+        }
+
+        /// <summary>Hub cleared sel (sanitize / timeout). Preserve cycle pending → PosePending.</summary>
+        internal static void NotifySelectionCleared()
+        {
+            bool keepPending = _pendingCycleRequest;
+            _queuedAnimationRef = null;
+            _sawChangeAnim = false;
+            _stableReadyFrames = 0;
+            if (keepPending)
+            {
+                _state = DirectorState.PosePending;
+                _phaseEnteredUnscaled = Time.unscaledTime;
+            }
+            else
+            {
+                _state = DirectorState.Orbitting;
+                _phaseEnteredUnscaled = -1f;
+            }
+        }
+
+        /// <summary>Obsolete name kept for call-site compatibility.</summary>
+        internal static void NotifySelectionClearedWithoutTransition() => NotifySelectionCleared();
+
+        internal static void TickStuckRecovery(HScene? hScene)
+        {
+            if (hScene == null)
+                return;
+            if (_state == DirectorState.Orbitting && !_pendingCycleRequest)
+                return;
+
+            if (_phaseEnteredUnscaled >= 0f
+                && Time.unscaledTime - _phaseEnteredUnscaled >= TransitionTimeoutSeconds)
+            {
+                // Hard timeout: Hub clears game flags; we may skip Rebinding.
+                if (hScene.ctrlFlag?.selectAnimationListInfo != null || hScene.NowChangeAnim)
+                {
+                    OrbitBehaviorHub.ClearSelection(
+                        hScene,
+                        hScene.NowChangeAnim
+                            ? OrbitAssistReasons.ClearedNowChangeStuck
+                            : OrbitAssistReasons.ClearedAfterTimeout,
+                        forceClearNowChangeAnim: true);
+                }
+                else
+                {
+                    // Pending-only timeout: drop owed cycle; do not keep pending forever.
+                    _pendingCycleRequest = false;
+                    Reset();
+                }
+                return;
+            }
+
+            if (_state == DirectorState.PosePending)
+            {
+                SyncFromGameFlags(hScene);
+                return;
+            }
+
+            if (_state == DirectorState.PoseQueued || _state == DirectorState.Changing)
+            {
+                if (hScene.NowChangeAnim)
+                    _sawChangeAnim = true;
+
+                if (!OrbitBehaviorHub.IsOrbitAssistActive()
+                    && _sawChangeAnim
+                    && !hScene.NowChangeAnim
+                    && hScene.ctrlFlag?.selectAnimationListInfo == null)
+                {
+                    NotifySelectionCleared();
+                }
+            }
         }
 
         internal static void Tick(HScene hScene, OrbitController orbit, CameraControl_Ver2 ctrl)
@@ -52,21 +152,22 @@ namespace HS2OrbitAndExciter
             if (hScene == null || orbit == null || ctrl == null)
                 return;
 
+            SyncFromGameFlags(hScene);
             RetryPendingCycleRequest(hScene);
+            TickStuckRecovery(hScene);
 
             switch (_state)
             {
                 case DirectorState.Orbitting:
-                    if (hScene.NowChangeAnim)
-                        EnterPoseTransition();
-                    break;
-
                 case DirectorState.PosePending:
-                    if (hScene.NowChangeAnim || hScene.ctrlFlag?.selectAnimationListInfo != null)
-                        EnterPoseTransition();
                     break;
 
-                case DirectorState.PoseTransition:
+                case DirectorState.PoseQueued:
+                    if (hScene.NowChangeAnim)
+                        EnterChanging();
+                    break;
+
+                case DirectorState.Changing:
                     if (hScene.NowChangeAnim)
                         _sawChangeAnim = true;
 
@@ -76,10 +177,12 @@ namespace HS2OrbitAndExciter
                         if (_stableReadyFrames >= StableReadyFramesRequired)
                         {
                             _state = DirectorState.Rebinding;
+                            _phaseEnteredUnscaled = Time.unscaledTime;
                             _stableReadyFrames = 0;
                             orbit.InternalRebindAfterPoseChange(hScene, ctrl);
                             _state = DirectorState.Orbitting;
                             _queuedAnimationRef = null;
+                            _phaseEnteredUnscaled = -1f;
                             RetryPendingCycleRequest(hScene);
                         }
                     }
@@ -94,38 +197,51 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        internal static bool RequestPoseChange(HScene hScene, PoseChangeSource source, HScene.AnimationListInfo? explicitNext = null)
+        /// <summary>
+        /// Track game/checkpoint sel and NowChangeAnim into Queued/Changing.
+        /// Illegal sel is not tracked — Hub sanitize owns that.
+        /// </summary>
+        internal static void SyncFromGameFlags(HScene hScene)
         {
             if (hScene == null)
-                return false;
+                return;
+            var ctrlFlag = hScene.ctrlFlag;
+            if (ctrlFlag == null)
+                return;
 
-            if (IsTransitionActive)
+            if (hScene.NowChangeAnim)
             {
-                if (source == PoseChangeSource.Cycle)
-                    _pendingCycleRequest = true;
-                return false;
+                if (_state != DirectorState.Changing && _state != DirectorState.Rebinding)
+                    EnterChanging();
+                return;
             }
 
-            if (!CanAcceptRequestForSource(hScene, source))
+            var sel = ctrlFlag.selectAnimationListInfo;
+            if (sel != null)
             {
-                if (source == PoseChangeSource.Cycle)
+                if (!OrbitHelpers.IsPoseAllowedUnderFaintness(sel, ctrlFlag))
+                    return; // Hub will sanitize
+
+                if (_state == DirectorState.Orbitting || _state == DirectorState.PosePending)
                 {
-                    _pendingCycleRequest = true;
-                    _state = DirectorState.PosePending;
+                    _queuedAnimationRef = sel;
+                    EnterPoseQueued();
                 }
-                return false;
+                else if (_state == DirectorState.Changing && !hScene.NowChangeAnim)
+                {
+                    // Change ended but sel still set briefly — stay/move Queued until Hub/game clears
+                    EnterPoseQueued();
+                }
             }
-
-            return TryQueuePoseChange(hScene, explicitNext);
         }
 
-        /// <summary>L hotkey: random next pose (same pool as cycle pose change).</summary>
-        internal static bool RequestHotkeyPoseChange(HScene hScene) =>
-            RequestPoseChange(hScene, PoseChangeSource.Hotkey);
-
+        /// <summary>Legacy entry from nowAnimationInfo change — prefer SyncFromGameFlags.</summary>
         internal static void NotifyExternalPoseChange(HScene hScene)
         {
-            if (hScene == null || _state != DirectorState.Orbitting)
+            if (hScene == null)
+                return;
+            SyncFromGameFlags(hScene);
+            if (_state != DirectorState.Orbitting)
                 return;
 
             var nowInfo = hScene.ctrlFlag?.nowAnimationInfo;
@@ -134,18 +250,113 @@ namespace HS2OrbitAndExciter
             if (ReferenceEquals(nowInfo, _queuedAnimationRef))
                 return;
 
-            EnterPoseTransition();
-            if (hScene.NowChangeAnim)
+            // Pose already applied without us seeing sel/NowChangeAnim this frame.
+            if (!hScene.NowChangeAnim && hScene.ctrlFlag?.selectAnimationListInfo == null)
+            {
+                EnterChanging();
                 _sawChangeAnim = true;
-            else if (hScene.ctrlFlag?.selectAnimationListInfo == null)
-                _sawChangeAnim = true;
+            }
         }
 
-        private static void EnterPoseTransition()
+        internal static bool RequestPoseChange(HScene hScene, PoseChangeSource source, HScene.AnimationListInfo? explicitNext = null)
         {
-            _state = DirectorState.PoseTransition;
+            _lastHotkeyFailReason = OrbitAssistReasons.None;
+            if (hScene == null)
+            {
+                _lastHotkeyFailReason = OrbitAssistReasons.NoHScene;
+                return false;
+            }
+
+            // Cycle pose (every N round-trips when ChangePoseOnCycle): same as L — arm escape from long waits.
+            if (source == PoseChangeSource.Cycle || source == PoseChangeSource.Hotkey)
+            {
+                OrbitBehaviorHub.RequestMotionEscape(source == PoseChangeSource.Cycle ? "cycle" : "L");
+                OrbitBehaviorHub.TickAfterIdleEscape(hScene);
+                OrbitBehaviorHub.TickIdleEscape(hScene);
+            }
+
+            if (IsPoseChangeInFlight)
+            {
+                if (source == PoseChangeSource.Cycle)
+                {
+                    _pendingCycleRequest = true;
+                    _lastHotkeyFailReason = OrbitAssistReasons.CycleQueued;
+                    return false;
+                }
+
+                // Hotkey: clear abandoned plugin-only state (no sel, not changing).
+                if (source == PoseChangeSource.Hotkey
+                    && !hScene.NowChangeAnim
+                    && hScene.ctrlFlag?.selectAnimationListInfo == null
+                    && (_state == DirectorState.PosePending || _state == DirectorState.Rebinding))
+                {
+                    bool keep = _pendingCycleRequest;
+                    Reset();
+                    _pendingCycleRequest = keep;
+                    if (keep)
+                    {
+                        _state = DirectorState.PosePending;
+                        _phaseEnteredUnscaled = Time.unscaledTime;
+                    }
+                }
+                else if (IsPoseChangeInFlight)
+                {
+                    _lastHotkeyFailReason = DescribeBlockFromFlags(hScene);
+                    return false;
+                }
+            }
+
+            if (!CanAcceptRequestForSource(hScene, source, out string blockReason))
+            {
+                _lastHotkeyFailReason = blockReason;
+                if (source == PoseChangeSource.Cycle)
+                {
+                    _pendingCycleRequest = true;
+                    if (_state == DirectorState.Orbitting)
+                    {
+                        _state = DirectorState.PosePending;
+                        _phaseEnteredUnscaled = Time.unscaledTime;
+                    }
+                    if (blockReason == OrbitAssistReasons.None)
+                        _lastHotkeyFailReason = OrbitAssistReasons.CycleQueued;
+                }
+                return false;
+            }
+
+            return TryQueuePoseChange(hScene, explicitNext);
+        }
+
+        internal static bool RequestHotkeyPoseChange(HScene hScene) =>
+            RequestPoseChange(hScene, PoseChangeSource.Hotkey);
+
+        internal static string DescribeBlockFromFlags(HScene? hScene)
+        {
+            if (hScene == null) return OrbitAssistReasons.NoHScene;
+            if (OrbitManualDirector.IsBusy) return OrbitAssistReasons.ManualBusy;
+            if (hScene.NowChangeAnim || _state == DirectorState.Changing)
+                return OrbitAssistReasons.Changing;
+            if (hScene.ctrlFlag?.selectAnimationListInfo != null || _state == DirectorState.PoseQueued)
+                return OrbitAssistReasons.PoseQueued;
+            if (_state == DirectorState.Rebinding) return OrbitAssistReasons.Rebinding;
+            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
+                return OrbitAssistReasons.NowOrgasm;
+            return OrbitAssistReasons.None;
+        }
+
+        private static void EnterPoseQueued()
+        {
+            _state = DirectorState.PoseQueued;
             _stableReadyFrames = 0;
             _sawChangeAnim = false;
+            _phaseEnteredUnscaled = Time.unscaledTime;
+        }
+
+        private static void EnterChanging()
+        {
+            _state = DirectorState.Changing;
+            _stableReadyFrames = 0;
+            _sawChangeAnim = true;
+            _phaseEnteredUnscaled = Time.unscaledTime;
         }
 
         private static void RetryPendingCycleRequest(HScene hScene)
@@ -156,37 +367,52 @@ namespace HS2OrbitAndExciter
             {
                 _pendingCycleRequest = false;
                 if (_state == DirectorState.PosePending)
-                    _state = DirectorState.Orbitting;
+                    Reset();
                 return;
             }
-            if (IsTransitionActive && _state != DirectorState.PosePending)
+            if (IsPoseChangeInFlight)
                 return;
-            if (!CanAcceptRequest(hScene))
+            if (!CanAcceptRequest(hScene, out _))
                 return;
 
             if (TryQueuePoseChange(hScene, null))
                 _pendingCycleRequest = false;
         }
 
-        private static bool CanAcceptRequestForSource(HScene hScene, PoseChangeSource source)
+        private static bool CanAcceptRequestForSource(HScene hScene, PoseChangeSource source, out string reason)
         {
             if (source == PoseChangeSource.Hotkey)
-                return OrbitManualDirector.CanAcceptHotkey(hScene);
+            {
+                reason = OrbitManualDirector.DescribeHotkeyBlockReason(hScene);
+                return reason == OrbitAssistReasons.None;
+            }
 
-            return CanAcceptRequest(hScene);
+            return CanAcceptRequest(hScene, out reason);
         }
 
-        private static bool CanAcceptRequest(HScene hScene)
+        private static bool CanAcceptRequest(HScene hScene, out string reason)
         {
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
+            {
+                reason = OrbitAssistReasons.NoHScene;
                 return false;
-            if (OrbitBehaviorHub.ShouldSuppressAssist(ctrlFlag, out _))
-                return false;
+            }
             if (hScene.NowChangeAnim)
+            {
+                reason = OrbitAssistReasons.Changing;
                 return false;
+            }
             if (ctrlFlag.selectAnimationListInfo != null)
+            {
+                reason = OrbitAssistReasons.PoseQueued;
                 return false;
+            }
+            // Cycle may run while PosePending; ignore pose/manual busy for write gate —
+            // but still respect orgasm/UI via CanAutoAdvance-like checks without poseQueued.
+            if (!OrbitBehaviorHub.CanQueueCyclePose(ctrlFlag, out reason))
+                return false;
+            reason = OrbitAssistReasons.None;
             return true;
         }
 
@@ -194,22 +420,46 @@ namespace HS2OrbitAndExciter
         {
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
+            {
+                _lastHotkeyFailReason = OrbitAssistReasons.NoHScene;
                 return false;
+            }
 
             HScene.AnimationListInfo? next = explicitNext;
             if (next == null)
             {
                 var all = OrbitHelpers.GetAllPoseList();
                 if (all.Count == 0)
+                {
+                    _lastHotkeyFailReason = OrbitAssistReasons.NoPoseCandidate;
                     return false;
-                next = OrbitHelpers.PickNextPose(ctrlFlag.nowAnimationInfo, all);
+                }
+                next = OrbitHelpers.PickNextPose(ctrlFlag.nowAnimationInfo, all, ctrlFlag);
             }
             if (next == null)
+            {
+                _lastHotkeyFailReason = OrbitAssistReasons.NoPoseCandidate;
                 return false;
+            }
+            if (!OrbitHelpers.IsPoseAllowedUnderFaintness(next, ctrlFlag))
+            {
+                _lastHotkeyFailReason = OrbitAssistReasons.NoValidDownPose;
+                OrbitStateMachineLog.Event("pose_reject", OrbitAssistReasons.NoValidDownPose,
+                    "{\"id\":" + next.id + ",\"down\":" + next.nDownPtn + "}");
+                return false;
+            }
 
             ctrlFlag.selectAnimationListInfo = next;
             _queuedAnimationRef = next;
-            EnterPoseTransition();
+            // Successful write satisfies any owed cycle pose.
+            _pendingCycleRequest = false;
+
+            if (OrbitBehaviorHub.IsOrbitAssistActive())
+                EnterPoseQueued();
+            else
+                Reset();
+
+            _lastHotkeyFailReason = OrbitAssistReasons.None;
             return true;
         }
 
@@ -218,6 +468,8 @@ namespace HS2OrbitAndExciter
             if (!_sawChangeAnim)
                 return false;
             if (hScene.NowChangeAnim)
+                return false;
+            if (hScene.ctrlFlag?.selectAnimationListInfo != null)
                 return false;
 
             var fade = Traverse.Create(hScene).Field("fade").GetValue();

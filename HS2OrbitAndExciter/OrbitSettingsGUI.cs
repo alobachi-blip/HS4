@@ -265,6 +265,10 @@ namespace HS2OrbitAndExciter
             GUILayout.Label(
                 OrbitManualHotkeys.PregnancyHudLegend + " — Y/U 為 PregnancyPlus；R 由本插件強制清腹（含 HS2 H 膨脹）",
                 _labelStyle);
+            if (HS2OrbitAndExciter.CumflationEnabled != null)
+                HS2OrbitAndExciter.CumflationEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.CumflationEnabled.Value,
+                    " 內射時肚子變大（PregnancyPlus cumflation，預設開）");
 
             GUILayout.Space(8);
             GUILayout.Label("語音巡禮", GUI.skin.box);

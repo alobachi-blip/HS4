@@ -166,13 +166,16 @@ namespace HS2OrbitAndExciter
                     _manualDirectorHSceneId = hId;
                     OrbitManualDirector.OnHSceneEntered(hProbe);
                 }
+                OrbitPoseDirector.TickStuckRecovery(hProbe);
                 OrbitVoiceTour.Tick(hProbe);
+                OrbitStateMachineLog.Tick(hProbe);
             }
             else
             {
                 if (_manualDirectorHSceneId != -1)
                     OrbitVoiceTour.OnHSceneExited();
                 _manualDirectorHSceneId = -1;
+                OrbitPoseDirector.Reset();
             }
 
             if (hProbe != null && Input.GetMouseButtonDown(0))
@@ -231,31 +234,44 @@ namespace HS2OrbitAndExciter
 
             if (Input.GetKeyDown(OrbitManualHotkeys.CharaKey))
             {
-                if (OrbitManualDirector.TrySwapFemale0(hScene, this))
+                bool ok = OrbitManualDirector.TrySwapFemale0(hScene, this);
+                OrbitStateMachineLog.Hotkey("G", ok, ok ? "swap" : "reject");
+                if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.CoordinateKey))
             {
-                if (OrbitManualDirector.TrySwapCoordinate(hScene, this))
+                bool ok = OrbitManualDirector.TrySwapCoordinate(hScene, this);
+                OrbitStateMachineLog.Hotkey("H", ok, ok ? "coord" : "reject");
+                if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.WearKey))
             {
-                if (OrbitManualDirector.TryRandomWear(hScene))
+                bool ok = OrbitManualDirector.TryRandomWear(hScene);
+                OrbitStateMachineLog.Hotkey("J", ok, ok ? "wear" : "reject");
+                if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.PoseCameraKey))
             {
-                if (OrbitManualDirector.TryCyclePoseCamera(hScene, this))
+                bool ok = OrbitManualDirector.TryCyclePoseCamera(hScene, this);
+                OrbitStateMachineLog.Hotkey("K", ok, ok ? "cam" : "reject");
+                if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.PoseKey))
             {
-                if (OrbitManualDirector.TryChangePose(hScene))
+                bool ok = OrbitManualDirector.TryChangePose(hScene);
+                string detail = ok ? "pose" : OrbitManualDirector.DescribeHotkeyBlockReason(hScene);
+                if (!ok && (detail == OrbitAssistReasons.None || string.IsNullOrEmpty(detail)))
+                    detail = OrbitPoseDirector.LastHotkeyFailReason;
+                OrbitStateMachineLog.Hotkey("L", ok, detail);
+                if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
@@ -302,7 +318,7 @@ namespace HS2OrbitAndExciter
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
             if (_waitingForPrepStart)
             {
-                if (OrbitPoseDirector.IsTransitionActive || OrbitManualDirector.IsCameraPaused)
+                if (OrbitPoseDirector.ShouldFreezeCycleCounters)
                 {
                     if (_prepFrozenElapsed < 0f)
                         _prepFrozenElapsed = Time.unscaledTime - _prepCountdownStart;
@@ -352,8 +368,10 @@ namespace HS2OrbitAndExciter
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
 
-            if (!OrbitPoseDirector.IsCameraPaused && !OrbitManualDirector.IsCameraPaused)
+            // Only G/H reload pauses yaw. Pose transition must keep orbiting (rebind on complete).
+            if (!OrbitManualDirector.IsCameraPaused)
             {
+                bool freezeCycle = OrbitPoseDirector.ShouldFreezeCycleCounters;
                 if (_orbitPhase == 0)
                 {
                     _orbitAccumulatedDegrees += speedDegPerSec * dt;
@@ -361,8 +379,11 @@ namespace HS2OrbitAndExciter
                     {
                         _orbitAccumulatedDegrees = 360f;
                         _orbitPhase = 1;
-                        _rotationCount++;
-                        OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
+                        if (!freezeCycle)
+                        {
+                            _rotationCount++;
+                            OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
+                        }
                     }
                 }
                 else
@@ -372,10 +393,13 @@ namespace HS2OrbitAndExciter
                     {
                         _orbitAccumulatedDegrees = 0f;
                         _orbitPhase = 0;
-                        _rotationCount++;
-                        _roundTripCount++;
-                        OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
-                        OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
+                        if (!freezeCycle)
+                        {
+                            _rotationCount++;
+                            _roundTripCount++;
+                            OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
+                            OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
+                        }
                     }
                 }
             }
@@ -438,7 +462,7 @@ namespace HS2OrbitAndExciter
 
             int roundTripsUntilPose = changePose && mPose > 0 ? CountsUntilNextMultiple(_roundTripCount, mPose) : -1;
 
-            OrbitBehaviorHub.ShouldSuppressAssist(hScene.ctrlFlag, out string reason);
+            OrbitBehaviorHub.CanAutoAdvance(hScene.ctrlFlag, out string reason);
             bool faint = hScene.ctrlFlag?.isFaintness ?? false;
 
             _hudSnapshot = new OrbitHudSnapshot(
@@ -454,7 +478,7 @@ namespace HS2OrbitAndExciter
                 faint,
                 orbitTimePer360,
                 roundTripSec,
-                OrbitPoseDirector.IsCameraPaused || OrbitManualDirector.IsCameraPaused);
+                OrbitManualDirector.IsCameraPaused);
             _hudSnapshotValid = true;
         }
 
@@ -681,6 +705,9 @@ namespace HS2OrbitAndExciter
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
             OrbitBehaviorHub.TickStaleSelectionRecovery(hScene);
+            OrbitBehaviorHub.TickUserWheelEscape();
+            OrbitBehaviorHub.TickAfterIdleEscape(hScene);
+            OrbitBehaviorHub.TickIdleEscape(hScene);
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
             OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }

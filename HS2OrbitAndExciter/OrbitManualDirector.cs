@@ -79,9 +79,25 @@ namespace HS2OrbitAndExciter
                 return false;
             if (hScene.ctrlFlag?.selectAnimationListInfo != null)
                 return false;
+            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
+                return false;
             if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
                 return false;
             return true;
+        }
+
+        internal static string DescribeHotkeyBlockReason(HScene? hScene)
+        {
+            if (hScene == null) return OrbitAssistReasons.NoHScene;
+            if (_busy) return OrbitAssistReasons.ManualBusy;
+            if (hScene.NowChangeAnim) return OrbitAssistReasons.Changing;
+            if (hScene.ctrlFlag?.selectAnimationListInfo != null) return OrbitAssistReasons.PoseQueued;
+            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm) return OrbitAssistReasons.NowOrgasm;
+            if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
+                return OrbitAssistReasons.SpriteFade;
+            if (OrbitPoseDirector.Phase == DirectorState.Rebinding) return OrbitAssistReasons.Rebinding;
+            if (OrbitPoseDirector.IsPoseChangeInFlight) return OrbitAssistReasons.PoseQueued;
+            return OrbitAssistReasons.None;
         }
 
         internal static bool TrySwapFemale0(HScene hScene, OrbitController host)
@@ -155,12 +171,24 @@ namespace HS2OrbitAndExciter
 
         internal static bool TryChangePose(HScene hScene)
         {
-            if (!CanAcceptHotkey(hScene))
+            // Long waits (bath/toilet/AfterIdle): only leave when user asks — L arms escape first.
+            OrbitBehaviorHub.RequestMotionEscape("L");
+            OrbitBehaviorHub.TickAfterIdleEscape(hScene);
+            OrbitBehaviorHub.TickIdleEscape(hScene);
+
+            string block = DescribeHotkeyBlockReason(hScene);
+            if (block != OrbitAssistReasons.None)
+            {
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 被擋 {block}");
                 return false;
+            }
 
             if (!OrbitPoseDirector.RequestHotkeyPoseChange(hScene))
             {
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L 無可換姿");
+                string fail = OrbitPoseDirector.LastHotkeyFailReason;
+                if (string.IsNullOrEmpty(fail) || fail == OrbitAssistReasons.None)
+                    fail = OrbitAssistReasons.NoPoseCandidate;
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 被擋 {fail}");
                 return false;
             }
 

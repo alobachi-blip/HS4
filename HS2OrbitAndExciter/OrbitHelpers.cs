@@ -68,6 +68,47 @@ namespace HS2OrbitAndExciter
             return false;
         }
 
+        /// <summary>Vanilla <c>HScene.IsAfterIdle</c> state names (post-orgasm wait).</summary>
+        private static readonly string[] AfterIdleStateNames =
+        {
+            "Orgasm_A", "Orgasm_IN_A", "Orgasm_OUT_A", "Drink_A", "Vomit_A", "OrgasmM_OUT_A",
+            "D_Orgasm_A", "D_Orgasm_OUT_A", "D_Orgasm_IN_A", "D_OrgasmM_OUT_A"
+        };
+
+        /// <summary>Vanilla Idle / D_Idle (pre-action wait).</summary>
+        public static bool IsFirstFemaleInIdle(HScene? hScene)
+        {
+            if (hScene == null) return false;
+            var chaFemales = GetChaFemales(hScene);
+            if (chaFemales == null || chaFemales.Length == 0) return false;
+            var cha = chaFemales[0];
+            if (cha == null) return false;
+            var animBody = TryGetFemaleAnimBody(cha);
+            if (animBody == null) return false;
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            return stateInfo.IsName("Idle") || stateInfo.IsName("D_Idle")
+                   || stateInfo.IsName("WIdle") || stateInfo.IsName("SIdle");
+        }
+
+        /// <summary>True when first female is in post-orgasm AfterIdle (e.g. D_Orgasm_IN_A).</summary>
+        public static bool IsFirstFemaleInAfterIdle(HScene? hScene)
+        {
+            if (hScene == null) return false;
+            var chaFemales = GetChaFemales(hScene);
+            if (chaFemales == null || chaFemales.Length == 0) return false;
+            var cha = chaFemales[0];
+            if (cha == null) return false;
+            var animBody = TryGetFemaleAnimBody(cha);
+            if (animBody == null) return false;
+            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            foreach (string name in AfterIdleStateNames)
+            {
+                if (stateInfo.IsName(name))
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>Get world position of a bone on female (0 or 1). Returns null if not found.</summary>
         public static Vector3? GetBonePosition(ChaControl[] chaFemales, int femaleIndex, string boneName)
         {
@@ -271,19 +312,36 @@ namespace HS2OrbitAndExciter
             return distinctCameras[nextIdx];
         }
 
-        /// <summary>Pick a random pose different from current (exclude by animation id, not reference).</summary>
-        public static HScene.AnimationListInfo? PickNextPose(HScene.AnimationListInfo? current, List<HScene.AnimationListInfo> all)
+        /// <summary>
+        /// Pick a random pose different from current (exclude by animation id).
+        /// When faintness is active (and FaintnessType != 2), only poses with <c>nDownPtn != 0</c>
+        /// are valid — otherwise <c>HScene.ChangeAnimation</c> aborts immediately and ops look dead.
+        /// </summary>
+        public static HScene.AnimationListInfo? PickNextPose(
+            HScene.AnimationListInfo? current,
+            List<HScene.AnimationListInfo> all,
+            HSceneFlagCtrl? ctrlFlag = null)
         {
             if (all == null || all.Count == 0) return null;
+            bool requireDown = ctrlFlag != null && ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2;
             var candidates = new List<HScene.AnimationListInfo>();
             foreach (var item in all)
             {
                 if (item == null) continue;
                 if (current != null && item.id == current.id) continue;
+                if (requireDown && item.nDownPtn == 0) continue;
                 candidates.Add(item);
             }
             if (candidates.Count == 0) return null;
             return candidates[UnityEngine.Random.Range(0, candidates.Count)];
+        }
+
+        /// <summary>True if this pose can start ChangeAnimation under current faintness rules.</summary>
+        public static bool IsPoseAllowedUnderFaintness(HScene.AnimationListInfo? info, HSceneFlagCtrl? ctrlFlag)
+        {
+            if (info == null || ctrlFlag == null) return info != null;
+            if (!ctrlFlag.isFaintness || ctrlFlag.FaintnessType == 2) return true;
+            return info.nDownPtn != 0;
         }
 
         /// <summary>List *.png under UserData (e.g. chara/female/, coordinate/female/).</summary>

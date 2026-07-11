@@ -12,7 +12,12 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier2 = KeyCode.LeftControl;
         private const float AreaWidth = 300f;
         private const float Margin = 6f;
-        private const float MaxHeightFraction = 0.42f;
+        private const float MaxHeightFraction = 0.32f;
+        /// <summary>
+        /// Clearance above the bottom H UI strip (Finish / 跳出 buttons ≈ 1–2 rows).
+        /// Measured as ~72–90px per button row; use ~2 rows + padding.
+        /// </summary>
+        private const float BottomUiClearance = 176f;
 
         private OrbitController? _orbit;
         private bool _panelVisible = true;
@@ -107,7 +112,7 @@ namespace HS2OrbitAndExciter
             float areaH = Mathf.Min(contentH, maxH);
             bool needScroll = contentH > maxH + 0.5f;
 
-            var area = new Rect(Margin, Screen.height - areaH - Margin, AreaWidth, areaH);
+            var area = new Rect(Margin, Screen.height - areaH - Margin - BottomUiClearance, AreaWidth, areaH);
             GUILayout.BeginArea(area);
             GUILayout.BeginVertical(box);
             if (needScroll)
@@ -131,7 +136,11 @@ namespace HS2OrbitAndExciter
         {
             string status;
             if (snap.CameraPaused)
-                status = OrbitManualDirector.IsBusy ? "換角中" : "換姿中";
+                status = "換角中";
+            else if (OrbitPoseDirector.ShouldFreezeCycleCounters)
+                status = OrbitPoseDirector.Phase == DirectorState.PosePending
+                    ? "運轉·換姿待"
+                    : "運轉·換姿";
             else
                 status = "運轉";
             if (snap.IsFaintness)
@@ -149,6 +158,9 @@ namespace HS2OrbitAndExciter
             string assist = FormatAssistShort(snap.SuppressReasonKey);
             string manual = FormatManualPoolLine();
             string orgasmFx = FormatOrgasmFxLine();
+            string fsm = OrbitStateMachineLog.LogPath != null
+                ? "FSM→LogOutput/HS2OrbitAndExciter_fsm.ndjson"
+                : "FSM log n/a";
 
             return new[]
             {
@@ -157,7 +169,8 @@ namespace HS2OrbitAndExciter
                 "⌃⇧O/I/P  " + OrbitManualHotkeys.HudLegend,
                 orgasmFx,
                 OrbitManualHotkeys.PregnancyHudLegend,
-                manual
+                manual,
+                fsm
             };
         }
 
@@ -257,24 +270,37 @@ namespace HS2OrbitAndExciter
         {
             switch (reasonKey)
             {
-                case "pointerOverUi": return "自動·UI";
-                case "orbitStartGrace":
+                case OrbitAssistReasons.PointerOverUi: return "自動·UI";
+                case OrbitAssistReasons.OrbitStartGrace:
                     {
                         float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
                         return g > 0.01f ? $"自動·緩衝{g:F0}s" : "自動·緩衝";
                     }
-                case "inputForcus": return "自動·輸入";
-                case "selectionListPresent": return "自動·選單";
-                case "mouseHolding": return "自動·按住";
-                case "recentUiClick":
+                case OrbitAssistReasons.InputForcus: return "自動·輸入";
+                case OrbitAssistReasons.PoseQueued:
+                case OrbitAssistReasons.SelectionListPresentLegacy: return "自動·選姿";
+                case OrbitAssistReasons.Changing:
+                case OrbitAssistReasons.NowChangeAnim:
+                case OrbitAssistReasons.PoseTransitionLegacy: return "自動·換姿";
+                case OrbitAssistReasons.Rebinding: return "自動·換姿";
+                case OrbitAssistReasons.PosePending: return "自動·就緒"; // Pending does not gate assist
+                case OrbitAssistReasons.MouseHolding: return "自動·按住";
+                case OrbitAssistReasons.RecentUiClick:
                     {
                         float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
                         return u > 0.01f ? $"自動·UI{u:F0}s" : "自動·UI";
                     }
-                case "poseTransition": return "自動·換姿";
-                case "manualBusy": return "自動·換角";
-                case "assistInterval": return "自動·節流";
-                case "checkpointInterval": return "自動·節流";
+                case OrbitAssistReasons.ManualBusy: return "自動·換角";
+                case OrbitAssistReasons.NowOrgasm: return "自動·高潮中";
+                case OrbitAssistReasons.OrgasmQuiet:
+                    {
+                        float q = OrbitBehaviorHub.RemainingOrgasmQuietSeconds();
+                        return q > 0.01f ? $"自動·高潮後{q:F0}s" : "自動·高潮後";
+                    }
+                case OrbitAssistReasons.AssistInterval: return "自動·節流";
+                case OrbitAssistReasons.CheckpointInterval: return "自動·節流";
+                case OrbitAssistReasons.CheckpointLegacyCooldown: return "自動·節流";
+                case OrbitAssistReasons.None: return "自動·就緒";
                 default: return "自動·就緒";
             }
         }

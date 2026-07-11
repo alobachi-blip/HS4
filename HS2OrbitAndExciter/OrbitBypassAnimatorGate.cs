@@ -12,9 +12,8 @@ namespace HS2OrbitAndExciter
     {
         private static readonly string[] AllowedStateNames =
         {
-            // HScene.IsIdle
+            // Idle / AfterIdle only after RequestMotionEscape (see TryInjectOrbitWheelBypass).
             "Idle", "D_Idle", "WIdle", "SIdle", "Insert", "D_Insert",
-            // HScene.IsAfterIdle (post-orgasm / after states)
             "Orgasm_A", "Orgasm_IN_A", "Orgasm_OUT_A", "Drink_A", "Vomit_A", "OrgasmM_OUT_A",
             "D_Orgasm_A", "D_Orgasm_OUT_A", "D_Orgasm_IN_A", "D_OrgasmM_OUT_A"
         };
