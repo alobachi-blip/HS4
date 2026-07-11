@@ -51,9 +51,9 @@ namespace HS2OrbitAndExciter
 
         internal static bool Enabled => HS2OrbitAndExciter.OrgasmNippleSprayEnabled?.Value ?? true;
 
-        /// <summary>True = Play(-1,height) urine splitInfos; false = custom Bursts/Speed/Amount.</summary>
+        /// <summary>True = Play(-1,height) urine splitInfos; false = custom strong-first fade Bursts.</summary>
         internal static bool UseNativeUrineRhythm =>
-            HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm?.Value ?? true;
+            HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm?.Value ?? false;
 
         internal static string HudStatus => !Enabled ? "乳潮關" : _lastStatus;
 

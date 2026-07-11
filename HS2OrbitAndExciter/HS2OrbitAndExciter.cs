@@ -130,8 +130,8 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("Relative bust growth per orgasm (percent). 15 = +15% of current size.", new AcceptableValueRange<float>(0f, 100f)));
             OrgasmNippleSprayEnabled = Config.Bind("Orbit", "OrgasmNippleSprayEnabled", true,
                 "When true, each female orgasm sprays from both nipples using female urine/潮吹 Obi (or urine particles).");
-            OrgasmNippleSprayUseNativeUrineRhythm = Config.Bind("Orbit", "OrgasmNippleSprayUseNativeUrineRhythm", true,
-                "When true, use urine EmitterPtn splitInfos via Play(-1,height). When false, use custom Bursts/Interval/Speed/Amount.");
+            OrgasmNippleSprayUseNativeUrineRhythm = Config.Bind("Orbit", "OrgasmNippleSprayUseNativeUrineRhythm", false,
+                "When true, use urine EmitterPtn splitInfos via Play(-1,height). Default false: custom Bursts with strong-first fade (Speed/Amount start→end).");
             OrgasmNippleSprayOffsetX = Config.Bind("Orbit", "OrgasmNippleSprayOffsetX", 0f,
                 new ConfigDescription("Nipple spray local position X.", new AcceptableValueRange<float>(-0.2f, 0.2f)));
             OrgasmNippleSprayOffsetY = Config.Bind("Orbit", "OrgasmNippleSprayOffsetY", 0f,

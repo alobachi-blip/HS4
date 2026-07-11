@@ -5,7 +5,7 @@
 ### 高潮乳頭潮吹（urine）
 
 - 女高潮乳頭噴改為複用女 **潮吹／噴尿（urine）**：`siruInfos[1]` + `UrineIDs`（失敗則 clone `obiFluidCtrlFemale` urine slot，再退回 urine 粒子 2–5）。
-- **預設節奏**：`ObiEmitterCtrl.Play(-1, height)`（跟遊戲潮吹 splitInfos）；⌃⇧P 可關「潮吹節奏」改自訂連噴（Bursts／間隔／力道／量）。
+- **預設節奏**：自訂連噴（先大力／大量 → 漸弱），與改 urine 前手感相同；⌃⇧P「節奏」可改跟遊戲潮吹 `Play(-1)`。連噴滑桿常駐顯示。
 - 文案：HUD「乳潮…」；選單「乳頭潮吹」。掛點／Offset／Rot／重建噴口不變。
 
 ### 高潮乳頭射精（舊，已改為潮吹）
