@@ -58,6 +58,8 @@ namespace HS2OrbitAndExciter
         private static readonly List<Material> DecalMats = new List<Material>(32);
         private static int[]? _paintIds;
         private static int[]? _layoutIds;
+        /// <summary>bodypaint_layout id → Japanese Name (for matching decal site).</summary>
+        private static Dictionary<int, string>? _layoutNames;
         private static bool _catalogTried;
         private static int _parentCursor;
         private static int _lastHSceneId = -1;
@@ -136,6 +138,7 @@ namespace HS2OrbitAndExciter
             _catalogTried = false;
             _paintIds = null;
             _layoutIds = null;
+            _layoutNames = null;
             _decalShader = null;
         }
 
@@ -268,15 +271,15 @@ namespace HS2OrbitAndExciter
             Color color = Color.HSVToRGB(Random.value, Random.Range(0.55f, 1f), Random.Range(0.5f, 1f));
             color.a = 1f;
             float size = BaseSize * Random.Range(GetScaleMin(), GetScaleMax());
-            int layoutId = (_layoutIds != null && _layoutIds.Length > 0)
-                ? _layoutIds[Random.Range(0, _layoutIds.Length)]
-                : 0;
+            // Match body-paint layout region to the same site as the decal / HUD — never random UV.
+            int layoutId = ResolveLayoutIdForParent(cha, parentKey);
+            // Centered in the matched layout region; low x/y ⇒ larger stamp in CreateBodyTexture lerp.
             var layout = new Vector4(
-                Random.Range(0.05f, 0.35f),
-                Random.Range(0.05f, 0.35f),
-                Random.Range(0.2f, 0.8f),
-                Random.Range(0.2f, 0.8f));
-            float rotation = Random.value;
+                Random.Range(0.08f, 0.28f),
+                Random.Range(0.08f, 0.28f),
+                0.5f,
+                0.5f);
+            float rotation = Random.Range(0.35f, 0.65f);
 
             // Spawn first — only record stamp if the visible decal is created.
             // Trim after add so a failed spawn does not drop an existing stamp.
@@ -299,10 +302,99 @@ namespace HS2OrbitAndExciter
                 DestroyOldest();
 
             ApplyBodyPaintSlot(cha, stamp, Stamps.Count - 1);
+            string layoutNote = layoutId >= 0 && _layoutNames != null && _layoutNames.TryGetValue(layoutId, out var ln)
+                ? $" paint={ln}#{layoutId}"
+                : " paint=略";
             HS2OrbitAndExciter.Log?.LogInfo(
-                $"Orbit: 高潮刺青 +1 位置={FormatSiteLabel(parentKey)}({parentKey}) 共{Stamps.Count}");
+                $"Orbit: 高潮刺青 +1 位置={FormatSiteLabel(parentKey)}({parentKey}){layoutNote} 共{Stamps.Count}");
             // Orgasm / H systems often rebuild body tex after AddOrgasm; refresh again EoF + N frames.
             ScheduleBodyPaintRefresh(cha);
+        }
+
+        /// <summary>
+        /// Pick a bodypaint_layout whose Name matches the decal site (e.g. 左太もも).
+        /// Returns -1 when no match — skip body paint so a random layout cannot contradict the HUD.
+        /// </summary>
+        private static int ResolveLayoutIdForParent(ChaControl cha, string parentKey)
+        {
+            EnsureCatalog(cha);
+            if (_layoutNames == null || _layoutNames.Count == 0)
+                return -1;
+
+            string[] hints = GetLayoutNameHints(parentKey);
+            for (int h = 0; h < hints.Length; h++)
+            {
+                string hint = hints[h];
+                foreach (var kv in _layoutNames)
+                {
+                    if (kv.Key <= 0)
+                        continue; // 0 = なし
+                    if (kv.Value.IndexOf(hint, System.StringComparison.Ordinal) >= 0)
+                        return kv.Key;
+                }
+            }
+            return -1;
+        }
+
+        private static string[] GetLayoutNameHints(string parentKey)
+        {
+            switch (parentKey)
+            {
+                case "N_Leg_L":
+                case "cf_J_LegUp01_L":
+                    return new[] { "左太もも", "左腿", "Left Thigh", "太もも" };
+                case "N_Leg_R":
+                case "cf_J_LegUp01_R":
+                    return new[] { "右太もも", "右腿", "Right Thigh", "太もも" };
+                case "N_Kokan":
+                case "cf_J_Kokan":
+                    return new[] { "股間", "股", "秘部", "局部" };
+                case "N_Waist":
+                case "N_Waist_f":
+                case "cf_J_Kosi01":
+                    return new[] { "腰前", "お腹", "腹", "腰" };
+                case "N_Waist_b":
+                case "cf_J_Kosi02":
+                    return new[] { "腰後", "後腰", "尻", "腰" };
+                case "N_Waist_L":
+                    return new[] { "左腰", "腰" };
+                case "N_Waist_R":
+                    return new[] { "右腰", "腰" };
+                case "N_Back":
+                case "cf_J_Spine01":
+                case "cf_J_Spine02":
+                case "cf_J_Spine03":
+                    return new[] { "背中", "背" };
+                case "N_Back_L":
+                    return new[] { "左背", "背中", "背" };
+                case "N_Back_R":
+                    return new[] { "右背", "背中", "背" };
+                case "N_Chest_f":
+                case "N_Chest":
+                case "cf_J_Mune00":
+                    return new[] { "胸", "バスト" };
+                case "N_Tikubi_L":
+                case "cf_J_Mune01_L":
+                    return new[] { "左胸", "左乳", "胸" };
+                case "N_Tikubi_R":
+                case "cf_J_Mune01_R":
+                    return new[] { "右胸", "右乳", "胸" };
+                case "N_Arm_L":
+                case "cf_J_ArmUp00_L":
+                    return new[] { "左上腕", "左腕", "左腕部", "腕" };
+                case "N_Arm_R":
+                case "cf_J_ArmUp00_R":
+                    return new[] { "右上腕", "右腕", "右腕部", "腕" };
+                case "N_Neck":
+                case "cf_J_Neck":
+                    return new[] { "首", "ネック", "Neck" };
+                case "N_Face":
+                case "cf_J_Head":
+                    // Body paint rarely has a face slot; prefer neck over a wrong random region.
+                    return new[] { "顔", "首", "ネック" };
+                default:
+                    return System.Array.Empty<string>();
+            }
         }
 
         /// <summary>
@@ -360,6 +452,10 @@ namespace HS2OrbitAndExciter
 
         private static void ApplyBodyPaintSlot(ChaControl cha, Stamp stamp, int stampIndex, bool createTexture = true)
         {
+            // LayoutId < 0: no matching body region — keep decal only so paint cannot contradict HUD.
+            if (stamp.LayoutId < 0)
+                return;
+
             var paints = cha.fileBody?.paintInfo;
             if (paints == null || paints.Length < 2)
                 return;
@@ -732,22 +828,34 @@ namespace HS2OrbitAndExciter
                 _paintIds = list.Count > 0 ? list.ToArray() : null;
 
                 list.Clear();
+                var names = new Dictionary<int, string>(64);
                 var layoutCat = cha.lstCtrl?.GetCategoryInfo(ChaListDefine.CategoryNo.bodypaint_layout);
                 if (layoutCat != null)
                 {
                     foreach (var kv in layoutCat)
                     {
-                        if (kv.Key >= 0)
-                            list.Add(kv.Key);
+                        if (kv.Key < 0)
+                            continue;
+                        list.Add(kv.Key);
+                        // Prefer authored JP Name for matching; append display Name if different.
+                        string jp = kv.Value != null ? kv.Value.GetInfo(ChaListDefine.KeyType.Name) : "";
+                        string display = kv.Value?.Name ?? "";
+                        string combined = jp;
+                        if (!string.IsNullOrEmpty(display) && display != jp)
+                            combined = string.IsNullOrEmpty(jp) ? display : jp + "|" + display;
+                        if (!string.IsNullOrEmpty(combined))
+                            names[kv.Key] = combined;
                     }
                 }
                 _layoutIds = list.Count > 0 ? list.ToArray() : null;
+                _layoutNames = names.Count > 0 ? names : null;
             }
             catch (System.Exception ex)
             {
                 HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 刺青目錄讀取失敗: {ex.Message}");
                 _paintIds = null;
                 _layoutIds = null;
+                _layoutNames = null;
             }
 
             HS2OrbitAndExciter.Log?.LogInfo(

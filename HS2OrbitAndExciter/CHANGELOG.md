@@ -16,6 +16,7 @@
 - **掛點**：略過膝蓋／肘／腕／手／肩等關節（關節樞紐在肢體內，貼花會浮出）；優先 `N_*` 飾品掛點，再退回大腿／軀幹骨。
 - **刷新**：高潮當幀 `CreateBodyTexture` 常被 H 流程覆寫；改為立刻寫入後再於 EndOfFrame＋數幀重刷 paint 槽，避免只有第一次看得見。
 - **穩定性**：先成功建立貼花再記入 stamp（避免 Count 脫勾）；換衣重掛改為一次 `CreateBodyTexture`。
+- **部位對齊**：body paint 的 `layoutId` 依掛點名稱匹配（如 左太もも），不再隨機 UV；對不到則略過 paint，只留貼花／HUD。
 - **高潮胸部**：每次女高潮將 `BustSize`（胸サイズ）×(1+percent/100)，預設 +15%（`OrgasmBustGrowEnabled`／`OrgasmBustGrowPercent`）。
 
 ## 2026-04-05
