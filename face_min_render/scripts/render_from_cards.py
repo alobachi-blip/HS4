@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Load HS2 cards → full CmpFace non-hair draw (fo_head) + CreateFaceTexture makeup.
+"""Load HS2 cards → full CmpFace non-hair draw (real skeleton + real skin
+weights) + CreateFaceTexture makeup.
 
 Uses D:\\HS2 - Copy only. Mirrors ChaControl.CreateFaceTexture / ChangeEyes* /
-ChangeEyelashes* / CmpFace renderers (no hair).
+ChangeEyelashes* / CmpFace renderers (no hair) and ShapeHeadInfoFemale.Update()
+(auto-generated, see face_min/shape_update_real.py + tools/gen_shape_update_real.py).
 """
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from PIL import Image
@@ -26,13 +29,7 @@ from face_min.compose_face_tex import (
     export_addtex_layer,
     load_rgba,
 )
-from face_min.extract_eyes import (
-    DEFAULT_SKIP_PARTS,
-    FACE_DRAW_PARTS,
-    compose_eye_albedo,
-    export_face_meshes_from_head,
-    tinted_alpha_albedo,
-)
+from face_min.extract_eyes import compose_eye_albedo, tinted_alpha_albedo
 from face_min.extract_face_tex import extract_face_skin_pack
 from face_min.face_core import FaceCore
 from face_min.hs2_abdata import hs2_root
@@ -131,156 +128,83 @@ def load_card_face_bundle(card: Path):
     }
 
 
-def _part_main_tex(info: dict) -> Optional[np.ndarray]:
-    paths = info.get("tex_paths") or {}
-    for key in ("_MainTex", "MainTex"):
-        if key in paths:
-            return load_rgba(paths[key])
-    # fallback any png path
-    for p in paths.values():
-        arr = load_rgba(p)
-        if arr is not None:
-            return arr
-    return None
-
-
-def build_draw_extras(meta: dict, tex_dir: Path, card: dict) -> list:
-    """Build extra_meshes for all CmpFace parts except o_head (handled as main)."""
-    meshes = meta.get("meshes") or {}
+def apply_makeup_and_eyes(core: FaceCore, card: dict, tex_dir: Path) -> list[str]:
+    """Set per-part albedo+flags on `core` (real mode). Geometry/skinning is
+    handled entirely by FaceCore.deform_real_all(); we only supply textures."""
+    mk = card["makeup"]
     pupils = card["pupils"] or []
     p0 = pupils[0] if pupils else {}
     p1 = pupils[1] if len(pupils) > 1 else p0
 
-    white = load_rgba(meshes.get("eye_white"))
+    white = None
+    for part_meshdir in tex_dir.parent.glob("_fo_head*"):
+        cand = part_meshdir / "eye_white_c_t_eye_white_01.png"
+        if cand.is_file():
+            white = load_rgba(str(cand))
+            break
     if white is None:
         white = np.ones((64, 64, 4), dtype=np.float32)
-    black_default = load_rgba(meshes.get("eye_black"))
 
-    # Highlight from st_eye_hl
+    applied: list[str] = []
     hl_layer = export_addtex_layer("st_eye_hl_", int(card["hl_id"]), tex_dir / "eyes", label="hl")
     hl_tex = load_rgba(hl_layer.get("path") if hl_layer else None)
 
-    extras = []
-    for part in FACE_DRAW_PARTS:
-        if part == "o_head" or part in DEFAULT_SKIP_PARTS:
+    for side, part in (("L", "o_eyebase_L"), ("R", "o_eyebase_R")):
+        if part not in core.real_parts:
             continue
-        info = meshes.get(part) or {}
-        if not info.get("npz"):
-            continue
-        data = np.load(info["npz"])
-        verts, faces, uvs = data["verts"], data["faces"], data["uvs"]
-
-        if part in ("o_eyebase_L", "o_eyebase_R"):
-            pupil = p0 if part.endswith("_L") else p1
-            pid = int(pupil.get("pupilId", 0) or 0)
-            bid = int(pupil.get("blackId", 0) or 0)
-            pupil_layer = export_addtex_layer("st_eye_", pid, tex_dir / "eyes", label=f"pupil_{part}_{pid}")
-            black_layer = export_addtex_layer("st_eyeblack_", bid, tex_dir / "eyes", label=f"black_{part}_{bid}")
-            pupil_tex = load_rgba(pupil_layer.get("path") if pupil_layer else None)
-            black_tex = load_rgba(black_layer.get("path") if black_layer else None)
-            if black_tex is None:
-                black_tex = black_default
-            alb = compose_eye_albedo(
-                white,
-                pupil_tex,
-                pupil.get("pupilColor") or (0.3, 0.3, 0.3, 1),
-                white_color=pupil.get("whiteColor") or (1, 1, 1, 1),
-                black_tex=black_tex,
-                black_color=pupil.get("blackColor") or (0, 0, 0, 1),
-                hl_tex=hl_tex,
-                hl_color=card["hl_color"],
-                pupil_w=float(pupil.get("pupilW", 0.5) or 0.5),
-                pupil_h=float(pupil.get("pupilH", 0.5) or 0.5),
-                black_w=float(pupil.get("blackW", 0.8) or 0.8),
-                black_h=float(pupil.get("blackH", 0.8) or 0.8),
-            )
-            extras.append(
-                {
-                    "name": part,
-                    "verts": verts,
-                    "faces": faces,
-                    "uvs": uvs,
-                    "albedo": alb,
-                    "skin_tint": (1, 1, 1),
-                    "skip_ao": True,
-                }
-            )
-            continue
-
-        if part == "o_eyelashes":
-            layer = export_addtex_layer(
-                "st_eyelash_", int(card["eyelashes_id"]), tex_dir / "lash", label="lash"
-            )
-            tex = load_rgba(layer.get("path") if layer else None)
-            if tex is None:
-                tex = _part_main_tex(info)
-            if tex is None:
-                tex = np.zeros((64, 64, 4), dtype=np.float32)
-                tex[..., 3] = 1
-            alb = tinted_alpha_albedo(tex, card["eyelashes_color"])
-            extras.append(
-                {
-                    "name": part,
-                    "verts": verts,
-                    "faces": faces,
-                    "uvs": uvs,
-                    "albedo": alb,
-                    "skin_tint": (1, 1, 1),
-                    "use_alpha": True,
-                    "double_sided": True,
-                    "unlit": True,
-                    "skip_ao": True,
-                }
-            )
-            continue
-
-        if part == "o_eyeshadow":
-            # eyelid kage mesh — MainTex from mat; alpha from luminance, range ~ whiteShadowScale
-            tex = _part_main_tex(info)
-            if tex is None:
-                continue
-            # ChaControl: Lerp(0.1, 0.9, whiteShadowScale) → EyesShadowRange
-            strength = float(0.1 + 0.8 * float(np.clip(card["white_shadow_scale"], 0, 1)))
-            alb = tinted_alpha_albedo(tex, (0.12, 0.12, 0.12, strength))
-            extras.append(
-                {
-                    "name": part,
-                    "verts": verts,
-                    "faces": faces,
-                    "uvs": uvs,
-                    "albedo": alb,
-                    "skin_tint": (1, 1, 1),
-                    "use_alpha": True,
-                    "double_sided": True,
-                    "unlit": True,
-                    "skip_ao": True,
-                }
-            )
-            continue
-
-        # tooth / tang (and any other opaque)
-        tex = _part_main_tex(info)
-        if tex is None:
-            tex = np.ones((32, 32, 4), dtype=np.float32) * np.array([0.85, 0.8, 0.78, 1.0])
-        extras.append(
-            {
-                "name": part,
-                "verts": verts,
-                "faces": faces,
-                "uvs": uvs,
-                "albedo": tex,
-                "skin_tint": (1, 1, 1),
-                "skip_ao": True,
-            }
+        pupil = p0 if side == "L" else p1
+        pid = int(pupil.get("pupilId", 0) or 0)
+        bid = int(pupil.get("blackId", 0) or 0)
+        pupil_layer = export_addtex_layer("st_eye_", pid, tex_dir / "eyes", label=f"pupil_{side}_{pid}")
+        black_layer = export_addtex_layer("st_eyeblack_", bid, tex_dir / "eyes", label=f"black_{side}_{bid}")
+        alb = compose_eye_albedo(
+            white,
+            load_rgba(pupil_layer.get("path") if pupil_layer else None),
+            pupil.get("pupilColor") or (0.3, 0.3, 0.3, 1),
+            white_color=pupil.get("whiteColor") or (1, 1, 1, 1),
+            black_tex=load_rgba(black_layer.get("path") if black_layer else None),
+            black_color=pupil.get("blackColor") or (0, 0, 0, 1),
+            hl_tex=hl_tex,
+            hl_color=card["hl_color"],
+            pupil_w=float(pupil.get("pupilW", 0.5) or 0.5),
+            pupil_h=float(pupil.get("pupilH", 0.5) or 0.5),
+            black_w=float(pupil.get("blackW", 0.8) or 0.8),
+            black_h=float(pupil.get("blackH", 0.8) or 0.8),
         )
-    return extras
+        core.set_part_render(part, albedo=alb, skin_tint=(1.0, 1.0, 1.0), skip_ao=True)
+        applied.append(part)
+
+    if "o_eyelashes" in core.real_parts:
+        layer = export_addtex_layer("st_eyelash_", int(card["eyelashes_id"]), tex_dir / "lash", label="lash")
+        tex = load_rgba(layer.get("path") if layer else None)
+        if tex is None:
+            tex = np.zeros((64, 64, 4), dtype=np.float32)
+            tex[..., 3] = 1
+        alb = tinted_alpha_albedo(tex, card["eyelashes_color"])
+        core.set_part_render(
+            "o_eyelashes",
+            albedo=alb,
+            use_alpha=True,
+            double_sided=True,
+            unlit=True,
+            skip_ao=True,
+        )
+        applied.append("o_eyelashes")
+
+    if "o_eyeshadow" in core.real_parts:
+        # eyeshadow mesh MainTex comes from its own material; skipped here for
+        # now (needs a separate per-part texture export — see extract_skeleton
+        # REAL_RIG_PARTS; TODO: export material MainTex like extract_eyes did).
+        pass
+
+    return applied
 
 
 def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
     mk = card["makeup"]
     mk_dir = tex_dir / "makeup"
 
-    def layer(prefix: str, eid: int, label: str):
+    def layer(prefix: str, eid, label: str):
         return export_addtex_layer(prefix, int(eid or 0), mk_dir, label=label)
 
     lip = layer("st_lip_", mk.get("lipId", 0), "lip")
@@ -336,7 +260,6 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cards", nargs="*", type=Path)
-    ap.add_argument("--pack", type=Path, default=ROOT / "assets" / "demo_pack")
     ap.add_argument("--out-dir", type=Path, default=ROOT / "output" / "from_cards_textured")
     ap.add_argument("--size", type=int, default=640)
     args = ap.parse_args()
@@ -345,13 +268,10 @@ def main():
     if not args.cards:
         asset_dir = Path(r"C:\Users\jason\.cursor\projects\d-HS4\assets")
         args.cards = sorted(asset_dir.glob("*HS2ChaF*.png"))
-    if not (args.pack / "meta.json").exists():
-        raise SystemExit("Run scripts/build_demo_pack.py first")
 
-    core = FaceCore.from_demo_pack(args.pack)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     summary = []
-    mesh_cache: dict[int, dict] = {}
+    core_cache: dict[int, FaceCore] = {}
 
     for card_path in args.cards:
         name = card_short_name(card_path)
@@ -371,18 +291,15 @@ def main():
         composed = compose_card_face_tex(paths, card, tex_dir)
         composed_path = tex_dir / "face_composed.png"
         Image.fromarray((np.clip(composed, 0, 1) * 255).astype(np.uint8), mode="RGBA").save(composed_path)
+
+        if head_id not in core_cache:
+            mesh_dir = args.out_dir / f"_fo_head{head_id}"
+            core_cache[head_id] = FaceCore.from_real_head(head_id, cache_dir=mesh_dir)
+        core = core_cache[head_id]
         core.set_composed_albedo(composed, occlusion=None, tint_already_applied=True)
 
-        if head_id not in mesh_cache:
-            mesh_dir = args.out_dir / f"_fo_head{head_id}"
-            mesh_cache[head_id] = export_face_meshes_from_head(mesh_dir, head_id=head_id)
-        head_info = (mesh_cache[head_id].get("meshes") or {}).get("o_head") or {}
-        if not head_info.get("npz"):
-            raise RuntimeError(f"fo_head o_head missing for headId={head_id}")
-
-        extras = build_draw_extras(mesh_cache[head_id], tex_dir, card)
-        core.set_fo_head_meshes(head_info["npz"], eye_sources=extras)
-        print(f"  CmpFace parts (excl head/namida): {len(extras)} → {[e.get('name') for e in extras]}")
+        applied_parts = apply_makeup_and_eyes(core, card, tex_dir)
+        print(f"  real-skinned parts (excl head): {applied_parts}")
 
         core.set_shape(card["rates"])
         front = args.out_dir / f"{name}_front.png"
@@ -401,11 +318,10 @@ def main():
             "moleId": card["mole_id"],
             "pupils": [{"pupilId": (p or {}).get("pupilId")} for p in card["pupils"]],
             "composed": str(composed_path),
-            "parts": [e.get("name") for e in extras],
+            "parts": applied_parts,
+            "mode": core.mode,
         }
-        (args.out_dir / f"{name}_meta.json").write_text(
-            json.dumps(meta_out, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        (args.out_dir / f"{name}_meta.json").write_text(json.dumps(meta_out, ensure_ascii=False, indent=2), encoding="utf-8")
         summary.append({"name": name, "front": str(front), "side": str(side)})
         print(f"  → {front.name}, {side.name}")
 

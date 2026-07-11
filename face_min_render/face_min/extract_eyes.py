@@ -195,7 +195,15 @@ def export_face_meshes_from_head(
     *,
     head_id: int = 0,
 ) -> Dict[str, object]:
-    """Export all non-hair CmpFace meshes + default mat textures for one headId."""
+    """DEPRECATED for rendering: geometry-only, rest-pose export (no skin weights).
+
+    Superseded by extract_skeleton.export_real_head_rig(), which additionally
+    decodes real bone weights + bind pose so shapeValueFace actually deforms
+    these parts together. render_from_cards.py no longer calls this. Kept only
+    for quick inspection scripts.
+
+    Export all non-hair CmpFace meshes + default mat textures for one headId.
+    """
     import UnityPy
 
     out_dir = Path(out_dir)

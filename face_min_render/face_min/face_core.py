@@ -1,5 +1,15 @@
 # -*- coding: utf-8 -*-
-"""FaceCore: shapeValueFace → deform → HS2-textured render."""
+"""FaceCore: shapeValueFace → deform → HS2-textured render.
+
+Two modes:
+  - demo pack (`from_demo_pack`): synthetic o_head.obj + distance-weight LBS +
+    hand-approximated Src->Dst subset. Kept only as an offline fallback when no
+    HS2 Copy is available; not fidelity-accurate.
+  - real head (`from_real_head`): real cf_J_* skeleton, real per-part skin
+    weights, real cf_customhead category table, real cf_anmShapeHead_XX curves,
+    and shape_update_real.apply_real_shape_head_update (mechanically generated
+    from the decompiled ShapeHeadInfoFemale.Update()). This is the primary path.
+"""
 from __future__ import annotations
 
 import json
@@ -14,7 +24,33 @@ from .extract_face_tex import load_rgba
 from .obj_io import load_obj
 from .render import render_textured, save_image
 from .shape_update import apply_src_to_dst
+from .shape_update_real import apply_real_shape_head_update
 from .skeleton import Bone, Skeleton, skin_mesh
+
+
+def _build_skeleton(bone_names: List[str], parents: Dict[str, Optional[str]], rest_local: Dict[str, np.ndarray]) -> Skeleton:
+    bones = {}
+    for name in bone_names:
+        bones[name] = Bone(
+            name=name,
+            parent=parents.get(name),
+            rest_local=np.asarray(rest_local[name], dtype=np.float64),
+            local=np.asarray(rest_local[name], dtype=np.float64).copy(),
+        )
+    order: List[str] = []
+    remaining = set(bone_names)
+    while remaining:
+        progressed = False
+        for n in list(remaining):
+            p = parents.get(n)
+            if p is None or p in order:
+                order.append(n)
+                remaining.remove(n)
+                progressed = True
+        if not progressed:
+            order.extend(sorted(remaining))
+            break
+    return Skeleton(bones=bones, order=order)
 
 
 class FaceCore:
@@ -35,6 +71,7 @@ class FaceCore:
         albedo: Optional[np.ndarray] = None,
         occlusion: Optional[np.ndarray] = None,
     ):
+        self.mode = "demo"
         self.rest_verts = np.asarray(verts, dtype=np.float64)
         self.faces = np.asarray(faces, dtype=np.int32)
         self.uvs = np.asarray(uvs, dtype=np.float64)
@@ -48,32 +85,13 @@ class FaceCore:
         self.occlusion = occlusion
         self.skin_tint = (1.0, 1.0, 1.0)
         self.extra_meshes: List[dict] = []
-        self._eye_sources: List[dict] = []
-        self._use_rest_only = False  # True when verts come from fo_head (no demo LBS)
         self.shape = np.full(59, 0.5, dtype=np.float64)
+        self.skeleton = _build_skeleton(bone_names, parents, rest_local)
 
-        bones = {}
-        for name in bone_names:
-            bones[name] = Bone(
-                name=name,
-                parent=parents.get(name),
-                rest_local=np.asarray(rest_local[name], dtype=np.float64),
-                local=np.asarray(rest_local[name], dtype=np.float64).copy(),
-            )
-        order = []
-        remaining = set(bone_names)
-        while remaining:
-            progressed = False
-            for n in list(remaining):
-                p = parents.get(n)
-                if p is None or p in order:
-                    order.append(n)
-                    remaining.remove(n)
-                    progressed = True
-            if not progressed:
-                order.extend(sorted(remaining))
-                break
-        self.skeleton = Skeleton(bones=bones, order=order)
+        # Real-mode state (unused in demo mode)
+        self.real_skeleton: Optional[Skeleton] = None
+        self.real_parts: Dict[str, dict] = {}
+        self.real_part_render: Dict[str, dict] = {}
 
     @classmethod
     def from_demo_pack(cls, pack_dir: Union[str, Path]) -> "FaceCore":
@@ -107,6 +125,59 @@ class FaceCore:
             anime=anime,
         )
 
+    @classmethod
+    def from_real_head(cls, head_id: int, *, cache_dir: Optional[Union[str, Path]] = None) -> "FaceCore":
+        """Real cf_J_* skeleton + real per-part skin weights + real cf_customhead
+        category table + real cf_anmShapeHead_XX curves. No synthetic geometry,
+        no synthetic bones — every number here is read out of the HS2 Copy.
+        """
+        from .extract_skeleton import (
+            export_real_head_rig,
+            load_real_category_table,
+            load_real_shape_anime,
+        )
+
+        cache_dir = Path(cache_dir) if cache_dir else Path(f"_real_rig_head{head_id}")
+        rig_meta = export_real_head_rig(cache_dir, head_id=head_id)
+
+        self = cls.__new__(cls)
+        self.mode = "real"
+        self.skin_tint = (1.0, 1.0, 1.0)
+        self.shape = np.full(59, 0.5, dtype=np.float64)
+        self.extra_meshes = []
+        self.albedo = None
+        self.occlusion = None
+
+        parents = rig_meta["parents"]
+        rest_local = {k: np.asarray(v, dtype=np.float64) for k, v in rig_meta["rest_local"].items()}
+        self.real_skeleton = _build_skeleton(list(parents.keys()), parents, rest_local)
+        self.real_category_table = load_real_category_table()
+        self.real_anime = load_real_shape_anime(head_id)
+
+        self.real_parts = {}
+        for part_name, info in rig_meta["parts"].items():
+            if "error" in info:
+                continue
+            data = np.load(info["npz"])
+            self.real_parts[part_name] = {
+                "rest_verts": np.asarray(data["verts"], dtype=np.float64),
+                "faces": np.asarray(data["faces"], dtype=np.int32),
+                "uvs": np.asarray(data["uvs"], dtype=np.float64),
+                "bone_names": [str(x) for x in data["bone_names"].tolist()],
+                "bone_indices": np.asarray(data["bone_indices"], dtype=np.int32),
+                "bone_weights": np.asarray(data["bone_weights"], dtype=np.float64),
+                "bind_world_inv": {k: np.asarray(v, dtype=np.float64) for k, v in info["bind_world_inv"].items()},
+            }
+        if "o_head" not in self.real_parts:
+            raise RuntimeError(f"o_head missing from real rig for headId={head_id}")
+
+        head = self.real_parts["o_head"]
+        self.rest_verts = head["rest_verts"]
+        self.faces = head["faces"]
+        self.uvs = head["uvs"]
+        self.real_part_render = {}
+        return self
+
     def set_hs2_skin(
         self,
         albedo_path: Optional[str],
@@ -131,34 +202,18 @@ class FaceCore:
         if tint_already_applied:
             self.skin_tint = (1.0, 1.0, 1.0)
 
-    def set_fo_head_meshes(
-        self,
-        head_npz: Union[str, Path],
-        *,
-        eye_sources: Optional[List[dict]] = None,
-    ) -> None:
-        """Replace demo geometry with fo_head o_head (+ same-space eyebases).
-
-        Eyes must already be in the same mesh space as o_head (CmpFace prefab).
-        Demo ShapeAnime LBS is disabled until real bone weights are exported.
-        """
-        data = np.load(head_npz)
-        self.rest_verts = np.asarray(data["verts"], dtype=np.float64)
-        self.faces = np.asarray(data["faces"], dtype=np.int32)
-        self.uvs = np.asarray(data["uvs"], dtype=np.float64) if "uvs" in data.files else np.zeros((len(self.rest_verts), 2))
-        self._use_rest_only = True
-        self.extra_meshes = []
-        self._eye_sources = list(eye_sources or [])
+    def set_part_render(self, part_name: str, *, albedo: np.ndarray, **flags) -> None:
+        """Real-mode only: set albedo + render flags (use_alpha/unlit/double_sided/
+        skip_ao/skin_tint) for a non-head CmpFace part (eyebase/eyelashes/eyeshadow/
+        tooth/tang). Geometry is re-skinned every render() call from the SAME
+        skeleton pose as o_head — no static/rest-pose overlay."""
+        if part_name not in self.real_parts:
+            return
+        self.real_part_render[part_name] = {"albedo": albedo, **flags}
 
     def set_extra_meshes(self, meshes: Optional[List[dict]]) -> None:
-        """Overlays already in the same space as current head verts."""
+        """Demo-mode overlays already in the same space as current head verts."""
         self.extra_meshes = list(meshes or [])
-        self._eye_sources = []
-
-    def set_eye_sources(self, sources: Optional[List[dict]]) -> None:
-        """Eyebases in fo_head mesh space (same as o_head) — no retarget."""
-        self._eye_sources = list(sources or [])
-        self.extra_meshes = []
 
     def set_shape(self, values: Sequence[float]) -> None:
         arr = np.asarray(list(values), dtype=np.float64)
@@ -171,19 +226,22 @@ class FaceCore:
     def set_index(self, index: int, value: float) -> None:
         self.shape[int(index)] = float(np.clip(value, 0.0, 1.0))
 
-    def _gather_src(self) -> Dict[str, dict]:
+    def _gather_src(self, category_table: Dict[int, list], anime: AnimationKeyInfo) -> Dict[str, dict]:
+        """Mirrors ShapeInfoBase.ChangeValue: for every category, overwrite only the
+        masked axes of its Src bone(s) from the curve sampled at this category's
+        shapeValueFace rate. Unmasked axes / untouched names keep identity."""
         src: Dict[str, dict] = {}
-        for entries in self.category_table.values():
+        for entries in category_table.values():
             for e in entries:
                 name = e["name"]
                 if name not in src:
                     src[name] = {"pos": np.zeros(3), "rot": np.zeros(3), "scl": np.ones(3)}
-        for cat, entries in self.category_table.items():
+        for cat, entries in category_table.items():
             rate = float(self.shape[int(cat)]) if 0 <= int(cat) < 59 else 0.5
             for e in entries:
                 name = e["name"]
                 use = e.get("use", {})
-                pos, rot, scl = self.anime.get_prs(name, rate)
+                pos, rot, scl = anime.get_prs(name, rate)
                 cur = src[name]
                 up = use.get("pos", [True, True, True])
                 ur = use.get("rot", [True, True, True])
@@ -198,10 +256,9 @@ class FaceCore:
         return src
 
     def deform(self) -> np.ndarray:
-        if self._use_rest_only:
-            return self.rest_verts.copy()
+        """Demo-mode single-mesh deform (kept for from_demo_pack)."""
         self.skeleton.reset_to_rest()
-        apply_src_to_dst(self._gather_src(), self.skeleton)
+        apply_src_to_dst(self._gather_src(self.category_table, self.anime), self.skeleton)
         self.skeleton.update_world()
         return skin_mesh(
             self.rest_verts,
@@ -212,6 +269,27 @@ class FaceCore:
             self.bind_world_inv,
         )
 
+    def deform_real_all(self) -> Dict[str, np.ndarray]:
+        """Real-mode: pose the shared cf_J_* skeleton once from shapeValueFace,
+        then LBS-skin every loaded part (o_head + eyebase/eyelashes/eyeshadow/
+        tooth/tang) against that ONE pose — they move together by construction."""
+        sk = self.real_skeleton
+        sk.reset_to_rest()
+        src = self._gather_src(self.real_category_table, self.real_anime)
+        apply_real_shape_head_update(src, sk)
+        sk.update_world()
+        out: Dict[str, np.ndarray] = {}
+        for name, part in self.real_parts.items():
+            out[name] = skin_mesh(
+                part["rest_verts"],
+                part["bone_indices"],
+                part["bone_weights"],
+                part["bone_names"],
+                sk,
+                part["bind_world_inv"],
+            )
+        return out
+
     def render(
         self,
         out_front: Optional[Union[str, Path]] = None,
@@ -220,8 +298,6 @@ class FaceCore:
         size: int = 512,
         fast: bool = True,
     ) -> Dict[str, object]:
-        verts = self.deform()
-        result: Dict[str, object] = {"verts": verts}
         if self.albedo is None:
             alb = np.ones((64, 64, 4), dtype=np.float32)
             alb[..., 0], alb[..., 1], alb[..., 2] = 0.86, 0.72, 0.66
@@ -229,28 +305,41 @@ class FaceCore:
         else:
             albedo = self.albedo
 
-        # Parts already share o_head space (fo_head prefab) — no retarget.
-        extras = list(self.extra_meshes)
-        for src in self._eye_sources:
-            item = {
-                "verts": np.asarray(src["verts"], dtype=np.float64),
-                "faces": src["faces"],
-                "uvs": src["uvs"],
-                "albedo": src["albedo"],
-                "skin_tint": src.get("skin_tint", (1.0, 1.0, 1.0)),
-            }
-            for k in ("use_alpha", "double_sided", "unlit", "skip_ao", "occlusion", "name"):
-                if k in src:
-                    item[k] = src[k]
-            extras.append(item)
+        extras: List[dict] = []
+        if self.mode == "real":
+            deformed = self.deform_real_all()
+            verts = deformed["o_head"]
+            faces = self.real_parts["o_head"]["faces"]
+            uvs = self.real_parts["o_head"]["uvs"]
+            for part_name, render_info in self.real_part_render.items():
+                if part_name not in deformed:
+                    continue
+                part = self.real_parts[part_name]
+                item = {
+                    "verts": deformed[part_name],
+                    "faces": part["faces"],
+                    "uvs": part["uvs"],
+                    "albedo": render_info["albedo"],
+                    "skin_tint": render_info.get("skin_tint", (1.0, 1.0, 1.0)),
+                }
+                for k in ("use_alpha", "double_sided", "unlit", "skip_ao", "occlusion"):
+                    if k in render_info:
+                        item[k] = render_info[k]
+                extras.append(item)
+        else:
+            verts = self.deform()
+            faces = self.faces
+            uvs = self.uvs
+            extras = list(self.extra_meshes)
 
+        result: Dict[str, object] = {"verts": verts}
         for view, path in (("front", out_front), ("side", out_side)):
             if path is None:
                 continue
             img = render_textured(
                 verts,
-                self.faces,
-                self.uvs,
+                faces,
+                uvs,
                 albedo=albedo,
                 occlusion=self.occlusion,
                 view=view,  # type: ignore[arg-type]

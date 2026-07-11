@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """AnimationKeyInfo / ShapeAnime: rate → (pos, rot, scl).
 
-Binary layout matches HS2 AnimationKeyInfo.LoadInfo(Stream):
+Binary layout matches HS2 AnimationKeyInfo.LoadInfo(Stream) (C# BinaryReader):
   int32 N
   repeat N:
-    string name (Unity length-prefixed UTF-8: int32 len + bytes)
+    string name (C# BinaryWriter.Write(string): 7-bit-encoded length prefix + UTF-8 bytes,
+                 NOT a raw int32 length — verified against real cf_anmShapeHead_XX assets)
     int32 K
     repeat K: int32 no, float pos[3], rot[3], scl[3]
 """
@@ -17,6 +18,17 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+
+def _lerp_angle_deg(a: float, b: float, t: float) -> float:
+    """Match Unity Mathf.LerpAngle: shortest-path circular interpolation in degrees.
+
+    Real HS2 rotation curves are stored as raw 0..360 degree values that wrap
+    (e.g. ...358.33, 0.0, 1.67...). A plain lerp between 0.0 and 358.33 gives
+    ~179 (a bogus half-turn) instead of the intended ~-1 (359). This bit every
+    eye/chin rotation category once real (non-demo) curves were wired in."""
+    diff = (b - a + 180.0) % 360.0 - 180.0
+    return a + diff * t
 
 
 @dataclass
@@ -45,7 +57,10 @@ class AnimationKeyInfo:
         t = idx - i0
         a, b = keys[i0], keys[i1]
         pos = (1 - t) * a.pos + t * b.pos
-        rot = (1 - t) * a.rot + t * b.rot  # game uses LerpAngle; fine for small demo ranges
+        rot = np.array(
+            [_lerp_angle_deg(float(a.rot[i]), float(b.rot[i]), t) for i in range(3)],
+            dtype=np.float64,
+        )
         scl = (1 - t) * a.scl + t * b.scl
         return pos, rot, scl
 
@@ -87,8 +102,11 @@ class AnimationKeyInfo:
 
     @classmethod
     def load_binary(cls, path: str | Path) -> "AnimationKeyInfo":
-        """Load game ShapeAnime TextAsset.bytes."""
-        data = Path(path).read_bytes()
+        """Load game ShapeAnime TextAsset.bytes (e.g. cf_anmShapeHead_XX)."""
+        return cls.from_bytes(Path(path).read_bytes())
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "AnimationKeyInfo":
         offset = 0
 
         def read_i32() -> int:
@@ -106,9 +124,23 @@ class AnimationKeyInfo:
         def read_vec3() -> np.ndarray:
             return np.array([read_f32(), read_f32(), read_f32()], dtype=np.float64)
 
+        def read_7bit_len() -> int:
+            """C# BinaryWriter.Write(string) length prefix (7-bit encoded, NOT int32)."""
+            nonlocal offset
+            result = 0
+            shift = 0
+            while True:
+                b = data[offset]
+                offset += 1
+                result |= (b & 0x7F) << shift
+                shift += 7
+                if not (b & 0x80):
+                    break
+            return result
+
         def read_string() -> str:
             nonlocal offset
-            n = read_i32()
+            n = read_7bit_len()
             s = data[offset : offset + n].decode("utf-8", errors="replace")
             offset += n
             return s
@@ -126,4 +158,6 @@ class AnimationKeyInfo:
                 scl = read_vec3()
                 keys.append(KeySample(no=no, pos=pos, rot=rot, scl=scl))
             curves[name] = keys
+        if offset != len(data):
+            raise ValueError(f"AnimationKeyInfo parse left {len(data) - offset} trailing bytes")
         return cls(curves=curves)
