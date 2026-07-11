@@ -16,8 +16,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .extract_eyes import (
-    _export_texture_from_env,
-    _mat_tex_map,
+    DEFAULT_SKIP_PARTS,
+    FACE_DRAW_PARTS,
+    export_texture_from_env,
+    mat_tex_map,
     _parent_prefab_name,
     resolve_fo_head_entry,
 )
@@ -217,18 +219,9 @@ def _find_smr(env, go_name: str, prefab: str):
     return None
 
 
-# All non-hair CmpFace renderers that carry their own skin weights against the
-# same cf_J_* skeleton as o_head. Import-light duplicate of extract_eyes.FACE_DRAW_PARTS
-# to avoid a circular import; keep both lists in sync if CmpFace targets change.
-REAL_RIG_PARTS: Tuple[str, ...] = (
-    "o_head",
-    "o_tooth",
-    "o_tang",
-    "o_eyebase_L",
-    "o_eyebase_R",
-    "o_eyeshadow",
-    "o_eyelashes",
-)
+# Non-hair CmpFace parts with real skin weights (same source list as FACE_DRAW_PARTS,
+# minus DEFAULT_SKIP_PARTS e.g. o_namida). Single source of truth — do not fork.
+REAL_RIG_PARTS: Tuple[str, ...] = tuple(p for p in FACE_DRAW_PARTS if p not in DEFAULT_SKIP_PARTS)
 
 
 def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object]:
@@ -280,14 +273,14 @@ def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object
             try:
                 mat = mats[0].read()
                 mat_name = mat.m_Name
-                tex_map = _mat_tex_map(mat)
+                tex_map = mat_tex_map(mat)
                 color_map = _mat_color_map(mat)
             except Exception:
                 pass
         for prop, tex_name in tex_map.items():
             safe = prop.replace(" ", "_").lstrip("_")
             dest = out_dir / f"{part_name}_{safe}_{tex_name}.png"
-            if _export_texture_from_env(env, tex_name, dest):
+            if export_texture_from_env(env, tex_name, dest):
                 tex_paths[prop] = str(dest)
 
         npz_path = out_dir / f"{part_name}_real.npz"
@@ -323,7 +316,7 @@ def export_real_head_rig(out_dir: Path, *, head_id: int = 0) -> Dict[str, object
         ("c_t_eyeblack_00", "eye_black"),
     ):
         dest = out_dir / f"{label}_{tex_name}.png"
-        if _export_texture_from_env(env, tex_name, dest):
+        if export_texture_from_env(env, tex_name, dest):
             shared_tex[label] = str(dest)
 
     meta = {

@@ -1,6 +1,11 @@
 # HANDOFF：真骨架/真蒙皮已接上，下一步清單
 
-最新進度（本輪）：`o_eyeshadow` / `o_tooth` / `o_tang` 已接真材質 `_MainTex`（+ `_Color`），並納入 `render_from_cards.py` 繪製。
+最新進度（本輪）：眼壞掉（綠黑杏仁罩）已修——根因是 HS2 `st_eyelash`/`st_eye` 等 DXT1 AddTex
+把 coverage 放在 R、A 恆為 1；先前把 RGB 當顏色＋A 當透明，整片不透明綠罩蓋住眼球。
+現依 `ChangeEyelashes*` / `ChangeEyes*`：`normalize_hs2_addtex` 把 R→A，睫毛用 `_Color`，
+瞳孔/眼黑/高光按 ChaControl layout（眼黑含 material `_texture3uv.z=4`）。
+
+前一輪：`o_eyeshadow` / `o_tooth` / `o_tang` 已接真材質 `_MainTex`（+ `_Color`）。
 
 先前 commit：`cfe7353` feat(face_min_render): drive real cf_J_* skeleton from real shapeValueFace
 （在此之前還有 `2144b31` / `76c62c8` / `98d08e9` / `b59c1fc` 等，都在 `main` 上）
@@ -66,6 +71,9 @@
 
 ## 已知的架構債務（上次 code review 記錄，還沒處理完的部分）
 
+- ~~`extract_skeleton` 跨模組匯入 `_mat_tex_map`/`_export_texture_from_env`~~ **已清**：改為公開
+  `mat_tex_map` / `export_texture_from_env`；`REAL_RIG_PARTS` 改由 `FACE_DRAW_PARTS` 減
+  `DEFAULT_SKIP_PARTS` 推導，不再手動維護兩份清單。
 - `extract_eyes.py` 裡的 `export_face_meshes_from_head`/`export_eyebase_from_head` 現在是
   **deprecated 死代碼**（已加註記），render_from_cards.py 不再用它，改用
   `extract_skeleton.export_real_head_rig`。之後可以考慮直接刪掉，減少「兩套頭」的困惑。
