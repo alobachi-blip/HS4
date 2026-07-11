@@ -20,8 +20,6 @@ namespace HS2OrbitAndExciter
         public const string BoneHead = "cf_J_Head";
         public const string BoneChest = "cf_J_Mune00";
         public const string BonePelvis = "cf_J_Kokan";
-        /// <summary>Left foot bone for measuring full body height (head to foot).</summary>
-        private const string BoneFootL = "cf_J_Foot_L";
 
         public static ChaControl[]? GetChaFemales(HScene hScene)
         {
@@ -102,17 +100,24 @@ namespace HS2OrbitAndExciter
             return transBase.InverseTransformPoint(worldPos.Value);
         }
 
-        /// <summary>Full body height in world units (head to foot). Uses first female; fallback 1.6f if bones missing.</summary>
+        /// <summary>
+        /// Estimate full body height from the same three bones as Q/W/E focus (Head / Chest / Pelvis).
+        /// Uses 3D distances so pose orientation does not collapse the span; Head↔Pelvis × 2.2 ≈ standing height.
+        /// </summary>
         public static float GetBodyHeight(ChaControl[]? chaFemales, int femaleIndex = 0)
         {
             if (chaFemales == null || femaleIndex < 0 || femaleIndex >= chaFemales.Length) return 1.6f;
             var head = GetBonePosition(chaFemales, femaleIndex, BoneHead);
-            var foot = GetBonePosition(chaFemales, femaleIndex, BoneFootL);
-            if (head.HasValue && foot.HasValue)
-                return Mathf.Max(0.5f, head.Value.y - foot.Value.y);
+            var chest = GetBonePosition(chaFemales, femaleIndex, BoneChest);
             var pelvis = GetBonePosition(chaFemales, femaleIndex, BonePelvis);
+            // Q↔E: primary torso span (same bones as CameraKeyCtrl / plugin focus 0 & 2).
             if (head.HasValue && pelvis.HasValue)
-                return Mathf.Max(0.5f, (head.Value.y - pelvis.Value.y) * 2.2f);
+                return Mathf.Max(0.5f, Vector3.Distance(head.Value, pelvis.Value) * 2.2f);
+            // Partial: Q↔W or W↔E, scale similarly.
+            if (head.HasValue && chest.HasValue)
+                return Mathf.Max(0.5f, Vector3.Distance(head.Value, chest.Value) * 3.5f);
+            if (chest.HasValue && pelvis.HasValue)
+                return Mathf.Max(0.5f, Vector3.Distance(chest.Value, pelvis.Value) * 3.5f);
             return 1.6f;
         }
 
