@@ -2,14 +2,14 @@
 
 ## 2026-07-12
 
-### 行為：長動作可欣賞，按需才脫離
+### 行為：長動作可欣賞，按需才脫離（A+B）
 
-- 洗澡／入廁／高潮後 AfterIdle、Idle 等長等待：**不再**用 2 秒假滾輪自動脫離。
-- 僅在下列條件 **armed** `RequestMotionEscape` 後才強制 `IsReStart`／`IsStart`／`setPlay`：
-  - **L** 換姿
-  - **真實滑鼠滾輪**
-  - **迴轉換姿**：`ChangePoseOnCycle` 且滿 `OrbitCountBeforePoseChange` 次完整迴轉（預設 2；非計時）
-- FSM log：`escape`/`request`（reason=`L`|`wheel`|`cycle`）。
+- **只保護這 7 個姿勢**（短高潮 AfterIdle 不在內）：
+  - 窺視：105 洋式トイレ覗き、106 和式トイレ覗き、107 シャワー覗き
+  - 場所自慰：8 シャワー／9 洋式トイレ／15 和式トイレ／102 風呂 オナニー
+- 上述姿勢：擋自動換姿／checkpoint，直到 **L**／**真實滾輪**／**迴轉換姿**（`ChangePoseOnCycle`×`OrbitCountBeforePoseChange`，預設 2 迴轉）armed。
+- **高潮後短 AfterIdle**（`Orgasm_*_A` 等）：約 **2 秒**假滾輪／強制 `IsReStart` 自動脫離（**即使**當前仍是 A+B 姿勢 ID，也不擋這段短等待）。
+- FSM：`longAppreciation`；`escape`/`request`（`L`|`wheel`|`cycle`）。
 
 ### 功能：內射肚子變大（選單，預設開）
 

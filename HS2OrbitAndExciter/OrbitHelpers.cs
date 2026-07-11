@@ -75,6 +75,37 @@ namespace HS2OrbitAndExciter
             "D_Orgasm_A", "D_Orgasm_OUT_A", "D_Orgasm_IN_A", "D_OrgasmM_OUT_A"
         };
 
+        /// <summary>
+        /// Long appreciation poses (user confirmed A+B):
+        /// peeping 105/106/107 + location onani 8/9/15/102.
+        /// Short orgasm AfterIdle is NOT included.
+        /// </summary>
+        private static readonly int[] LongAppreciationPoseIds =
+        {
+            8,    // シャワーオナニー
+            9,    // 洋式トイレオナニー
+            15,   // 和式トイレオナニー
+            102,  // 風呂オナニー
+            105,  // 洋式トイレ覗き
+            106,  // 和式トイレ覗き
+            107,  // シャワー覗き
+        };
+
+        /// <summary>True when current H pose is a long bath/toilet/shower set to watch until L/wheel/cycle.</summary>
+        public static bool IsLongAppreciationPose(HScene? hScene)
+        {
+            var info = hScene?.ctrlFlag?.nowAnimationInfo;
+            if (info == null)
+                return false;
+            int id = info.id;
+            for (int i = 0; i < LongAppreciationPoseIds.Length; i++)
+            {
+                if (LongAppreciationPoseIds[i] == id)
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>Vanilla Idle / D_Idle (pre-action wait).</summary>
         public static bool IsFirstFemaleInIdle(HScene? hScene)
         {

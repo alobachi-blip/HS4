@@ -12,7 +12,7 @@ namespace HS2OrbitAndExciter
     {
         private static readonly string[] AllowedStateNames =
         {
-            // Idle / AfterIdle only after RequestMotionEscape (see TryInjectOrbitWheelBypass).
+            // Short AfterIdle/Idle: timed fake-wheel (2s). A+B long poses: only after RequestMotionEscape.
             "Idle", "D_Idle", "WIdle", "SIdle", "Insert", "D_Insert",
             "Orgasm_A", "Orgasm_IN_A", "Orgasm_OUT_A", "Drink_A", "Vomit_A", "OrgasmM_OUT_A",
             "D_Orgasm_A", "D_Orgasm_OUT_A", "D_Orgasm_IN_A", "D_OrgasmM_OUT_A"

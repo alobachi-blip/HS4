@@ -41,6 +41,8 @@ namespace HS2OrbitAndExciter
         public const string NoPoseCandidate = "noPoseCandidate";
         public const string CycleQueued = "cycleQueued";
         public const string NowChangeAnim = "NowChangeAnim";
+        /// <summary>Bath/toilet/shower long poses (A+B): wait for L / wheel / cycle escape.</summary>
+        public const string LongAppreciation = "longAppreciation";
 
         // Recovery log msg keys
         public const string ClearedFaintnessInvalid = "cleared_faintness_invalid_pose";

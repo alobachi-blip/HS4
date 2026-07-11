@@ -32,10 +32,12 @@ namespace HS2OrbitAndExciter
         private static FieldInfo? _isAutoActionChangeField;
         private static PropertyInfo? _isAutoActionChangeProp;
         private static float _wheelBypassStartUnscaled = -1f;
+        private static float _afterIdleAutoEscapeSinceUnscaled = -1f;
+        private static float _idleAutoEscapeSinceUnscaled = -1f;
 
         private static float _selectionListStuckSinceUnscaled = -1f;
         private static float _nowChangeStuckSinceUnscaled = -1f;
-        /// <summary>User/cycle requested leave of AfterIdle/Idle; active until this unscaled time.</summary>
+        /// <summary>User/cycle requested leave of long appreciation / waits; active until this unscaled time.</summary>
         private static float _motionEscapeUntilUnscaled = -1f;
         private static string _motionEscapeReason = "";
 
@@ -120,6 +122,8 @@ namespace HS2OrbitAndExciter
             _orbitAssistActive = active;
             _checkpointIdleTime = 0f;
             _wheelBypassStartUnscaled = -1f;
+            _afterIdleAutoEscapeSinceUnscaled = -1f;
+            _idleAutoEscapeSinceUnscaled = -1f;
             _orgasmAssistQuietUntilUnscaled = -1f;
             _selectionListStuckSinceUnscaled = -1f;
             _nowChangeStuckSinceUnscaled = -1f;
@@ -218,6 +222,16 @@ namespace HS2OrbitAndExciter
             if (Time.unscaledTime < _manualSelectionSuppressUntilUnscaled)
             {
                 reason = OrbitAssistReasons.RecentUiClick;
+                return false;
+            }
+
+            // A+B long bath/toilet/shower: do not auto-pick next pose until L/wheel/cycle arms escape.
+            // Cycle pose RequestPoseChange arms first, then CanAcceptRequest may still pass.
+            if (hScene != null
+                && OrbitHelpers.IsLongAppreciationPose(hScene)
+                && !IsMotionEscapeArmed())
+            {
+                reason = OrbitAssistReasons.LongAppreciation;
                 return false;
             }
 
@@ -550,13 +564,6 @@ namespace HS2OrbitAndExciter
                 _wheelBypassStartUnscaled = -1f;
                 return false;
             }
-            // Long waits (bath/toilet/AfterIdle/Idle): never auto-fake-wheel by timer.
-            // Only after L / real scroll / cycle pose armed escape.
-            if (!IsMotionEscapeArmed())
-            {
-                _wheelBypassStartUnscaled = -1f;
-                return false;
-            }
             var hScene = OrbitController.TryGetHScene();
             if (hScene?.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
             {
@@ -568,15 +575,33 @@ namespace HS2OrbitAndExciter
                 _wheelBypassStartUnscaled = -1f;
                 return false;
             }
-            // Armed: inject immediately (no 2s delay) so Manual AfterIdle advances same gesture.
+
+            // A+B long poses: fake wheel only after L / real scroll / cycle arms escape.
+            // Exception: post-orgasm AfterIdle (Orgasm_*_A) still uses timed bypass even on those pose ids.
+            if (OrbitHelpers.IsLongAppreciationPose(hScene)
+                && !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+            {
+                _wheelBypassStartUnscaled = -1f;
+                if (!IsMotionEscapeArmed())
+                    return false;
+                wheel = WheelBypassValue;
+                return true;
+            }
+
+            // Short orgasm AfterIdle / normal Idle / Insert: timed fake-wheel advance.
+            if (_wheelBypassStartUnscaled < 0f)
+                _wheelBypassStartUnscaled = Time.unscaledTime;
+            float elapsed = Time.unscaledTime - _wheelBypassStartUnscaled;
+            if (elapsed < WheelBypassDelaySeconds)
+                return false;
             _wheelBypassStartUnscaled = -1f;
             wheel = WheelBypassValue;
             return true;
         }
 
         /// <summary>
-        /// Arm leave of long AfterIdle/Idle (bath/toilet etc.) so user can watch until
-        /// L, real mouse wheel, or cycle pose-change asks to advance.
+        /// Arm leave so L / real mouse wheel / cycle pose can exit long A+B poses
+        /// (and also accelerate short AfterIdle/Idle force patches).
         /// </summary>
         internal static void RequestMotionEscape(string reason)
         {
@@ -591,26 +616,54 @@ namespace HS2OrbitAndExciter
         internal static bool IsMotionEscapeArmed() =>
             _orbitAssistActive && Time.unscaledTime < _motionEscapeUntilUnscaled;
 
-        /// <summary>True only when escape armed and female is in AfterIdle (bath/toilet/post-orgasm wait).</summary>
+        /// <summary>
+        /// Force leave AfterIdle: short orgasm waits auto after ≈2s (even on A+B pose ids),
+        /// or immediately when escape armed.
+        /// </summary>
         internal static bool ShouldForceAfterIdleEscape()
         {
-            if (!IsMotionEscapeArmed())
+            if (!_orbitAssistActive)
+            {
+                _afterIdleAutoEscapeSinceUnscaled = -1f;
                 return false;
+            }
             var hScene = OrbitController.TryGetHScene();
-            return hScene != null && OrbitHelpers.IsFirstFemaleInAfterIdle(hScene);
+            if (hScene == null || !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+            {
+                _afterIdleAutoEscapeSinceUnscaled = -1f;
+                return false;
+            }
+            if (IsMotionEscapeArmed())
+                return true;
+            // Orgasm_*_A is always the short wait — never gate on long-appreciation pose id.
+            if (_afterIdleAutoEscapeSinceUnscaled < 0f)
+                _afterIdleAutoEscapeSinceUnscaled = Time.unscaledTime;
+            return Time.unscaledTime - _afterIdleAutoEscapeSinceUnscaled >= WheelBypassDelaySeconds;
         }
 
-        /// <summary>True only when escape armed and female is in Idle (Auto IsStart gate).</summary>
+        /// <summary>
+        /// Force leave Idle: A+B long poses require armed escape; other Idle uses ≈2s auto (or armed).
+        /// </summary>
         internal static bool ShouldForceIdleEscape()
         {
-            if (!IsMotionEscapeArmed())
+            if (!_orbitAssistActive)
+            {
+                _idleAutoEscapeSinceUnscaled = -1f;
                 return false;
+            }
             var hScene = OrbitController.TryGetHScene();
-            if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene))
+            if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene) || hScene.NowChangeAnim)
+            {
+                _idleAutoEscapeSinceUnscaled = -1f;
                 return false;
-            if (hScene.NowChangeAnim)
-                return false;
-            return true;
+            }
+            if (OrbitHelpers.IsLongAppreciationPose(hScene))
+                return IsMotionEscapeArmed();
+            if (IsMotionEscapeArmed())
+                return true;
+            if (_idleAutoEscapeSinceUnscaled < 0f)
+                _idleAutoEscapeSinceUnscaled = Time.unscaledTime;
+            return Time.unscaledTime - _idleAutoEscapeSinceUnscaled >= WheelBypassDelaySeconds;
         }
 
         /// <summary>If armed and still in AfterIdle, force WLoop/D_WLoop.</summary>
