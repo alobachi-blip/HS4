@@ -47,6 +47,9 @@ class FaceCore:
         self.albedo = albedo
         self.occlusion = occlusion
         self.skin_tint = (1.0, 1.0, 1.0)
+        self.extra_meshes: List[dict] = []
+        self._eye_sources: List[dict] = []
+        self._use_rest_only = False  # True when verts come from fo_head (no demo LBS)
         self.shape = np.full(59, 0.5, dtype=np.float64)
 
         bones = {}
@@ -115,6 +118,48 @@ class FaceCore:
         if skin_tint is not None and len(skin_tint) >= 3:
             self.skin_tint = (float(skin_tint[0]), float(skin_tint[1]), float(skin_tint[2]))
 
+    def set_composed_albedo(
+        self,
+        albedo: np.ndarray,
+        *,
+        occlusion: Optional[np.ndarray] = None,
+        tint_already_applied: bool = True,
+    ) -> None:
+        self.albedo = np.asarray(albedo, dtype=np.float32)
+        if occlusion is not None:
+            self.occlusion = np.asarray(occlusion, dtype=np.float32)
+        if tint_already_applied:
+            self.skin_tint = (1.0, 1.0, 1.0)
+
+    def set_fo_head_meshes(
+        self,
+        head_npz: Union[str, Path],
+        *,
+        eye_sources: Optional[List[dict]] = None,
+    ) -> None:
+        """Replace demo geometry with fo_head o_head (+ same-space eyebases).
+
+        Eyes must already be in the same mesh space as o_head (CmpFace prefab).
+        Demo ShapeAnime LBS is disabled until real bone weights are exported.
+        """
+        data = np.load(head_npz)
+        self.rest_verts = np.asarray(data["verts"], dtype=np.float64)
+        self.faces = np.asarray(data["faces"], dtype=np.int32)
+        self.uvs = np.asarray(data["uvs"], dtype=np.float64) if "uvs" in data.files else np.zeros((len(self.rest_verts), 2))
+        self._use_rest_only = True
+        self.extra_meshes = []
+        self._eye_sources = list(eye_sources or [])
+
+    def set_extra_meshes(self, meshes: Optional[List[dict]]) -> None:
+        """Overlays already in the same space as current head verts."""
+        self.extra_meshes = list(meshes or [])
+        self._eye_sources = []
+
+    def set_eye_sources(self, sources: Optional[List[dict]]) -> None:
+        """Eyebases in fo_head mesh space (same as o_head) — no retarget."""
+        self._eye_sources = list(sources or [])
+        self.extra_meshes = []
+
     def set_shape(self, values: Sequence[float]) -> None:
         arr = np.asarray(list(values), dtype=np.float64)
         if arr.size < 59:
@@ -153,6 +198,8 @@ class FaceCore:
         return src
 
     def deform(self) -> np.ndarray:
+        if self._use_rest_only:
+            return self.rest_verts.copy()
         self.skeleton.reset_to_rest()
         apply_src_to_dst(self._gather_src(), self.skeleton)
         self.skeleton.update_world()
@@ -176,12 +223,24 @@ class FaceCore:
         verts = self.deform()
         result: Dict[str, object] = {"verts": verts}
         if self.albedo is None:
-            # flat fallback skin
             alb = np.ones((64, 64, 4), dtype=np.float32)
             alb[..., 0], alb[..., 1], alb[..., 2] = 0.86, 0.72, 0.66
             albedo = alb
         else:
             albedo = self.albedo
+
+        # Eyes already share o_head space (fo_head prefab) — no retarget.
+        extras = list(self.extra_meshes)
+        for src in self._eye_sources:
+            extras.append(
+                {
+                    "verts": np.asarray(src["verts"], dtype=np.float64),
+                    "faces": src["faces"],
+                    "uvs": src["uvs"],
+                    "albedo": src["albedo"],
+                    "skin_tint": src.get("skin_tint", (1.0, 1.0, 1.0)),
+                }
+            )
 
         for view, path in (("front", out_front), ("side", out_side)):
             if path is None:
@@ -195,6 +254,7 @@ class FaceCore:
                 view=view,  # type: ignore[arg-type]
                 size=size,
                 skin_tint=self.skin_tint,
+                extra_meshes=extras or None,
             )
             save_image(img, path)
             result[view] = str(path)

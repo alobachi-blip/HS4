@@ -56,75 +56,98 @@ def render_textured(
     size: int = 512,
     skin_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0),
     bg: Tuple[float, float, float] = (0.55, 0.58, 0.62),
+    extra_meshes: Optional[list] = None,
 ) -> np.ndarray:
-    """Fast path: sample HS2 albedo at vertices, Gouraud-ish face colors, no edges."""
+    """Fast path: sample HS2 albedo at vertices; optional extra_meshes for eyes.
+
+    extra_meshes: list of dicts with keys verts, faces, uvs, albedo (optional).
+    """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.collections import PolyCollection
 
+    # Merge extras into one draw list
+    draw_items = [{"verts": verts, "faces": faces, "uvs": uvs, "albedo": albedo, "occlusion": occlusion}]
+    if extra_meshes:
+        for em in extra_meshes:
+            draw_items.append(em)
+
+    # Combined bounds for camera framing
+    all_v = np.vstack([it["verts"] for it in draw_items])
     if view == "front":
-        xy = verts[:, [0, 1]].copy()
+        xy_all = all_v[:, [0, 1]]
         view_dir = np.array([0.0, 0.0, -1.0])
         light = np.array([0.25, 0.45, -0.85], dtype=np.float64)
     else:
-        xy = np.column_stack([verts[:, 2], verts[:, 1]])
+        xy_all = np.column_stack([all_v[:, 2], all_v[:, 1]])
         view_dir = np.array([-1.0, 0.0, 0.0])
         light = np.array([-0.75, 0.4, 0.3], dtype=np.float64)
-
     light /= np.linalg.norm(light)
-    vn = _vertex_normals(verts, faces)
-    fn = _face_normals(verts, faces)
-    visible = (fn @ view_dir) < -0.01
-    faces_v = faces[visible]
-    if faces_v.size == 0:
-        faces_v = faces
 
-    # painter sort
-    centroids = (verts[faces_v[:, 0]] + verts[faces_v[:, 1]] + verts[faces_v[:, 2]]) / 3.0
-    if view == "front":
-        order = np.argsort(centroids[:, 2])
-    else:
-        order = np.argsort(-centroids[:, 0])
-    faces_v = faces_v[order]
-
-    tint = np.asarray(skin_tint, dtype=np.float64)
-    alb_v = _sample_tex(albedo, uvs)[:, :3] * tint
-    if occlusion is not None:
-        ao = _sample_tex(occlusion, uvs)[:, :3].mean(axis=1, keepdims=True)
-        alb_v = alb_v * (0.55 + 0.45 * ao)
-
-    ndl = np.clip((-vn) @ light, 0.0, 1.0)
-    shade_v = 0.28 + 0.72 * ndl
-    col_v = np.clip(alb_v * shade_v[:, None], 0, 1)
-
-    # Keep only visible faces for triangulation
-    from matplotlib.tri import Triangulation
-
-    tri = Triangulation(xy[:, 0], xy[:, 1], faces_v)
-    # scalar for cmap workaround: encode RGB via three passes is heavy;
-    # use face-average with very soft edges by supersampling via high dpi + no edges
-    face_cols = (col_v[faces_v[:, 0]] + col_v[faces_v[:, 1]] + col_v[faces_v[:, 2]]) / 3.0
+    pad = 0.06 * max(float(np.ptp(xy_all[:, 0])), float(np.ptp(xy_all[:, 1])), 1e-6)
+    xlim = (xy_all[:, 0].min() - pad, xy_all[:, 0].max() + pad)
+    ylim = (xy_all[:, 1].min() - pad, xy_all[:, 1].max() + pad)
 
     fig = plt.figure(figsize=(size / 100, size / 100), dpi=100)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_facecolor(bg)
-    # Gouraud via tripcolor on luminance then... better: PolyCollection antialiased
-    coll = PolyCollection(
-        xy[faces_v],
-        facecolors=face_cols,
-        edgecolors=face_cols,  # match fill → hide seams
-        linewidths=0.35,
-        antialiased=True,
-        closed=True,
-    )
-    ax.add_collection(coll)
-    pad = 0.06 * max(float(np.ptp(xy[:, 0])), float(np.ptp(xy[:, 1])), 1e-6)
-    ax.set_xlim(xy[:, 0].min() - pad, xy[:, 0].max() + pad)
-    ax.set_ylim(xy[:, 1].min() - pad, xy[:, 1].max() + pad)
+
+    # Depth-sort faces across all meshes
+    batches = []
+    for it in draw_items:
+        v = it["verts"]
+        f = it["faces"]
+        if f.size == 0:
+            continue
+        uv = it.get("uvs")
+        if uv is None or len(uv) != len(v):
+            uv = np.zeros((len(v), 2))
+        alb = it.get("albedo", albedo)
+        occ = it.get("occlusion", None)
+        tint = np.asarray(it.get("skin_tint", skin_tint), dtype=np.float64)
+
+        if view == "front":
+            xy = v[:, [0, 1]].copy()
+        else:
+            xy = np.column_stack([v[:, 2], v[:, 1]])
+
+        vn = _vertex_normals(v, f)
+        fn = _face_normals(v, f)
+        visible = (fn @ view_dir) < -0.01
+        faces_v = f[visible] if visible.any() else f
+        centroids = (v[faces_v[:, 0]] + v[faces_v[:, 1]] + v[faces_v[:, 2]]) / 3.0
+        depth = centroids[:, 2] if view == "front" else -centroids[:, 0]
+
+        alb_v = _sample_tex(alb, uv)[:, :3] * tint
+        if occ is not None:
+            ao = _sample_tex(occ, uv)[:, :3].mean(axis=1, keepdims=True)
+            alb_v = alb_v * (0.55 + 0.45 * ao)
+        ndl = np.clip((-vn) @ light, 0.0, 1.0)
+        col_v = np.clip(alb_v * (0.28 + 0.72 * ndl)[:, None], 0, 1)
+        face_cols = (col_v[faces_v[:, 0]] + col_v[faces_v[:, 1]] + col_v[faces_v[:, 2]]) / 3.0
+        batches.append((depth, xy[faces_v], face_cols))
+
+    if batches:
+        depths = np.concatenate([b[0] for b in batches])
+        polys = np.concatenate([b[1] for b in batches], axis=0)
+        cols = np.concatenate([b[2] for b in batches], axis=0)
+        order = np.argsort(depths)
+        coll = PolyCollection(
+            polys[order],
+            facecolors=cols[order],
+            edgecolors=cols[order],
+            linewidths=0.3,
+            antialiased=True,
+            closed=True,
+        )
+        ax.add_collection(coll)
+
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
 
     import io
     from PIL import Image
@@ -133,8 +156,7 @@ def render_textured(
     fig.savefig(buf, format="png", dpi=100, facecolor=bg)
     plt.close(fig)
     buf.seek(0)
-    arr = np.asarray(Image.open(buf).convert("RGB"), dtype=np.float64) / 255.0
-    return arr
+    return np.asarray(Image.open(buf).convert("RGB"), dtype=np.float64) / 255.0
 
 
 def save_image(img: np.ndarray, path: str | Path) -> None:

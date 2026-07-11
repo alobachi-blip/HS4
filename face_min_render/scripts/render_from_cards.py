@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Load HS2 cards → extract real face MainTex from HS2 Copy → textured render.
+"""Load HS2 cards → skin+makeup+eyes from HS2 Copy → textured render.
 
 Uses D:\\HS2 - Copy only (never writes into live D:\\HS2).
-Texture paths follow ChaControl.CreateFaceTexture / ChaListDefine (dll_decompiled).
+Texture paths follow ChaControl.CreateFaceTexture / ChangeEyesKind (dll_decompiled).
 """
 from __future__ import annotations
 
@@ -13,11 +13,22 @@ import shutil
 import sys
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 HS4 = Path(r"D:\HS4")
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HS4))
 
+from face_min.compose_face_tex import (
+    compose_face_albedo,
+    export_addtex_layer,
+    load_rgba,
+)
+from face_min.extract_eyes import (
+    compose_eye_albedo,
+    export_face_meshes_from_head,
+)
 from face_min.extract_face_tex import extract_face_skin_pack
 from face_min.face_core import FaceCore
 from face_min.hs2_abdata import hs2_root
@@ -61,6 +72,8 @@ def load_card_face_and_ids(card: Path):
     up.feed(blob)
     head_id, skin_id = 0, 0
     skin_color = [1.0, 1.0, 1.0, 1.0]
+    makeup = {}
+    pupils = []
     while up.tell() < len(blob):
         try:
             o = up.unpack()
@@ -71,9 +84,52 @@ def load_card_face_and_ids(card: Path):
         if "shapeValueFace" in o:
             head_id = int(o.get("headId", 0) or 0)
             skin_id = int(o.get("skinId", 0) or 0)
+            makeup = o.get("makeup") or {}
+            pupils = o.get("pupil") or []
         if "skinColor" in o and isinstance(o["skinColor"], (list, tuple)):
             skin_color = list(o["skinColor"])
-    return game_dict_to_rates(face_game), face_game, head_id, skin_id, skin_color
+    return game_dict_to_rates(face_game), face_game, head_id, skin_id, skin_color, makeup, pupils
+
+
+def _build_eye_sources(eyes_meta: dict, tex_dir: Path, pupils: list) -> list:
+    """Eyebases stay in fo_head mesh space (same as exported o_head)."""
+    meshes_info = eyes_meta.get("meshes") or {}
+    L_info = meshes_info.get("o_eyebase_L") or {}
+    R_info = meshes_info.get("o_eyebase_R") or {}
+    if not L_info.get("npz") or not R_info.get("npz"):
+        return []
+
+    L = np.load(L_info["npz"])
+    R = np.load(R_info["npz"])
+
+    white = load_rgba(meshes_info.get("eye_white"))
+    if white is None:
+        white = np.ones((64, 64, 4), dtype=np.float32)
+
+    p0 = pupils[0] if pupils else {}
+    p1 = pupils[1] if len(pupils) > 1 else p0
+    sources = []
+    for side, data, pupil in (("L", L, p0), ("R", R, p1)):
+        pid = int(pupil.get("pupilId", 0) or 0)
+        layer = export_addtex_layer("st_eye_", pid, tex_dir / "eyes", label=f"pupil_{side}_{pid}")
+        pupil_tex = load_rgba(layer.get("path") if layer else None)
+        alb = compose_eye_albedo(
+            white,
+            pupil_tex,
+            pupil.get("pupilColor") or (0.3, 0.3, 0.3, 1),
+            white_color=pupil.get("whiteColor") or (1, 1, 1, 1),
+        )
+        sources.append(
+            {
+                "side": side,
+                "verts": data["verts"],
+                "faces": data["faces"],
+                "uvs": data["uvs"],
+                "albedo": alb,
+                "skin_tint": (1.0, 1.0, 1.0),
+            }
+        )
+    return sources
 
 
 def main():
@@ -96,18 +152,65 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     summary = []
 
+    # Cache eyebase per headId
+    eyes_cache: dict[int, dict] = {}
+
     for card in args.cards:
         name = card_short_name(card)
-        rates, face_game, head_id, skin_id, skin_color = load_card_face_and_ids(card)
-        print(f"\n=== {name} headId={head_id} skinId={skin_id} ===")
+        rates, face_game, head_id, skin_id, skin_color, makeup, pupils = load_card_face_and_ids(card)
+        print(f"\n=== {name} headId={head_id} skinId={skin_id} makeup={ {k: makeup.get(k) for k in ('eyeshadowId','cheekId','lipId')} } ===")
 
         tex_dir = args.out_dir / f"_tex_{name}"
         paths = extract_face_skin_pack(tex_dir, skin_id=skin_id, head_id=head_id)
         print(f"  MainTex ← {paths.get('main_asset')} @ {paths.get('bundle')}")
-        if not paths.get("main"):
-            print("  WARN: MainTex export failed, using flat fallback")
 
-        core.set_hs2_skin(paths.get("main"), paths.get("occlusion"), skin_tint=skin_color)
+        # Makeup AddTex layers (CreateFaceTexture order: eyeshadow → cheek → lip)
+        mk_dir = tex_dir / "makeup"
+        lip = export_addtex_layer("st_lip_", int(makeup.get("lipId", 0) or 0), mk_dir, label="lip")
+        cheek = export_addtex_layer("st_cheek_", int(makeup.get("cheekId", 0) or 0), mk_dir, label="cheek")
+        eyeshadow = export_addtex_layer(
+            "st_eyeshadow_", int(makeup.get("eyeshadowId", 0) or 0), mk_dir, label="eyeshadow"
+        )
+        for lab, layer in (("lip", lip), ("cheek", cheek), ("eyeshadow", eyeshadow)):
+            if layer and layer.get("ok") and not layer.get("disabled"):
+                print(f"  {lab} ← {layer.get('asset')} @ {layer.get('main_ab')}")
+            else:
+                print(f"  {lab} ← skip ({layer})")
+
+        main = load_rgba(paths.get("main"))
+        if main is None:
+            print("  WARN: MainTex export failed, using flat fallback")
+            main = np.ones((256, 256, 4), dtype=np.float32)
+            main[..., 0], main[..., 1], main[..., 2] = 0.86, 0.72, 0.66
+        occ = load_rgba(paths.get("occlusion"))
+        composed = compose_face_albedo(
+            main,
+            skin_tint=skin_color,
+            eyeshadow=load_rgba(eyeshadow.get("path") if eyeshadow else None),
+            eyeshadow_color=makeup.get("eyeshadowColor") or (1, 1, 1, 1),
+            cheek=load_rgba(cheek.get("path") if cheek else None),
+            cheek_color=makeup.get("cheekColor") or (1, 1, 1, 1),
+            lip=load_rgba(lip.get("path") if lip else None),
+            lip_color=makeup.get("lipColor") or (1, 1, 1, 1),
+            occlusion=occ,
+        )
+        composed_path = tex_dir / "face_composed.png"
+        from PIL import Image
+
+        Image.fromarray((np.clip(composed, 0, 1) * 255).astype(np.uint8), mode="RGBA").save(composed_path)
+        core.set_composed_albedo(composed, occlusion=None, tint_already_applied=True)
+
+        if head_id not in eyes_cache:
+            mesh_dir = args.out_dir / f"_fo_head{head_id}"
+            eyes_cache[head_id] = export_face_meshes_from_head(mesh_dir, head_id=head_id)
+        head_info = (eyes_cache[head_id].get("meshes") or {}).get("o_head") or {}
+        if not head_info.get("npz"):
+            raise RuntimeError(f"fo_head o_head missing for headId={head_id}")
+        extras = _build_eye_sources(eyes_cache[head_id], tex_dir, pupils)
+        # Same fo_head bundle → o_head + eyebase share mesh space (CmpFace).
+        core.set_fo_head_meshes(head_info["npz"], eye_sources=extras)
+        print(f"  fo_head o_head + eyes: {len(extras)} (native space, no retarget)")
+
         core.set_shape(rates)
 
         front = args.out_dir / f"{name}_front.png"
@@ -121,7 +224,14 @@ def main():
             "headId": head_id,
             "skinId": skin_id,
             "skinColor": skin_color,
+            "makeup": {
+                "eyeshadowId": makeup.get("eyeshadowId"),
+                "cheekId": makeup.get("cheekId"),
+                "lipId": makeup.get("lipId"),
+            },
+            "pupils": [{"pupilId": (p or {}).get("pupilId")} for p in (pupils or [])],
             "main_tex": paths.get("main"),
+            "composed": str(composed_path),
             "occlusion": paths.get("occlusion"),
             "list_entry": paths.get("list_entry"),
             "key_rates": {
