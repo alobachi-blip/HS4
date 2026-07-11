@@ -380,7 +380,7 @@ namespace HS2OrbitAndExciter
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.Label($"總噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value:F1}", GUILayout.Width(100));
-                    float am = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value, 0.2f, 8f);
+                    float am = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value, 0.2f, 24f);
                     if (Mathf.Abs(am - HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value) > 0.05f)
                         HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value = Mathf.Round(am * 10f) / 10f;
                     GUILayout.EndHorizontal();
@@ -389,7 +389,7 @@ namespace HS2OrbitAndExciter
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.Label($"首噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value:F1}", GUILayout.Width(100));
-                    float as0 = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value, 0.2f, 8f);
+                    float as0 = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value, 0.2f, 24f);
                     if (Mathf.Abs(as0 - HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value) > 0.05f)
                         HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value = Mathf.Round(as0 * 10f) / 10f;
                     GUILayout.EndHorizontal();
@@ -398,12 +398,30 @@ namespace HS2OrbitAndExciter
                 {
                     GUILayout.BeginHorizontal();
                     GUILayout.Label($"末噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value:F1}", GUILayout.Width(100));
-                    float ae = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value, 0.1f, 5f);
+                    float ae = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value, 0.1f, 15f);
                     if (Mathf.Abs(ae - HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value) > 0.05f)
                         HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value = Mathf.Round(ae * 10f) / 10f;
                     GUILayout.EndHorizontal();
                 }
 
+                if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetX != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"偏移 X {HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value:F2}", GUILayout.Width(100));
+                    float ox = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value, -0.1f, 0.1f);
+                    if (Mathf.Abs(ox - HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value) > 0.001f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value = Mathf.Round(ox * 100f) / 100f;
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetY != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"偏移 Y {HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value:F2}", GUILayout.Width(100));
+                    float oy = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value, -0.1f, 0.1f);
+                    if (Mathf.Abs(oy - HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value) > 0.001f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value = Mathf.Round(oy * 100f) / 100f;
+                    GUILayout.EndHorizontal();
+                }
                 if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ != null)
                 {
                     GUILayout.BeginHorizontal();
@@ -443,8 +461,10 @@ namespace HS2OrbitAndExciter
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("重建乳頭噴口", GUILayout.Width(140)))
                     OrbitOrgasmNippleSpray.ForceRebuild(OrbitController.TryGetHScene());
-                GUILayout.Label("調完偏移／旋轉後按此立即套用", _labelStyle ?? GUI.skin.label);
+                if (GUILayout.Button("重設為預設", GUILayout.Width(120)))
+                    OrbitOrgasmNippleSpray.ResetSettingsToDefaults(OrbitController.TryGetHScene());
                 GUILayout.EndHorizontal();
+                GUILayout.Label("預設：Offset (0,0,0.02)／Rot (90,0,0)；連噴 5 次、先大後弱。重設後自動重建噴口。", _labelStyle ?? GUI.skin.label);
             }
 
             GUILayout.Space(8);

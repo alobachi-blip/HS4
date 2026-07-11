@@ -153,11 +153,11 @@ namespace HS2OrbitAndExciter
             OrgasmNippleSpraySpeedEnd = Config.Bind("Orbit", "OrgasmNippleSpraySpeedEnd", 0.4f,
                 new ConfigDescription("Last custom pulse speed vs base.", new AcceptableValueRange<float>(0.05f, 2f)));
             OrgasmNippleSprayAmount = Config.Bind("Orbit", "OrgasmNippleSprayAmount", 1f,
-                new ConfigDescription("Overall custom-rhythm volume (1 = default).", new AcceptableValueRange<float>(0.2f, 8f)));
+                new ConfigDescription("Overall custom-rhythm volume (1 = default).", new AcceptableValueRange<float>(0.2f, 24f)));
             OrgasmNippleSprayAmountStart = Config.Bind("Orbit", "OrgasmNippleSprayAmountStart", 1.5f,
-                new ConfigDescription("First custom pulse volume weight.", new AcceptableValueRange<float>(0.2f, 8f)));
+                new ConfigDescription("First custom pulse volume weight.", new AcceptableValueRange<float>(0.2f, 24f)));
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
-                new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 5f)));
+                new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;

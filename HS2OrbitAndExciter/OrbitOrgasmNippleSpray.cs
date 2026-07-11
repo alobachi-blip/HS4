@@ -76,13 +76,13 @@ namespace HS2OrbitAndExciter
             Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd?.Value ?? 0.4f, 0.05f, 2f);
 
         private static float AmountOverall =>
-            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmount?.Value ?? 1f, 0.2f, 8f);
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmount?.Value ?? 1f, 0.2f, 24f);
 
         private static float AmountStartWeight =>
-            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart?.Value ?? 1.5f, 0.2f, 8f);
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart?.Value ?? 1.5f, 0.2f, 24f);
 
         private static float AmountEndWeight =>
-            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd?.Value ?? 0.5f, 0.1f, 5f);
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd?.Value ?? 0.5f, 0.1f, 15f);
 
         internal static void Reset()
         {
@@ -122,6 +122,35 @@ namespace HS2OrbitAndExciter
                 _lastStatus = "乳潮失敗";
                 HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭潮吹噴口重建失敗");
             }
+        }
+
+        /// <summary>Restore Offset/Rot/burst/amount (and rhythm mode) to plugin defaults; then rebuild emitters.</summary>
+        internal static void ResetSettingsToDefaults(HScene? hScene = null)
+        {
+            void Set<T>(BepInEx.Configuration.ConfigEntry<T>? e, T v)
+            {
+                if (e != null)
+                    e.Value = v;
+            }
+
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm, false);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayOffsetX, 0f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayOffsetY, 0f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ, 0.02f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayRotX, 90f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayRotY, 0f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayRotZ, 0f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayBursts, 5);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval, 0.35f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart, 1.8f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd, 0.4f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayAmount, 1f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart, 1.5f);
+            Set(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd, 0.5f);
+
+            _lastStatus = "乳潮已重設";
+            HS2OrbitAndExciter.Log?.LogInfo("Orbit: 乳頭潮吹參數已重設為預設值");
+            ForceRebuild(hScene);
         }
 
         internal static void OnOrgasm(HSceneFlagCtrl? ctrlFlag)
