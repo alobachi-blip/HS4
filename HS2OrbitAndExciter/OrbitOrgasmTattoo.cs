@@ -173,7 +173,7 @@ namespace HS2OrbitAndExciter
             for (int i = 0; i < Stamps.Count; i++)
             {
                 var s = Stamps[i];
-                ApplyBodyPaintSlot(cha, s, i);
+                ApplyBodyPaintSlot(cha, s, i, createTexture: false);
                 var tex = LoadPaintTexture(cha, s.PaintId);
                 if (tex == null)
                     continue;
@@ -182,9 +182,12 @@ namespace HS2OrbitAndExciter
                     HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 刺青重掛找不到 {s.ParentKey}");
                     continue;
                 }
-                SpawnDecalVisual(cha, parent, s.ParentKey, tex, s.Color, s.Size, recordStamp: false);
-                hung++;
+                if (TrySpawnDecalVisual(cha, parent, s.ParentKey, tex, s.Color, s.Size, out _))
+                    hung++;
             }
+
+            // One skin rebuild after all paint slots are written (avoid N× 4096 blit).
+            RebuildBodyPaintTexture(cha);
 
             if (Stamps.Count > 0)
                 _lastSiteLabel = FormatSiteLabel(Stamps[Stamps.Count - 1].ParentKey);
@@ -275,9 +278,10 @@ namespace HS2OrbitAndExciter
                 Random.Range(0.2f, 0.8f));
             float rotation = Random.value;
 
-            int max = GetMaxStamps();
-            while (Stamps.Count >= max)
-                DestroyOldest();
+            // Spawn first — only record stamp if the visible decal is created.
+            // Trim after add so a failed spawn does not drop an existing stamp.
+            if (!TrySpawnDecalVisual(cha, parent, parentKey, tex, color, size, out _))
+                return;
 
             var stamp = new Stamp
             {
@@ -290,8 +294,13 @@ namespace HS2OrbitAndExciter
                 Rotation = rotation,
             };
             Stamps.Add(stamp);
+            int max = GetMaxStamps();
+            while (Stamps.Count > max)
+                DestroyOldest();
+
             ApplyBodyPaintSlot(cha, stamp, Stamps.Count - 1);
-            SpawnDecalVisual(cha, parent, parentKey, tex, color, size, recordStamp: true);
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: 高潮刺青 +1 位置={FormatSiteLabel(parentKey)}({parentKey}) 共{Stamps.Count}");
             // Orgasm / H systems often rebuild body tex after AddOrgasm; refresh again EoF + N frames.
             ScheduleBodyPaintRefresh(cha);
         }
@@ -333,7 +342,11 @@ namespace HS2OrbitAndExciter
             for (int i = start; i < n; i++)
                 ApplyBodyPaintSlot(cha, Stamps[i], i, createTexture: false);
 
-            // One rebuild after both slots are written.
+            RebuildBodyPaintTexture(cha);
+        }
+
+        private static void RebuildBodyPaintTexture(ChaControl cha)
+        {
             var paints = cha.fileBody?.paintInfo;
             if (paints == null || paints.Length < 2)
                 return;
@@ -433,23 +446,24 @@ namespace HS2OrbitAndExciter
             return false;
         }
 
-        private static void SpawnDecalVisual(
-            ChaControl cha, Transform parent, string parentKey, Texture2D tex, Color color, float size, bool recordStamp)
+        private static bool TrySpawnDecalVisual(
+            ChaControl cha, Transform parent, string parentKey, Texture2D tex, Color color, float size, out GameObject? go)
         {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            go.name = $"OrbitTattoo_{Decals.Count}_{parentKey}";
-            var col = go.GetComponent("Collider") as Component;
+            go = null;
+            var created = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            created.name = $"OrbitTattoo_{Decals.Count}_{parentKey}";
+            var col = created.GetComponent("Collider") as Component;
             if (col != null)
                 Object.Destroy(col);
 
-            go.layer = cha.gameObject.layer;
-            go.transform.SetParent(parent, worldPositionStays: false);
+            created.layer = cha.gameObject.layer;
+            created.transform.SetParent(parent, worldPositionStays: false);
 
             // Accessory parents (N_*) have a correct outward local Z; bone pivots need body-center offset.
             if (parentKey.StartsWith("N_"))
             {
-                go.transform.localPosition = new Vector3(0f, 0f, AccessoryLocalZ);
-                go.transform.localRotation = Quaternion.identity;
+                created.transform.localPosition = new Vector3(0f, 0f, AccessoryLocalZ);
+                created.transform.localRotation = Quaternion.identity;
             }
             else
             {
@@ -460,25 +474,25 @@ namespace HS2OrbitAndExciter
                 if (outward.sqrMagnitude < 1e-6f)
                     outward = parent.TransformDirection(Vector3.forward);
                 outward.Normalize();
-                go.transform.position = parent.position + outward * BoneSurfaceOffset;
-                go.transform.rotation = Quaternion.LookRotation(outward, Vector3.up);
+                created.transform.position = parent.position + outward * BoneSurfaceOffset;
+                created.transform.rotation = Quaternion.LookRotation(outward, Vector3.up);
             }
 
-            go.transform.localScale = new Vector3(size, size, size);
+            created.transform.localScale = new Vector3(size, size, size);
 
-            var mr = go.GetComponent<MeshRenderer>();
+            var mr = created.GetComponent<MeshRenderer>();
             if (mr == null)
             {
-                Object.Destroy(go);
-                return;
+                Object.Destroy(created);
+                return false;
             }
 
             var mat = CreateDecalMaterial(tex, color);
             if (mat == null)
             {
-                Object.Destroy(go);
+                Object.Destroy(created);
                 HS2OrbitAndExciter.Log?.LogWarning("Orbit: 無法建立刺青材質");
-                return;
+                return false;
             }
 
             mr.sharedMaterial = mat;
@@ -486,16 +500,11 @@ namespace HS2OrbitAndExciter
             mr.receiveShadows = false;
             mr.enabled = true;
 
-            Decals.Add(go);
+            Decals.Add(created);
             DecalMats.Add(mat);
-            string site = FormatSiteLabel(parentKey);
-            _lastSiteLabel = site;
-
-            if (recordStamp)
-            {
-                HS2OrbitAndExciter.Log?.LogInfo(
-                    $"Orbit: 高潮刺青 +1 位置={site}({parentKey}) 材質={mat.shader?.name} 共{Stamps.Count}");
-            }
+            _lastSiteLabel = FormatSiteLabel(parentKey);
+            go = created;
+            return true;
         }
 
         private static string FormatSiteLabel(string key)
