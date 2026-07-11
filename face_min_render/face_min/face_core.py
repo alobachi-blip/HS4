@@ -229,18 +229,20 @@ class FaceCore:
         else:
             albedo = self.albedo
 
-        # Eyes already share o_head space (fo_head prefab) — no retarget.
+        # Parts already share o_head space (fo_head prefab) — no retarget.
         extras = list(self.extra_meshes)
         for src in self._eye_sources:
-            extras.append(
-                {
-                    "verts": np.asarray(src["verts"], dtype=np.float64),
-                    "faces": src["faces"],
-                    "uvs": src["uvs"],
-                    "albedo": src["albedo"],
-                    "skin_tint": src.get("skin_tint", (1.0, 1.0, 1.0)),
-                }
-            )
+            item = {
+                "verts": np.asarray(src["verts"], dtype=np.float64),
+                "faces": src["faces"],
+                "uvs": src["uvs"],
+                "albedo": src["albedo"],
+                "skin_tint": src.get("skin_tint", (1.0, 1.0, 1.0)),
+            }
+            for k in ("use_alpha", "double_sided", "unlit", "skip_ao", "occlusion", "name"):
+                if k in src:
+                    item[k] = src[k]
+            extras.append(item)
 
         for view, path in (("front", out_front), ("side", out_side)):
             if path is None:

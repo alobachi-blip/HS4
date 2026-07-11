@@ -155,16 +155,31 @@ def compose_face_albedo(
     cheek_color: Sequence[float] = (1, 1, 1, 1),
     lip: Optional[np.ndarray] = None,
     lip_color: Sequence[float] = (1, 1, 1, 1),
+    mole: Optional[np.ndarray] = None,
+    mole_color: Sequence[float] = (1, 1, 1, 1),
+    eyebrow: Optional[np.ndarray] = None,
+    eyebrow_color: Sequence[float] = (0.2, 0.15, 0.12, 1),
+    paint0: Optional[np.ndarray] = None,
+    paint0_color: Sequence[float] = (1, 0, 0, 1),
+    paint1: Optional[np.ndarray] = None,
+    paint1_color: Sequence[float] = (1, 0, 0, 1),
     occlusion: Optional[np.ndarray] = None,
 ) -> np.ndarray:
+    """Approximate CreateFaceTexture + matDraw eyebrow (ChaControl)."""
     base = main_tex.copy()
     if base.shape[2] == 3:
         base = np.concatenate([base, np.ones((*base.shape[:2], 1), dtype=np.float32)], axis=2)
     tint = np.array(list(skin_tint)[:3], dtype=np.float32)
     base[..., :3] *= tint
+    # CreateFaceTexture order: eyeshadow → paint → cheek → lip → mole
     base = blend_addtex(base, eyeshadow, eyeshadow_color, strength=1.0)
+    base = blend_addtex(base, paint0, paint0_color, strength=1.0)
+    base = blend_addtex(base, paint1, paint1_color, strength=1.0)
     base = blend_addtex(base, cheek, cheek_color, strength=0.85)
     base = blend_addtex(base, lip, lip_color, strength=1.0)
+    base = blend_addtex(base, mole, mole_color, strength=1.0)
+    # ChangeEyebrowKind writes _Texture3 on face mat
+    base = blend_addtex(base, eyebrow, eyebrow_color, strength=1.0)
     if occlusion is not None:
         ao = _resize_to(occlusion, (base.shape[0], base.shape[1]))
         factor = 0.55 + 0.45 * ao[..., :3].mean(axis=2, keepdims=True)

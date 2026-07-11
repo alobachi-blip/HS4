@@ -117,30 +117,57 @@ def render_textured(
 
         vn = _vertex_normals(v, f)
         fn = _face_normals(v, f)
-        visible = (fn @ view_dir) < -0.01
-        faces_v = f[visible] if visible.any() else f
+        if it.get("double_sided"):
+            faces_v = f
+        else:
+            visible = (fn @ view_dir) < -0.01
+            faces_v = f[visible] if visible.any() else f
         centroids = (v[faces_v[:, 0]] + v[faces_v[:, 1]] + v[faces_v[:, 2]]) / 3.0
         depth = centroids[:, 2] if view == "front" else -centroids[:, 0]
 
-        alb_v = _sample_tex(alb, uv)[:, :3] * tint
-        if occ is not None:
+        alb_v = _sample_tex(alb, uv)
+        rgb = alb_v[:, :3] * tint
+        if alb_v.shape[1] >= 4:
+            alpha_v = np.clip(alb_v[:, 3], 0, 1)
+        else:
+            alpha_v = np.ones(len(v), dtype=np.float64)
+        if it.get("use_alpha") and float(alpha_v.max()) < 0.02:
+            alpha_v = np.clip(alb_v[:, :3].max(axis=1), 0, 1)
+        if occ is not None and not it.get("skip_ao"):
             ao = _sample_tex(occ, uv)[:, :3].mean(axis=1, keepdims=True)
-            alb_v = alb_v * (0.55 + 0.45 * ao)
-        ndl = np.clip((-vn) @ light, 0.0, 1.0)
-        col_v = np.clip(alb_v * (0.28 + 0.72 * ndl)[:, None], 0, 1)
-        face_cols = (col_v[faces_v[:, 0]] + col_v[faces_v[:, 1]] + col_v[faces_v[:, 2]]) / 3.0
-        batches.append((depth, xy[faces_v], face_cols))
+            rgb = rgb * (0.55 + 0.45 * ao)
+        if it.get("unlit"):
+            col_v = np.clip(rgb, 0, 1)
+        else:
+            ndl = np.clip((-vn) @ light, 0.0, 1.0)
+            col_v = np.clip(rgb * (0.28 + 0.72 * ndl)[:, None], 0, 1)
+        face_rgb = (col_v[faces_v[:, 0]] + col_v[faces_v[:, 1]] + col_v[faces_v[:, 2]]) / 3.0
+        face_a = (alpha_v[faces_v[:, 0]] + alpha_v[faces_v[:, 1]] + alpha_v[faces_v[:, 2]]) / 3.0
+        if it.get("use_alpha"):
+            keep = face_a > 0.04
+            if not np.any(keep):
+                continue
+            faces_v = faces_v[keep]
+            depth = depth[keep]
+            face_rgb = face_rgb[keep]
+            face_a = face_a[keep]
+        else:
+            face_a = np.ones(len(face_rgb))
+        xy_f = xy[faces_v]
+        face_cols = np.concatenate([face_rgb, face_a[:, None]], axis=1)
+        batches.append((depth, xy_f, face_cols))
 
     if batches:
         depths = np.concatenate([b[0] for b in batches])
         polys = np.concatenate([b[1] for b in batches], axis=0)
         cols = np.concatenate([b[2] for b in batches], axis=0)
         order = np.argsort(depths)
+        # opaque first in painter: already depth sorted; alpha edges match fill
         coll = PolyCollection(
             polys[order],
             facecolors=cols[order],
             edgecolors=cols[order],
-            linewidths=0.3,
+            linewidths=0.25,
             antialiased=True,
             closed=True,
         )
