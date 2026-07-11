@@ -2,12 +2,41 @@
 
 ## 2026-07-12
 
+### 重整：狀態基 — PoseLandedPolicy＋latch 契約＋invariant
+
+- **根因**：換姿清旗 ≠ 下一步；`auto_after_*` 散落且無視 A+B；`ClearSelection(ClearedPoseAlreadyApplied)` 先清 latch，Idle 保留死碼。
+- **`OrbitPoseLandedPolicy`**：落地唯一決策 — AfterIdle→TimedEscape；Idle 非 A+B→AutoStartSex；Idle A+B→Appreciate（清 arrival latch）；N 仍強制開幹。刪 `auto_after_kick/pose/rebind/unstick`。
+- **Latch**：`ClearedPoseAlreadyApplied` 不再清 latch；非 wait 落地才清；Appreciate 清 arrival latch 避免窺視姿立刻被 Idle escape 開幹。
+- **晚序 invariant**：Sanitize→Resolve→Kick→Landed；殘留 `sel==now` 打 `invariant/fail_sel_eq_now`。
+- HUD：`欣賞·等 L／滾輪／N`。回歸：`tools/_assert_fsm_regression.py`。詳見 `HANDOFF_fsm_stuck_root_causes.md`。
+
+- **修復：`Changing` 黏旗鎖 L**：kick∥原版競態後 `nowChangeAnim=true` 且 `sel.id==now.id`（姿已套用）會長時間擋 L（log 見 ~120s Changing、88× hotkey fail）。每幀／L／kick finally 用 `TryResolveAppliedPoseChange` 立刻清 sel＋`nowChangeAnim`（無計時）。
+
+### 功能：N 開始做愛＋換姿後自動進 Loop
+
+- **N**：強制從 Idle／AfterIdle／Insert 進 `WLoop`／`D_WLoop`（解鎖黏旗、latch escape、設 auto）。
+- **Case**：換姿落地 Idle 後由 **PoseLandedPolicy** 決定下一步（非 A+B→AutoStartSex；A+B→Appreciate）。`TryForceStartSex` 為執行器。
+- HUD 圖例加 `N幹`。
+
+### HUD：有時限的 lock 顯示倒數
+
+- 協助列：`緩衝`／`UI`／`高潮後`／`脫離` 顯示剩餘秒數（`F1`）。
+- 無時限鎖：`高潮中`、`欣賞·等L/滾輪/N`（A+B），避免誤以為卡死。
+- 修正：`longAppreciation` 先前誤顯示成「自動·就緒」。
+
+### 重整：FSM 去計時（擁有權契約）
+
+- **Escape latch**：L／真實滾輪／cycle → latch；離開 Idle／AfterIdle、換姿完成、關環視才清。刪 1.5s 窗與 `TickMotionEscapeRenewal`。
+- **換姿**：`PoseQueued && !NowChangeAnim` → **立刻** kick 一次（互斥）；`NowChangeAnim` 時 kick finally **不清** sel。
+- **解卡**：矛盾態立即復原（orphan `NowChangeAnim`、phantom `Changing`）；刪 6s／8s／2s stale 計時清 sel。
+- **保留體感延遲**：AfterIdle／非 A+B Idle 假滾輪 ≈2s、`orgasmQuiet`、UI suppress、orbit grace、assist／checkpoint interval。
+
 ### 行為：長動作可欣賞，按需才脫離（A+B）
 
 - **只保護這 7 個姿勢**（短高潮 AfterIdle 不在內）：
   - 窺視：105 洋式トイレ覗き、106 和式トイレ覗き、107 シャワー覗き
   - 場所自慰：8 シャワー／9 洋式トイレ／15 和式トイレ／102 風呂 オナニー
-- 上述姿勢：擋自動換姿／checkpoint，直到 **L**／**真實滾輪**／**迴轉換姿**（`ChangePoseOnCycle`×`OrbitCountBeforePoseChange`，預設 2 迴轉）armed。
+- 上述姿勢：擋自動換姿／checkpoint，直到 **L**／**真實滾輪**／**迴轉換姿** latch。
 - **高潮後短 AfterIdle**（`Orgasm_*_A` 等）：約 **2 秒**假滾輪／強制 `IsReStart` 自動脫離（**即使**當前仍是 A+B 姿勢 ID，也不擋這段短等待）。
 - FSM：`longAppreciation`；`escape`/`request`（`L`|`wheel`|`cycle`）。
 

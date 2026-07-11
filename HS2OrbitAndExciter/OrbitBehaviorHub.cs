@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Reflection;
 using HarmonyLib;
 using Manager;
@@ -35,20 +36,17 @@ namespace HS2OrbitAndExciter
         private static float _afterIdleAutoEscapeSinceUnscaled = -1f;
         private static float _idleAutoEscapeSinceUnscaled = -1f;
 
-        private static float _selectionListStuckSinceUnscaled = -1f;
-        private static float _nowChangeStuckSinceUnscaled = -1f;
-        /// <summary>User/cycle requested leave of long appreciation / waits; active until this unscaled time.</summary>
-        private static float _motionEscapeUntilUnscaled = -1f;
+        /// <summary>L / real wheel / cycle asked to leave waits or open A+B auto; cleared by latch rules.</summary>
+        private static bool _motionEscapeLatched;
+        private static bool _motionEscapeSawWait;
         private static string _motionEscapeReason = "";
+        private static bool _poseKickInFlight;
 
         internal const float WheelBypassValue = 0.10f;
         internal const float WheelBypassDelaySeconds = 2f;
-        internal const float StaleSelectionClearSeconds = 8f;
-        /// <summary>How long L/wheel/cycle escape stays armed for IsStart/IsReStart patches.</summary>
-        internal const float MotionEscapeWindowSeconds = 1.5f;
-        internal const float IdleStaleSelectionClearSeconds = 2.0f;
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
+        internal static bool IsPoseKickInFlight => _poseKickInFlight;
 
         internal static void NotifyManualUiClick()
         {
@@ -125,10 +123,8 @@ namespace HS2OrbitAndExciter
             _afterIdleAutoEscapeSinceUnscaled = -1f;
             _idleAutoEscapeSinceUnscaled = -1f;
             _orgasmAssistQuietUntilUnscaled = -1f;
-            _selectionListStuckSinceUnscaled = -1f;
-            _nowChangeStuckSinceUnscaled = -1f;
-            _motionEscapeUntilUnscaled = -1f;
-            _motionEscapeReason = "";
+            ClearMotionEscapeLatch();
+            _poseKickInFlight = false;
             if (active)
             {
                 _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
@@ -225,12 +221,15 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            // A+B long bath/toilet/shower: do not auto-pick next pose until L/wheel/cycle arms escape.
-            // Cycle pose RequestPoseChange arms first, then CanAcceptRequest may still pass.
+            // A+B long bath/toilet/shower: do not auto-pick next pose until L/wheel/cycle latch.
+            // Cycle pose RequestPoseChange latches first, then CanAcceptRequest may still pass.
             if (hScene != null
                 && OrbitHelpers.IsLongAppreciationPose(hScene)
                 && !IsMotionEscapeArmed())
             {
+                // Drop leftover isAutoActionChange only (keep initiative).
+                if (ctrlFlag != null && ctrlFlag.isAutoActionChange)
+                    ctrlFlag.isAutoActionChange = false;
                 reason = OrbitAssistReasons.LongAppreciation;
                 return false;
             }
@@ -306,6 +305,36 @@ namespace HS2OrbitAndExciter
         {
             if (_manualSelectionSuppressUntilUnscaled < 0f) return 0f;
             return Mathf.Max(0f, _manualSelectionSuppressUntilUnscaled - Time.unscaledTime);
+        }
+
+        /// <summary>Seconds until timed AfterIdle auto-leave (0 if latched, not in AfterIdle, or ready).</summary>
+        internal static float RemainingAfterIdleAutoEscapeSeconds()
+        {
+            if (!_orbitAssistActive || IsMotionEscapeArmed())
+                return 0f;
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene == null || !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+                return 0f;
+            if (_afterIdleAutoEscapeSinceUnscaled < 0f)
+                return WheelBypassDelaySeconds;
+            return Mathf.Max(0f, WheelBypassDelaySeconds - (Time.unscaledTime - _afterIdleAutoEscapeSinceUnscaled));
+        }
+
+        /// <summary>
+        /// Seconds until timed Idle auto-leave (0 if A+B, latched, not Idle, or ready).
+        /// </summary>
+        internal static float RemainingIdleAutoEscapeSeconds()
+        {
+            if (!_orbitAssistActive || IsMotionEscapeArmed())
+                return 0f;
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene) || hScene.NowChangeAnim)
+                return 0f;
+            if (OrbitHelpers.IsLongAppreciationPose(hScene))
+                return 0f;
+            if (_idleAutoEscapeSinceUnscaled < 0f)
+                return WheelBypassDelaySeconds;
+            return Mathf.Max(0f, WheelBypassDelaySeconds - (Time.unscaledTime - _idleAutoEscapeSinceUnscaled));
         }
 
         internal static bool ShouldDeferOrbitFocusHotkeysToGame(HSceneFlagCtrl? ctrlFlag) =>
@@ -418,9 +447,13 @@ namespace HS2OrbitAndExciter
                 }
             }
 
-            _selectionListStuckSinceUnscaled = -1f;
-            _nowChangeStuckSinceUnscaled = -1f;
             OrbitPoseDirector.NotifySelectionCleared();
+            // Drop escape latch for aborted / orphan clears — NOT ClearedPoseAlreadyApplied
+            // (Idle/AfterIdle land must keep latch for PoseLandedPolicy / Tick*Escape).
+            if (reason == OrbitAssistReasons.PoseKickDone
+                || reason == OrbitAssistReasons.ClearedAfterTimeout
+                || reason == OrbitAssistReasons.ClearedNowChangeStuck)
+                ClearMotionEscapeLatch();
             OrbitStateMachineLog.Event("stale_sel", reason,
                 "{\"id\":" + id + ",\"down\":" + down + "}");
         }
@@ -600,25 +633,52 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>
-        /// Arm leave so L / real mouse wheel / cycle pose can exit long A+B poses
-        /// (and also accelerate short AfterIdle/Idle force patches).
+        /// Latch leave / open A+B auto until wait state is exited, pose finishes, or orbit off.
+        /// No time window.
         /// </summary>
         internal static void RequestMotionEscape(string reason)
         {
             if (!_orbitAssistActive)
                 return;
-            _motionEscapeUntilUnscaled = Time.unscaledTime + MotionEscapeWindowSeconds;
+            _motionEscapeLatched = true;
             _motionEscapeReason = reason ?? "";
             OrbitStateMachineLog.Event("escape", "request",
                 "{\"reason\":\"" + (_motionEscapeReason.Replace("\"", "") ?? "") + "\"}");
         }
 
         internal static bool IsMotionEscapeArmed() =>
-            _orbitAssistActive && Time.unscaledTime < _motionEscapeUntilUnscaled;
+            _orbitAssistActive && _motionEscapeLatched;
+
+        internal static void ClearMotionEscapeLatch()
+        {
+            _motionEscapeLatched = false;
+            _motionEscapeSawWait = false;
+            _motionEscapeReason = "";
+        }
+
+        /// <summary>
+        /// Clear latch when leaving Idle/AfterIdle after having been in a wait while latched.
+        /// Arming during action loop keeps latch until pose change / orbit off.
+        /// </summary>
+        internal static void TickMotionEscapeLatch(HScene? hScene)
+        {
+            if (!_orbitAssistActive || !_motionEscapeLatched || hScene == null)
+                return;
+            bool inWait = OrbitHelpers.IsFirstFemaleInIdle(hScene)
+                          || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene);
+            if (_motionEscapeSawWait && !inWait)
+            {
+                ClearMotionEscapeLatch();
+                OrbitStateMachineLog.Event("escape", "clear_left_wait");
+                return;
+            }
+            if (inWait)
+                _motionEscapeSawWait = true;
+        }
 
         /// <summary>
         /// Force leave AfterIdle: short orgasm waits auto after ≈2s (even on A+B pose ids),
-        /// or immediately when escape armed.
+        /// or immediately when escape latched.
         /// </summary>
         internal static bool ShouldForceAfterIdleEscape()
         {
@@ -642,7 +702,7 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>
-        /// Force leave Idle: A+B long poses require armed escape; other Idle uses ≈2s auto (or armed).
+        /// Force leave Idle: A+B long poses require escape latch; other Idle uses ≈2s auto (or latch).
         /// </summary>
         internal static bool ShouldForceIdleEscape()
         {
@@ -666,6 +726,157 @@ namespace HS2OrbitAndExciter
             return Time.unscaledTime - _idleAutoEscapeSinceUnscaled >= WheelBypassDelaySeconds;
         }
 
+        /// <summary>
+        /// When sel is set but HScene.Update never starts ChangeAnimation (seen on faint D_WLoop),
+        /// start the same coroutine vanilla would. Idempotent while in-flight.
+        /// </summary>
+        internal static bool TryKickQueuedChangeAnimation(HScene? hScene)
+        {
+            if (_poseKickInFlight || hScene == null || !IsOrbitAssistActive())
+                return false;
+            var ctrlFlag = hScene.ctrlFlag;
+            var sel = ctrlFlag?.selectAnimationListInfo;
+            if (sel == null || hScene.NowChangeAnim)
+                return false;
+            if (!OrbitHelpers.IsPoseAllowedUnderFaintness(sel, ctrlFlag))
+                return false;
+
+            _poseKickInFlight = true;
+            int id = sel.id;
+            int down = sel.nDownPtn;
+            OrbitStateMachineLog.Event("pose_kick", OrbitAssistReasons.PoseKickStart,
+                "{\"id\":" + id + ",\"down\":" + down + "}");
+            hScene.StartCoroutine(KickChangeAnimationCo(hScene, sel));
+            return true;
+        }
+
+        private static IEnumerator KickChangeAnimationCo(HScene hScene, HScene.AnimationListInfo sel)
+        {
+            try
+            {
+                bool useFade = true;
+                try
+                {
+                    if (hScene.ctrlFlag != null && hScene.ctrlFlag.pointMoveAnimChange)
+                        useFade = false;
+                }
+                catch { /* ignore */ }
+
+                yield return hScene.StartCoroutine(
+                    hScene.ChangeAnimation(sel, _isForceResetCamera: false, _isForceLoopAction: false, _UseFade: useFade));
+            }
+            finally
+            {
+                _poseKickInFlight = false;
+                // Pose already applied but flags left sticky (common after kick∥vanilla race).
+                if (TryResolveAppliedPoseChange(hScene))
+                {
+                    OrbitStateMachineLog.Event("pose_kick", "done_resolved_applied");
+                    OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Kick);
+                }
+                else if (hScene != null && hScene.NowChangeAnim)
+                {
+                    OrbitStateMachineLog.Event("pose_kick", "done_leave_inflight");
+                }
+                else if (hScene?.ctrlFlag?.selectAnimationListInfo != null)
+                {
+                    ClearSelection(hScene, OrbitAssistReasons.PoseKickDone);
+                    try { hScene.ctrlFlag.isAutoActionChange = false; } catch { /* ignore */ }
+                    OrbitStateMachineLog.Event("pose_kick", OrbitAssistReasons.PoseKickDone);
+                }
+                else
+                {
+                    try
+                    {
+                        if (hScene?.ctrlFlag != null)
+                            hScene.ctrlFlag.isAutoActionChange = false;
+                    }
+                    catch { /* ignore */ }
+                    ClearMotionEscapeLatch();
+                    OrbitStateMachineLog.Event("pose_kick", "done_clean");
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when sel is already the current pose but NowChangeAnim/sel were left sticky —
+        /// clears both (no timer). Used by kick finally and per-frame recovery.
+        /// Does not clear escape latch while still in Idle/AfterIdle (PoseLandedPolicy owns that).
+        /// </summary>
+        internal static bool TryResolveAppliedPoseChange(HScene? hScene)
+        {
+            if (hScene?.ctrlFlag == null || _poseKickInFlight)
+                return false;
+            var ctrlFlag = hScene.ctrlFlag;
+            var sel = ctrlFlag.selectAnimationListInfo;
+            var now = ctrlFlag.nowAnimationInfo;
+            if (sel == null || now == null)
+                return false;
+            if (sel.id != now.id)
+                return false;
+            // Same pose already live; sticky NowChangeAnim and/or leftover sel locks L/auto.
+            // ClearedPoseAlreadyApplied does not clear latch inside ClearSelection.
+            ClearSelection(hScene, OrbitAssistReasons.ClearedPoseAlreadyApplied, forceClearNowChangeAnim: true);
+            try { ctrlFlag.isAutoActionChange = false; } catch { /* ignore */ }
+            // Non-wait land: drop latch. Wait land: keep for policy / Tick*Escape.
+            if (!OrbitHelpers.IsFirstFemaleInIdle(hScene)
+                && !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+                ClearMotionEscapeLatch();
+            return true;
+        }
+
+        /// <summary>
+        /// Force start action loop (WLoop/D_WLoop) from Idle / AfterIdle / Insert.
+        /// Used by N hotkey and after pose lands on Idle.
+        /// </summary>
+        internal static bool TryForceStartSex(HScene? hScene, string reason = "N")
+        {
+            if (hScene == null || !IsOrbitAssistActive())
+                return false;
+
+            TryResolveAppliedPoseChange(hScene);
+            RequestMotionEscape(reason);
+
+            if (OrbitHelpers.IsFirstFemaleInActionLoop(hScene))
+            {
+                OrbitStateMachineLog.Event("startsex", "already_loop",
+                    "{\"reason\":\"" + (reason ?? "") + "\"}");
+                return true;
+            }
+
+            var ctrlFlag = hScene.ctrlFlag;
+            bool faint = ctrlFlag != null && ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2;
+            string anim = faint ? "D_WLoop" : "WLoop";
+
+            if (!TryForceFemaleAnim(hScene, anim))
+            {
+                OrbitStateMachineLog.Event("startsex", "setPlay_fail",
+                    "{\"anim\":\"" + anim + "\"}");
+                return false;
+            }
+
+            if (ctrlFlag != null)
+            {
+                ctrlFlag.speed = 1f;
+                ctrlFlag.nowOrgasm = false;
+                try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
+                ctrlFlag.isAutoActionChange = true;
+                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+            }
+
+            try
+            {
+                var auto = hScene.ctrlAuto;
+                auto?.ReStartInit();
+                auto?.PullInit();
+            }
+            catch { /* ignore */ }
+
+            OrbitStateMachineLog.Event("startsex", "force_cha_setPlay",
+                "{\"anim\":\"" + anim + "\",\"reason\":\"" + (reason ?? "") + "\"}");
+            return true;
+        }
+
         /// <summary>If armed and still in AfterIdle, force WLoop/D_WLoop.</summary>
         internal static void TickAfterIdleEscape(HScene? hScene)
         {
@@ -685,6 +896,15 @@ namespace HS2OrbitAndExciter
                 ctrlFlag.nowOrgasm = false;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
             }
+
+            // Match Sonyu AfterIdle escape: leave auto wait state so later sel can be consumed.
+            try
+            {
+                var auto = hScene.ctrlAuto;
+                auto?.ReStartInit();
+                auto?.PullInit();
+            }
+            catch { /* ignore */ }
 
             OrbitStateMachineLog.Event("afteridle", "force_cha_setPlay",
                 "{\"anim\":\"" + anim + "\",\"reason\":\"" + _motionEscapeReason + "\"}");
@@ -741,60 +961,66 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        /// <summary>Recovery entry: sanitize, stale sel, stuck NowChangeAnim.</summary>
-        internal static void TickStaleSelectionRecovery(HScene? hScene)
+        /// <summary>
+        /// Per-frame pose-change invariants (no timer stale clears):
+        /// Sanitize → Resolve(sel==now) → Kick(Queued) → orphan NowChangeAnim.
+        /// Landed next-step is owned by <see cref="OrbitPoseLandedPolicy"/>.
+        /// </summary>
+        internal static void TickPoseFlagRecovery(HScene? hScene)
         {
             if (hScene == null)
-            {
-                _selectionListStuckSinceUnscaled = -1f;
-                _nowChangeStuckSinceUnscaled = -1f;
                 return;
-            }
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
-            {
-                _selectionListStuckSinceUnscaled = -1f;
-                _nowChangeStuckSinceUnscaled = -1f;
                 return;
-            }
 
             if (SanitizeSelectedPose(hScene))
                 return;
 
-            if (hScene.NowChangeAnim)
+            // Invariant: sel.id == now.id → resolve (Landed).
+            if (TryResolveAppliedPoseChange(hScene))
             {
-                _selectionListStuckSinceUnscaled = -1f;
-                if (_nowChangeStuckSinceUnscaled < 0f)
-                    _nowChangeStuckSinceUnscaled = Time.unscaledTime;
-                else if (Time.unscaledTime - _nowChangeStuckSinceUnscaled
-                         >= OrbitPoseDirector.TransitionTimeoutSeconds)
-                {
-                    ClearSelection(hScene, OrbitAssistReasons.ClearedNowChangeStuck, forceClearNowChangeAnim: true);
-                }
+                OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Resolve);
+                AssertPoseChangeInvariants(hScene, "after_resolve");
                 return;
             }
 
-            _nowChangeStuckSinceUnscaled = -1f;
-
-            if (ctrlFlag.selectAnimationListInfo == null)
+            // Invariant: Queued ∧ ¬NowChangeAnim ∧ ¬kickInFlight → kick.
+            if (ctrlFlag.selectAnimationListInfo != null
+                && !hScene.NowChangeAnim
+                && !_poseKickInFlight)
             {
-                _selectionListStuckSinceUnscaled = -1f;
-                return;
+                TryKickQueuedChangeAnimation(hScene);
             }
 
-            // Only accelerate clear while user/cycle asked to leave a wait state.
-            float clearSec = IsMotionEscapeArmed()
-                             && (OrbitHelpers.IsFirstFemaleInIdle(hScene)
-                                 || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
-                ? IdleStaleSelectionClearSeconds
-                : StaleSelectionClearSeconds;
-
-            if (_selectionListStuckSinceUnscaled < 0f)
-                _selectionListStuckSinceUnscaled = Time.unscaledTime;
-            else if (Time.unscaledTime - _selectionListStuckSinceUnscaled >= clearSec)
+            // Orphan NowChangeAnim: change flag set but no sel and we are not kicking.
+            if (hScene.NowChangeAnim
+                && ctrlFlag.selectAnimationListInfo == null
+                && !_poseKickInFlight)
             {
-                ClearSelection(hScene, OrbitAssistReasons.ClearedAfterTimeout);
+                ClearSelection(hScene, OrbitAssistReasons.ClearedNowChangeStuck, forceClearNowChangeAnim: true);
+                OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Unstick);
+            }
+
+            AssertPoseChangeInvariants(hScene, "end");
+        }
+
+        /// <summary>Log if sel==now still sticky after recovery (should be empty).</summary>
+        private static void AssertPoseChangeInvariants(HScene? hScene, string where)
+        {
+            if (hScene?.ctrlFlag == null || _poseKickInFlight)
+                return;
+            var sel = hScene.ctrlFlag.selectAnimationListInfo;
+            var now = hScene.ctrlFlag.nowAnimationInfo;
+            if (sel != null && now != null && sel.id == now.id)
+            {
+                OrbitStateMachineLog.Event("invariant", "fail_sel_eq_now",
+                    "{\"where\":\"" + where + "\",\"id\":" + sel.id + "}");
             }
         }
+
+        /// <summary>Obsolete name — use <see cref="TickPoseFlagRecovery"/>.</summary>
+        internal static void TickStaleSelectionRecovery(HScene? hScene) =>
+            TickPoseFlagRecovery(hScene);
     }
 }

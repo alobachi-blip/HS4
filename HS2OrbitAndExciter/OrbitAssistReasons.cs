@@ -46,7 +46,17 @@ namespace HS2OrbitAndExciter
 
         // Recovery log msg keys
         public const string ClearedFaintnessInvalid = "cleared_faintness_invalid_pose";
+        /// <summary>Obsolete: timer-based sel clear removed; kept for log readers / ClearSelection branch.</summary>
         public const string ClearedAfterTimeout = "cleared_after_timeout";
         public const string ClearedNowChangeStuck = "cleared_nowChange_stuck";
+        public const string ClearedPoseAlreadyApplied = "cleared_pose_already_applied";
+        public const string PoseKickDone = "pose_kick_done";
+        public const string PoseKickStart = "pose_kick_start";
+
+        // PoseLandedPolicy log msg keys (id=landed)
+        public const string LandedAppreciate = "appreciate";
+        public const string LandedAutoStartSex = "auto_start_sex";
+        public const string LandedTimedEscape = "timed_escape";
+        public const string LandedNone = "none";
     }
 }

@@ -156,11 +156,27 @@ namespace HS2OrbitAndExciter
                 timer += " " + next;
 
             string assist = FormatAssistShort(snap.SuppressReasonKey);
+            string lockLine = FormatTimedLockLine(snap.SuppressReasonKey);
             string manual = FormatManualPoolLine();
             string orgasmFx = FormatOrgasmFxLine();
             string fsm = OrbitStateMachineLog.LogPath != null
                 ? "FSM→LogOutput/HS2OrbitAndExciter_fsm.ndjson"
                 : "FSM log n/a";
+
+            if (!string.IsNullOrEmpty(lockLine))
+            {
+                return new[]
+                {
+                    $"環視·{status} {timer}",
+                    assist,
+                    lockLine,
+                    "⌃⇧O/I/P  " + OrbitManualHotkeys.HudLegend,
+                    orgasmFx,
+                    OrbitManualHotkeys.PregnancyHudLegend,
+                    manual,
+                    fsm
+                };
+            }
 
             return new[]
             {
@@ -270,39 +286,79 @@ namespace HS2OrbitAndExciter
         {
             switch (reasonKey)
             {
-                case OrbitAssistReasons.PointerOverUi: return "自動·UI";
+                case OrbitAssistReasons.PointerOverUi: return "自動·UI上（移開游標）";
                 case OrbitAssistReasons.OrbitStartGrace:
                     {
                         float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
-                        return g > 0.01f ? $"自動·緩衝{g:F0}s" : "自動·緩衝";
+                        return g > 0.05f ? $"自動·緩衝 {g:F1}s" : "自動·緩衝";
                     }
-                case OrbitAssistReasons.InputForcus: return "自動·輸入";
+                case OrbitAssistReasons.InputForcus: return "自動·輸入中";
                 case OrbitAssistReasons.PoseQueued:
-                case OrbitAssistReasons.SelectionListPresentLegacy: return "自動·選姿";
+                case OrbitAssistReasons.SelectionListPresentLegacy: return "自動·選姿中";
                 case OrbitAssistReasons.Changing:
                 case OrbitAssistReasons.NowChangeAnim:
-                case OrbitAssistReasons.PoseTransitionLegacy: return "自動·換姿";
-                case OrbitAssistReasons.Rebinding: return "自動·換姿";
-                case OrbitAssistReasons.PosePending: return "自動·就緒"; // Pending does not gate assist
+                case OrbitAssistReasons.PoseTransitionLegacy: return "自動·換姿中";
+                case OrbitAssistReasons.Rebinding: return "自動·換姿綁定";
+                case OrbitAssistReasons.PosePending: return "自動·換姿待（高潮後）";
                 case OrbitAssistReasons.MouseHolding: return "自動·按住";
                 case OrbitAssistReasons.RecentUiClick:
                     {
                         float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
-                        return u > 0.01f ? $"自動·UI{u:F0}s" : "自動·UI";
+                        return u > 0.05f ? $"自動·UI點擊 {u:F1}s" : "自動·UI點擊";
                     }
-                case OrbitAssistReasons.ManualBusy: return "自動·換角";
-                case OrbitAssistReasons.NowOrgasm: return "自動·高潮中";
+                case OrbitAssistReasons.ManualBusy: return "自動·換角中";
+                case OrbitAssistReasons.NowOrgasm: return "鎖·高潮中（等結束）";
                 case OrbitAssistReasons.OrgasmQuiet:
                     {
                         float q = OrbitBehaviorHub.RemainingOrgasmQuietSeconds();
-                        return q > 0.01f ? $"自動·高潮後{q:F0}s" : "自動·高潮後";
+                        return q > 0.05f ? $"鎖·高潮後安靜 {q:F1}s" : "鎖·高潮後安靜";
                     }
+                case OrbitAssistReasons.LongAppreciation:
+                    return OrbitBehaviorHub.IsMotionEscapeArmed()
+                        ? "欣賞·已解鎖（推進中）"
+                        : "欣賞·等 L／滾輪／N";
                 case OrbitAssistReasons.AssistInterval: return "自動·節流";
                 case OrbitAssistReasons.CheckpointInterval: return "自動·節流";
                 case OrbitAssistReasons.CheckpointLegacyCooldown: return "自動·節流";
                 case OrbitAssistReasons.None: return "自動·就緒";
-                default: return "自動·就緒";
+                default: return string.IsNullOrEmpty(reasonKey) || reasonKey == OrbitAssistReasons.None
+                    ? "自動·就緒"
+                    : $"自動·{reasonKey}";
             }
+        }
+
+        /// <summary>Extra line for timed waits that are not (only) CanAutoAdvance reasons.</summary>
+        private static string FormatTimedLockLine(string suppressReasonKey)
+        {
+            float after = OrbitBehaviorHub.RemainingAfterIdleAutoEscapeSeconds();
+            if (after > 0.05f)
+                return $"倒數·脫離AfterIdle {after:F1}s";
+
+            float idle = OrbitBehaviorHub.RemainingIdleAutoEscapeSeconds();
+            if (idle > 0.05f)
+                return $"倒數·脫離Idle {idle:F1}s";
+
+            // Mirror timed suppress on its own line when assist line is crowded / for clarity.
+            if (suppressReasonKey == OrbitAssistReasons.OrgasmQuiet)
+            {
+                float q = OrbitBehaviorHub.RemainingOrgasmQuietSeconds();
+                if (q > 0.05f)
+                    return $"倒數·高潮後 {q:F1}s";
+            }
+            if (suppressReasonKey == OrbitAssistReasons.OrbitStartGrace)
+            {
+                float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
+                if (g > 0.05f)
+                    return $"倒數·緩衝 {g:F1}s";
+            }
+            if (suppressReasonKey == OrbitAssistReasons.RecentUiClick)
+            {
+                float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
+                if (u > 0.05f)
+                    return $"倒數·UI {u:F1}s";
+            }
+
+            return "";
         }
 
         /// <summary>Only show the nearest upcoming cycle event, ultra-compact.</summary>

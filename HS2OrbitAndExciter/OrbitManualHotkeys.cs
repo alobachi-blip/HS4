@@ -10,6 +10,8 @@ namespace HS2OrbitAndExciter
         internal const KeyCode WearKey = KeyCode.J;
         internal const KeyCode PoseCameraKey = KeyCode.K;
         internal const KeyCode PoseKey = KeyCode.L;
+        /// <summary>Force leave Idle/AfterIdle into WLoop (start sex).</summary>
+        internal const KeyCode StartSexKey = KeyCode.N;
         /// <summary>T = enable + place next stamp; Shift+T = disable.</summary>
         internal const KeyCode TattooKey = KeyCode.T;
         /// <summary>Restore bust size to H-enter / G-swap baseline.</summary>
@@ -18,7 +20,7 @@ namespace HS2OrbitAndExciter
         internal const KeyCode BellyResetKey = KeyCode.R;
 
         /// <summary>Ultra-compact HUD legend: 角=換角, 套=換衣, 著=穿著, 鏡=姿勢鏡頭, 姿=換姿勢, 刺=T貼圖/⇧T關, 胸=胸回復.</summary>
-        internal const string HudLegend = "G角·H套·J著·K鏡·L姿·T刺+·⇧T關·B胸";
+        internal const string HudLegend = "G角·H套·J著·K鏡·L姿·N幹·T刺+·⇧T關·B胸";
 
         /// <summary>PregnancyPlus Live Inflation Shortcuts (KK_PregnancyPlus.cfg); Y/U step scaled 5×; R also forced by this plugin.</summary>
         internal const string PregnancyHudLegend = "Y膨+×5·U膨-×5·R清腹";

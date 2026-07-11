@@ -256,7 +256,7 @@ namespace HS2OrbitAndExciter
             GUILayout.Label("H 場景熱鍵", GUI.skin.box);
             GUILayout.Label("單鍵操作（勿同時按 Ctrl／Shift／Alt；環視開關不影響）：", _labelStyle);
             GUILayout.Label(
-                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢、T 刺青、B 胸回復",
+                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢、N 開始做愛、T 刺青、B 胸回復",
                 _labelStyle);
             GUILayout.Label(
                 "G 池排除同性格卡；<30 秒快換降權、≥60 秒久留優先；左下角面板顯示 G 池統計與上場秒數",

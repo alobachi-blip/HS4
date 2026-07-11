@@ -30,7 +30,6 @@ namespace HS2OrbitAndExciter
     internal static class OrbitPoseDirector
     {
         private const int StableReadyFramesRequired = 3;
-        internal const float TransitionTimeoutSeconds = 6f;
 
         private static DirectorState _state = DirectorState.Orbitting;
         private static bool _pendingCycleRequest;
@@ -104,28 +103,36 @@ namespace HS2OrbitAndExciter
             if (_state == DirectorState.Orbitting && !_pendingCycleRequest)
                 return;
 
-            if (_phaseEnteredUnscaled >= 0f
-                && Time.unscaledTime - _phaseEnteredUnscaled >= TransitionTimeoutSeconds)
+            var sel = hScene.ctrlFlag?.selectAnimationListInfo;
+
+            // PoseQueued with NowChangeAnim → Changing (ownership handoff).
+            if (_state == DirectorState.PoseQueued && hScene.NowChangeAnim)
             {
-                // Hard timeout: Hub clears game flags; we may skip Rebinding.
-                if (hScene.ctrlFlag?.selectAnimationListInfo != null || hScene.NowChangeAnim)
-                {
-                    OrbitBehaviorHub.ClearSelection(
-                        hScene,
-                        hScene.NowChangeAnim
-                            ? OrbitAssistReasons.ClearedNowChangeStuck
-                            : OrbitAssistReasons.ClearedAfterTimeout,
-                        forceClearNowChangeAnim: true);
-                }
-                else
-                {
-                    // Pending-only timeout: drop owed cycle; do not keep pending forever.
-                    _pendingCycleRequest = false;
-                    Reset();
-                }
+                EnterChanging();
                 return;
             }
 
+            // Still queued, vanilla did not start — kick immediately (idempotent).
+            if (_state == DirectorState.PoseQueued
+                && !hScene.NowChangeAnim
+                && sel != null)
+            {
+                OrbitBehaviorHub.TryKickQueuedChangeAnimation(hScene);
+            }
+
+            // Phantom Changing: entered Changing without ever seeing NowChangeAnim (e.g. NotifyExternal).
+            // Normal completion also has !NowChangeAnim && sel==null but _sawChangeAnim — leave that to Tick.
+            if (_state == DirectorState.Changing
+                && !hScene.NowChangeAnim
+                && sel == null
+                && !_sawChangeAnim)
+            {
+                OrbitStateMachineLog.Event("director", "reset_phantom_changing");
+                Reset();
+                return;
+            }
+
+            // Pending-only with nothing owed forever: drop if game already has a live transition.
             if (_state == DirectorState.PosePending)
             {
                 SyncFromGameFlags(hScene);
@@ -140,7 +147,7 @@ namespace HS2OrbitAndExciter
                 if (!OrbitBehaviorHub.IsOrbitAssistActive()
                     && _sawChangeAnim
                     && !hScene.NowChangeAnim
-                    && hScene.ctrlFlag?.selectAnimationListInfo == null)
+                    && sel == null)
                 {
                     NotifySelectionCleared();
                 }
@@ -183,6 +190,7 @@ namespace HS2OrbitAndExciter
                             _state = DirectorState.Orbitting;
                             _queuedAnimationRef = null;
                             _phaseEnteredUnscaled = -1f;
+                            OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Rebind);
                             RetryPendingCycleRequest(hScene);
                         }
                     }
@@ -301,6 +309,16 @@ namespace HS2OrbitAndExciter
                 }
                 else if (IsPoseChangeInFlight)
                 {
+                    // Stuck PoseQueued (no NowChangeAnim): kick instead of failing L forever.
+                    if (source == PoseChangeSource.Hotkey
+                        && _state == DirectorState.PoseQueued
+                        && !hScene.NowChangeAnim
+                        && hScene.ctrlFlag?.selectAnimationListInfo != null
+                        && OrbitBehaviorHub.TryKickQueuedChangeAnimation(hScene))
+                    {
+                        _lastHotkeyFailReason = OrbitAssistReasons.None;
+                        return true;
+                    }
                     _lastHotkeyFailReason = DescribeBlockFromFlags(hScene);
                     return false;
                 }

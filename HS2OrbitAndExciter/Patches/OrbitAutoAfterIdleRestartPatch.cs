@@ -4,8 +4,9 @@ using UnityEngine;
 namespace HS2OrbitAndExciter.Patches
 {
     /// <summary>
-    /// AfterIdle/Idle escape: short orgasm waits auto after ≈2s; A+B long poses only when
-    /// <see cref="OrbitBehaviorHub.RequestMotionEscape"/> was armed (L / real wheel / cycle).
+    /// AfterIdle escape: ≈2s auto (even on A+B pose ids), or immediately when escape latched.
+    /// Idle: A+B needs latch (L / real wheel / cycle); other Idle ≈2s auto.
+    /// Latch clears on leaving wait / pose done / orbit off — no time window.
     /// </summary>
     [HarmonyPatch(typeof(HAutoCtrl), nameof(HAutoCtrl.IsReStart))]
     public static class OrbitAutoAfterIdleRestartPatch
@@ -22,7 +23,7 @@ namespace HS2OrbitAndExciter.Patches
         }
     }
 
-    /// <summary>Auto Idle start — A+B requires escape arm; other Idle ≈2s auto.</summary>
+    /// <summary>Auto Idle start — A+B requires escape latch; other Idle ≈2s auto.</summary>
     [HarmonyPatch(typeof(HAutoCtrl), nameof(HAutoCtrl.IsStart))]
     public static class OrbitAutoIdleStartPatch
     {

@@ -171,12 +171,33 @@ namespace HS2OrbitAndExciter
 
         internal static bool TryChangePose(HScene hScene)
         {
-            // Long waits (bath/toilet/AfterIdle): only leave when user asks — L arms escape first.
+            // A+B Idle / waits: L latches escape first (AfterIdle also auto≈2s; latch accelerates).
             OrbitBehaviorHub.RequestMotionEscape("L");
             OrbitBehaviorHub.TickAfterIdleEscape(hScene);
             OrbitBehaviorHub.TickIdleEscape(hScene);
 
+            // Sticky Changing: pose already applied but NowChangeAnim/sel left — unlock before gate.
+            if (OrbitBehaviorHub.TryResolveAppliedPoseChange(hScene))
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L 解除已套用換姿鎖");
+                OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Resolve);
+            }
+
             string block = DescribeHotkeyBlockReason(hScene);
+            if (block == OrbitAssistReasons.PoseQueued
+                && !hScene.NowChangeAnim
+                && OrbitBehaviorHub.TryKickQueuedChangeAnimation(hScene))
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L kick 卡住換姿");
+                return true;
+            }
+            if (block == OrbitAssistReasons.Changing
+                && OrbitBehaviorHub.TryResolveAppliedPoseChange(hScene))
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L 解除 Changing 黏旗");
+                OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Resolve);
+                block = DescribeHotkeyBlockReason(hScene);
+            }
             if (block != OrbitAssistReasons.None)
             {
                 HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 被擋 {block}");

@@ -275,6 +275,17 @@ namespace HS2OrbitAndExciter
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
+            if (Input.GetKeyDown(OrbitManualHotkeys.StartSexKey))
+            {
+                bool ok = OrbitBehaviorHub.TryForceStartSex(hScene, "N");
+                OrbitStateMachineLog.Hotkey("N", ok, ok ? "startsex" : "reject");
+                if (ok)
+                {
+                    HS2OrbitAndExciter.Log?.LogInfo("Orbit: N 開始做愛");
+                    _lastHotkeyTime = Time.unscaledTime;
+                }
+                return;
+            }
             if (Input.GetKeyDown(OrbitManualHotkeys.BustRestoreKey))
             {
                 if (OrbitOrgasmBustGrowth.TryRestore(hScene))
@@ -700,12 +711,16 @@ namespace HS2OrbitAndExciter
             return Singleton<HSceneManager>.Instance.Hscene;
         }
 
-        /// <summary>Runs after H-scene proc (see OrbitHSceneLateAssist). Do not call from early LateUpdate.</summary>
+        /// <summary>
+        /// Runs after H-scene proc (see OrbitHSceneLateAssist). Do not call from early LateUpdate.
+        /// Order: pose invariants (Sanitize→Resolve→Kick→Landed) → wheel latch → escape ticks → assist.
+        /// </summary>
         internal void RunLateHSceneAssist(HScene hScene)
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive() || hScene == null) return;
-            OrbitBehaviorHub.TickStaleSelectionRecovery(hScene);
+            OrbitBehaviorHub.TickPoseFlagRecovery(hScene);
             OrbitBehaviorHub.TickUserWheelEscape();
+            OrbitBehaviorHub.TickMotionEscapeLatch(hScene);
             OrbitBehaviorHub.TickAfterIdleEscape(hScene);
             OrbitBehaviorHub.TickIdleEscape(hScene);
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
