@@ -267,6 +267,42 @@ namespace HS2OrbitAndExciter
                 _labelStyle);
 
             GUILayout.Space(8);
+            GUILayout.Label("語音巡禮", GUI.skin.box);
+            GUILayout.Label(
+                "依女高潮／侍奉射精／插入內射依序換音庫（青澀→好意→享樂→隷属→嫌悪→依存→壊れ）。不改卡片好感等；進度可依角色記住。左下角 HUD 有參數與說明。",
+                _labelStyle);
+            if (HS2OrbitAndExciter.VoiceTourEnabled != null)
+            {
+                bool on = HS2OrbitAndExciter.VoiceTourEnabled.Value;
+                bool next = GUILayout.Toggle(on, on ? "開" : "關");
+                if (next != on)
+                    HS2OrbitAndExciter.VoiceTourEnabled.Value = next;
+            }
+            if (HS2OrbitAndExciter.VoiceTourHitsPerStage != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"每階需幾擊（目前 {HS2OrbitAndExciter.VoiceTourHitsPerStage.Value}）", GUILayout.Width(200));
+                float h = GUILayout.HorizontalSlider(HS2OrbitAndExciter.VoiceTourHitsPerStage.Value, 1f, 10f);
+                int hi = Mathf.RoundToInt(h);
+                if (hi != HS2OrbitAndExciter.VoiceTourHitsPerStage.Value)
+                    HS2OrbitAndExciter.VoiceTourHitsPerStage.Value = hi;
+                GUILayout.EndHorizontal();
+            }
+            if (HS2OrbitAndExciter.VoiceTourLoop != null)
+                HS2OrbitAndExciter.VoiceTourLoop.Value = GUILayout.Toggle(HS2OrbitAndExciter.VoiceTourLoop.Value, "到壊れ後從頭 Loop");
+            if (HS2OrbitAndExciter.VoiceTourPersistProgress != null)
+                HS2OrbitAndExciter.VoiceTourPersistProgress.Value = GUILayout.Toggle(HS2OrbitAndExciter.VoiceTourPersistProgress.Value, "記住進度（換人再回來不重來）");
+            if (HS2OrbitAndExciter.VoiceTourResetOnNewH != null)
+                HS2OrbitAndExciter.VoiceTourResetOnNewH.Value = GUILayout.Toggle(HS2OrbitAndExciter.VoiceTourResetOnNewH.Value, "每次進 H 重來（忽略記住）");
+            if (HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish != null)
+                HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish.Value = GUILayout.Toggle(HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish.Value, "侍奉體外／口內射精也算一擊（插入內射一律算）");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("重置目前角色語音進度", GUILayout.Width(200)))
+                OrbitVoiceTour.ResetCurrentCharacterProgress();
+            GUILayout.Label($"現：{OrbitVoiceTour.CurrentLabelZh} {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}", _labelStyle);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(8);
             GUILayout.Label("高潮特效", GUI.skin.box);
             GUILayout.Label(
                 "女高潮時觸發：刺青／胸部變大／乳頭潮吹（複用女 urine／潮吹 Obi／粒子）。左下角 HUD「高潮 …」列顯示狀態。",

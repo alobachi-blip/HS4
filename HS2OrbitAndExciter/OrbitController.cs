@@ -166,9 +166,12 @@ namespace HS2OrbitAndExciter
                     _manualDirectorHSceneId = hId;
                     OrbitManualDirector.OnHSceneEntered(hProbe);
                 }
+                OrbitVoiceTour.Tick(hProbe);
             }
             else
             {
+                if (_manualDirectorHSceneId != -1)
+                    OrbitVoiceTour.OnHSceneExited();
                 _manualDirectorHSceneId = -1;
             }
 

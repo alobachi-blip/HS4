@@ -10,7 +10,7 @@ namespace HS2OrbitAndExciter
         private const KeyCode ToggleHotkey = KeyCode.I;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 260f;
+        private const float AreaWidth = 300f;
         private const float Margin = 6f;
         private const float MaxHeightFraction = 0.42f;
 
@@ -76,23 +76,31 @@ namespace HS2OrbitAndExciter
             if (Event.current != null && Event.current.type == EventType.KeyDown
                 && Event.current.keyCode == ToggleHotkey && Event.current.control && Event.current.shift)
             {
-                if (OrbitBehaviorHub.IsOrbitAssistActive())
+                if (OrbitBehaviorHub.IsOrbitAssistActive()
+                    || OrbitVoiceTour.IsActive
+                    || (OrbitVoiceTour.Enabled && OrbitController.TryGetHScene() != null))
                 {
                     _panelVisible = !_panelVisible;
                     Event.current.Use();
                 }
             }
 
-            if (!_panelVisible || !OrbitBehaviorHub.IsOrbitAssistActive() || _orbit == null)
+            if (!_panelVisible || _orbit == null)
                 return;
 
-            if (!_orbit.TryGetCachedHudSnapshot(out var snap))
+            bool orbitOn = OrbitBehaviorHub.IsOrbitAssistActive();
+            bool voiceTourHud = OrbitVoiceTour.IsActive || (OrbitVoiceTour.Enabled && OrbitController.TryGetHScene() != null);
+            if (!orbitOn && !voiceTourHud)
                 return;
 
             InitStyles();
             var label = _smallLabel ?? GUI.skin.label;
             var box = _smallBox ?? GUI.skin.box;
-            var lines = BuildLines(snap);
+            var lines = orbitOn && _orbit.TryGetCachedHudSnapshot(out var snap)
+                ? BuildLines(snap)
+                : BuildVoiceTourOnlyLines();
+            // Always append voice tour block when relevant
+            lines = AppendVoiceTourLines(lines);
             float lineH = label.lineHeight;
             float contentH = box.padding.vertical + lineH * lines.Length + 4f;
             float maxH = Mathf.Max(lineH * 4f, Screen.height * MaxHeightFraction);
@@ -151,6 +159,62 @@ namespace HS2OrbitAndExciter
                 OrbitManualHotkeys.PregnancyHudLegend,
                 manual
             };
+        }
+
+        private static string[] BuildVoiceTourOnlyLines()
+        {
+            return new[]
+            {
+                "語音巡禮 HUD",
+                "⌃⇧I 隱藏 · 設定 VoiceTour"
+            };
+        }
+
+        private static string[] AppendVoiceTourLines(string[] baseLines)
+        {
+            var extra = FormatVoiceTourLines();
+            if (extra.Length == 0)
+                return baseLines;
+            var merged = new string[baseLines.Length + extra.Length];
+            for (int i = 0; i < baseLines.Length; i++)
+                merged[i] = baseLines[i];
+            for (int i = 0; i < extra.Length; i++)
+                merged[baseLines.Length + i] = extra[i];
+            return merged;
+        }
+
+        private static string[] FormatVoiceTourLines()
+        {
+            if (!OrbitVoiceTour.Enabled)
+                return new[] { "語音巡禮：關" };
+
+            if (!OrbitVoiceTour.IsActive && OrbitController.TryGetHScene() == null)
+                return new[] { "語音巡禮：待機（進H開始）" };
+
+            var def = OrbitVoiceTour.Stages[
+                OrbitVoiceTour.StageIndex >= 0 && OrbitVoiceTour.StageIndex < OrbitVoiceTour.StageCount
+                    ? OrbitVoiceTour.StageIndex
+                    : 0];
+            string num = def.StateNum >= 0 ? def.StateNum.ToString() : "—";
+            string persist = OrbitVoiceTour.PersistProgress ? "記住" : "不存檔";
+            string loop = OrbitVoiceTour.Loop ? "Loop開" : "Loop關";
+            string key = string.IsNullOrEmpty(OrbitVoiceTour.CharKey) ? "—" : OrbitVoiceTour.CharKey!;
+
+            return new[]
+            {
+                $"語音·{OrbitVoiceTour.CurrentLabelZh} {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}",
+                $"Num{num} · 擊{OrbitVoiceTour.HitsInStage}/{OrbitVoiceTour.HitsPerStage} · {OrbitVoiceTour.LastTrigger}",
+                $"鍵:{TrimKey(key)} · {persist} · {loop}",
+                "說明:高潮/男射精換音庫·不改卡片",
+                "推進:女高潮+侍奉體外口內+插入內射",
+                "進度:依角色記住·換人再回來不重來"
+            };
+        }
+
+        private static string TrimKey(string key)
+        {
+            if (key.Length <= 18) return key;
+            return key.Substring(0, 16) + "…";
         }
 
         private static string FormatOrgasmFxLine()

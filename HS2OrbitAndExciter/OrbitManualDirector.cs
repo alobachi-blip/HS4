@@ -65,7 +65,10 @@ namespace HS2OrbitAndExciter
             OrbitOrgasmNippleSpray.Reset();
             HScene? scene = hScene ?? OrbitController.TryGetHScene();
             if (scene != null)
+            {
                 OrbitOrgasmBustGrowth.CaptureBaseline(OrbitHelpers.GetChaFemales(scene)?[0]);
+                OrbitVoiceTour.OnHSceneEntered(scene);
+            }
         }
 
         internal static bool CanAcceptHotkey(HScene? hScene)

@@ -11,6 +11,7 @@ namespace HS2OrbitAndExciter.Patches
             OrbitOrgasmTattoo.OnOrgasm(__instance);
             OrbitOrgasmBustGrowth.OnOrgasm(__instance);
             OrbitOrgasmNippleSpray.OnOrgasm(__instance);
+            OrbitVoiceTour.OnFemaleOrgasm();
         }
     }
 }

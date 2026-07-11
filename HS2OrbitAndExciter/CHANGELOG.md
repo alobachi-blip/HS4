@@ -2,6 +2,13 @@
 
 ## 2026-07-11
 
+### 高潮語音巡禮（VoiceTour）
+
+- H 內依 **女高潮**／**侍奉體外·口內射精**／**插入內射** 推進語音階段：青澀 Blank → 好意（低／高／熟練）→ 享樂 → 隷属 → 嫌悪 → 依存 → 壊れ；可 Loop。
+- 只覆寫執行期 `FemaleState`／`CheckPhase`／`FemaleStateNum`，**不寫卡片**好感等；離 H 還原。
+- 進度依角色鍵存 `BepInEx/config/HS2OrbitAndExciter.VoiceTour.json`，換人再回來不重來（可關 Persist 或「每次進 H 重來」）。
+- 左下角 HUD（⌃⇧I）顯示當階／Num／擊數／觸發／角色鍵與繁中說明；⌃⇧P「語音巡禮」可調與重置進度。
+
 ### 高潮乳頭潮吹（urine）
 
 - 女高潮乳頭噴改為複用女 **潮吹／噴尿（urine）**：`siruInfos[1]` + `UrineIDs`（失敗則 clone `obiFluidCtrlFemale` urine slot，再退回 urine 粒子 2–5）。

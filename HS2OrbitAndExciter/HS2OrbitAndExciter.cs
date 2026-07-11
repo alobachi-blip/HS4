@@ -73,6 +73,18 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountStart;
         /// <summary>Last custom pulse volume weight.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
+        /// <summary>Advance H voice banks by orgasm / houshi male finish (session overlay; card stats unchanged).</summary>
+        internal static ConfigEntry<bool>? VoiceTourEnabled;
+        /// <summary>Hits (female orgasm or houshi male finish) required per voice stage.</summary>
+        internal static ConfigEntry<int>? VoiceTourHitsPerStage;
+        /// <summary>After last stage, wrap to Blank shy again.</summary>
+        internal static ConfigEntry<bool>? VoiceTourLoop;
+        /// <summary>Remember stage per character across H / game restart.</summary>
+        internal static ConfigEntry<bool>? VoiceTourPersistProgress;
+        /// <summary>If true, every new H starts at stage 0 (ignores saved progress for that enter).</summary>
+        internal static ConfigEntry<bool>? VoiceTourResetOnNewH;
+        /// <summary>Count houshi outside/drink male finish as a voice-tour hit.</summary>
+        internal static ConfigEntry<bool>? VoiceTourCountHoushiMaleFinish;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -158,6 +170,18 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("First custom pulse volume weight.", new AcceptableValueRange<float>(0.2f, 24f)));
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
                 new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
+            VoiceTourEnabled = Config.Bind("VoiceTour", "VoiceTourEnabled", true,
+                "H voice tour: cycle Blank→Favor→…→Dependence→Broken by orgasm/houshi finish. Does not write card Favor/etc.");
+            VoiceTourHitsPerStage = Config.Bind("VoiceTour", "VoiceTourHitsPerStage", 1,
+                new ConfigDescription("Hits per stage (female orgasm or houshi male finish).", new AcceptableValueRange<int>(1, 10)));
+            VoiceTourLoop = Config.Bind("VoiceTour", "VoiceTourLoop", true,
+                "After Broken stage, loop back to Blank shy.");
+            VoiceTourPersistProgress = Config.Bind("VoiceTour", "VoiceTourPersistProgress", true,
+                "Remember stage per character (JSON under BepInEx/config). Switch away and back resumes.");
+            VoiceTourResetOnNewH = Config.Bind("VoiceTour", "VoiceTourResetOnNewH", false,
+                "If true, each H enter starts at stage 0 for that character.");
+            VoiceTourCountHoushiMaleFinish = Config.Bind("VoiceTour", "VoiceTourCountHoushiMaleFinish", true,
+                "Count houshi outside/drink male finish as one hit. Insertion inside (numInside) always counts.");
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
@@ -165,6 +189,7 @@ namespace HS2OrbitAndExciter
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
             PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
+            PatchSafe(harmony, typeof(Patches.VoiceTourPhasePatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopSonyuProc));
