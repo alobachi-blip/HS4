@@ -25,6 +25,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HS4))
 
 from face_min.compose_face_tex import (
+    DEFAULT_EYEBROW_LAYOUT,
+    DEFAULT_EYEBROW_TILT,
     compose_face_albedo,
     export_addtex_layer,
     load_rgba,
@@ -77,6 +79,8 @@ def load_card_face_bundle(card: Path):
     makeup, pupils = {}, []
     eyebrow_id, mole_id = 0, 0
     eyebrow_color = [0.2, 0.15, 0.12, 1.0]
+    eyebrow_layout = list(DEFAULT_EYEBROW_LAYOUT)
+    eyebrow_tilt = float(DEFAULT_EYEBROW_TILT)
     mole_color = [1, 1, 1, 1]
     eyelashes_id = 0
     eyelashes_color = [0.15, 0.15, 0.15, 1.0]
@@ -98,6 +102,11 @@ def load_card_face_bundle(card: Path):
             pupils = o.get("pupil") or []
             eyebrow_id = int(o.get("eyebrowId", 0) or 0)
             eyebrow_color = list(o.get("eyebrowColor") or eyebrow_color)
+            raw_layout = o.get("eyebrowLayout")
+            if isinstance(raw_layout, (list, tuple)) and len(raw_layout) >= 4:
+                eyebrow_layout = [float(raw_layout[i]) for i in range(4)]
+            if "eyebrowTilt" in o and o["eyebrowTilt"] is not None:
+                eyebrow_tilt = float(o["eyebrowTilt"])
             mole_id = int(o.get("moleId", 0) or 0)
             mole_color = list(o.get("moleColor") or mole_color)
             eyelashes_id = int(o.get("eyelashesId", 0) or 0)
@@ -118,6 +127,8 @@ def load_card_face_bundle(card: Path):
         "pupils": pupils,
         "eyebrow_id": eyebrow_id,
         "eyebrow_color": eyebrow_color,
+        "eyebrow_layout": eyebrow_layout,
+        "eyebrow_tilt": eyebrow_tilt,
         "mole_id": mole_id,
         "mole_color": mole_color,
         "eyelashes_id": eyelashes_id,
@@ -256,14 +267,14 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
     cheek = layer("st_cheek_", mk.get("cheekId", 0), "cheek")
     eyeshadow = layer("st_eyeshadow_", mk.get("eyeshadowId", 0), "eyeshadow")
     mole = layer("st_mole_", card["mole_id"], "mole")
-    # Eyebrow uses _Texture3 + eyebrowLayout/Tilt on face matDraw (ChaControl.ChangeEyebrow*).
-    # Without that UV layout, the AddTex is a near-opaque sheet and would paint the whole face.
-    # Skip until layout bake is wired; still list-resolve for meta.
+    # Eyebrow: st_eyebrow_ AddTex → bake via ChangeEyebrowLayout/Tilt, then blend.
+    # List-resolve miss (e.g. mod id 704) stays None — no crash.
     eyebrow = layer("st_eyebrow_", card["eyebrow_id"], "eyebrow")
     paints = mk.get("paintInfo") or []
     paint0 = layer("st_paint_", (paints[0] or {}).get("id", 0) if paints else 0, "paint0")
     paint1 = layer("st_paint_", (paints[1] or {}).get("id", 0) if len(paints) > 1 else 0, "paint1")
 
+    brow_rgba = None
     for lab, L in (
         ("lip", lip),
         ("cheek", cheek),
@@ -273,6 +284,8 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
     ):
         if L and L.get("ok") and not L.get("disabled"):
             print(f"  {lab} ← {L.get('asset')} @ {L.get('main_ab')}")
+            if lab == "eyebrow":
+                brow_rgba = load_rgba(L.get("path"))
         else:
             print(f"  {lab} ← skip")
 
@@ -292,8 +305,10 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
         lip_color=mk.get("lipColor") or (1, 1, 1, 1),
         mole=load_rgba(mole.get("path") if mole else None),
         mole_color=card["mole_color"],
-        eyebrow=None,  # needs ChangeEyebrowLayout UV; see above
+        eyebrow=brow_rgba,
         eyebrow_color=card["eyebrow_color"],
+        eyebrow_layout=card.get("eyebrow_layout") or DEFAULT_EYEBROW_LAYOUT,
+        eyebrow_tilt=float(card.get("eyebrow_tilt", DEFAULT_EYEBROW_TILT)),
         paint0=load_rgba(paint0.get("path") if paint0 else None),
         paint0_color=(paints[0] or {}).get("color", (1, 0, 0, 1)) if paints else (1, 0, 0, 1),
         paint1=load_rgba(paint1.get("path") if paint1 else None),

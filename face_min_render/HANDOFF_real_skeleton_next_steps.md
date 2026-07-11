@@ -40,6 +40,18 @@
   - `o_eyelashes`：仍走 ChaList `st_eyelash_`；若 id 缺失（mod）則回退到 fo_head material MainTex。
   - 繪製順序：`tooth/tang → eyebase L/R → eyeshadow → eyelashes`。
 
+- **眉毛 matDraw（已完成）**：
+  - 卡讀 `eyebrowLayout` / `eyebrowTilt`（缺省 `ChaFileFace`：`(0.5,0.375,0.666,0.666)` / `0.5`）。
+  - `compose_face_tex.blend_eyebrow_matdraw`：對齊 `ChaControl.ChangeEyebrowLayout/Tilt`
+    （`dll_decompiled/AIChara/ChaControl.cs` ≈4336）→ `_Texture3UV` / `_Texture3Rotator`
+    （`ChaShader.Eyebrow*`）。公式：`ox=Lerp(-0.2,0.2,x)`，`oy=Lerp(0.16,0,y)`，
+    `sx/sy=Lerp(2,0.5,z/w)`，`rot=Lerp(-0.15,0.15,tilt)`。
+  - UV：mesh 空間（`render._sample_tex` 的 `v_img=1-mesh_v`）→ 繞 0.5 旋轉 →
+    中心 scale → **減** offset；垂直位置用 `fo_head` brow-ridge UV（~mesh_v 0.52）對
+    `c_t_eyebrow_*` stamp 校過。覆蓋用 RGB 剪影（stock 灰階；`min(RGB)` 等於 R，並能容忍
+    部分 DLC 非黑 clear）。**不要**再走 `blend_addtex`（會把 UV clip 後的 A 誤當 coverage）。
+  - list-resolve 失敗（如 Kana brow 704）仍 skip，不 crash。
+
 - **驗證結果**：三張測試卡（Kawamoto_Nanako / Aragaki_Yoko / Kana）現在依各自
   `shapeValueFace` 產生**真的不同**頭型；`o_head` + `o_eyebase_L/R` + `o_eyelashes` +
   `o_eyeshadow` + `o_tooth` + `o_tang` 共用同一組骨骼姿勢。跑法：
@@ -58,10 +70,7 @@
 3. **嘴巴內部穿模（側視）**：暫用 `skip_side=True` 讓側視不畫 `o_tooth`/`o_tang`（正面仍畫）。
    根因仍在（painter 深度 + 閉口內部 mesh）。之後可改成依嘴開合 shape 隱藏／裁切，
    或只畫落在口腔 AABB 內的面，再拿掉 skip_side。
-4. **眉毛 `ChangeEyebrowLayout` UV**：`compose_face_tex.py`/`render_from_cards.py` 裡
-   眉毛目前是直接跳過（`eyebrow=None`），因為它需要 `_Texture3UV`/`_Texture3Rotator`
-   的 UV 位移/旋轉，不是單純疊圖。要做的話去查 `dll_decompiled/AIChara/ChaControl.cs`
-   的 `ChangeEyebrowLayout`/`ChangeEyebrowTilt`（約 4336 行附近），公式已經在上次審查記錄裡。
+4. ~~**眉毛 `ChangeEyebrowLayout` UV**~~ **已完成**（見上；入口 `blend_eyebrow_matdraw`）。
 5. **mod 資源缺失**（Kana 的睫毛 id `666012`、眉毛 id `704` 在 `D:\HS2 - Copy` 裡查不到）：
    這不是 bug，是我們的清單解析器（`compose_face_tex.find_list_entry`）只掃
    `abdata/list/characustom/*.unity3d`，沒有合併 BepInEx/Sideloader 的 mod 清單。

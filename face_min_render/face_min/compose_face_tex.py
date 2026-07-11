@@ -150,6 +150,135 @@ def blend_addtex(
     return np.concatenate([np.clip(out, 0, 1), alpha], axis=2)
 
 
+# ChaFileFace defaults (ChaFileFace.cs ctor)
+DEFAULT_EYEBROW_LAYOUT: Tuple[float, float, float, float] = (0.5, 0.375, 0.666, 0.666)
+DEFAULT_EYEBROW_TILT: float = 0.5
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    t = float(np.clip(t, 0.0, 1.0))
+    return float(a + (b - a) * t)
+
+
+def eyebrow_shader_uv_params(
+    layout_rates: Sequence[float] = DEFAULT_EYEBROW_LAYOUT,
+    tilt_rate: float = DEFAULT_EYEBROW_TILT,
+) -> Tuple[float, float, float, float, float]:
+    """ChaControl.ChangeEyebrowLayout / ChangeEyebrowTilt → (_Texture3UV, _Texture3Rotator).
+
+    Returns (offset_x, offset_y, scale_x, scale_y, rotator_radians).
+    """
+    lx = float(layout_rates[0]) if len(layout_rates) > 0 else DEFAULT_EYEBROW_LAYOUT[0]
+    ly = float(layout_rates[1]) if len(layout_rates) > 1 else DEFAULT_EYEBROW_LAYOUT[1]
+    lz = float(layout_rates[2]) if len(layout_rates) > 2 else DEFAULT_EYEBROW_LAYOUT[2]
+    lw = float(layout_rates[3]) if len(layout_rates) > 3 else DEFAULT_EYEBROW_LAYOUT[3]
+    ox = _lerp(-0.2, 0.2, lx)
+    oy = _lerp(0.16, 0.0, ly)
+    sx = _lerp(2.0, 0.5, lz)
+    sy = _lerp(2.0, 0.5, lw)
+    rot = _lerp(-0.15, 0.15, float(tilt_rate))
+    return ox, oy, sx, sy, rot
+
+
+def _sample_uv_bilinear(tex: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Bilinear sample; u/v in 0..1, image row = v (top→bottom, matches UnityPy PNG)."""
+    h, w = tex.shape[:2]
+    u = np.clip(u, 0, 1) * (w - 1)
+    v = np.clip(v, 0, 1) * (h - 1)
+    x0 = np.floor(u).astype(np.int32)
+    y0 = np.floor(v).astype(np.int32)
+    x1 = np.clip(x0 + 1, 0, w - 1)
+    y1 = np.clip(y0 + 1, 0, h - 1)
+    x0 = np.clip(x0, 0, w - 1)
+    y0 = np.clip(y0, 0, h - 1)
+    fu = (u - x0)[..., None]
+    fv = (v - y0)[..., None]
+    c00 = tex[y0, x0]
+    c10 = tex[y0, x1]
+    c01 = tex[y1, x0]
+    c11 = tex[y1, x1]
+    return c00 * (1 - fu) * (1 - fv) + c10 * fu * (1 - fv) + c01 * (1 - fu) * fv + c11 * fu * fv
+
+
+def blend_eyebrow_matdraw(
+    base: np.ndarray,
+    eyebrow: Optional[np.ndarray],
+    eyebrow_color: Sequence[float],
+    layout_rates: Sequence[float] = DEFAULT_EYEBROW_LAYOUT,
+    tilt_rate: float = DEFAULT_EYEBROW_TILT,
+) -> np.ndarray:
+    """Face matDraw eyebrow: ChaControl.ChangeEyebrow* → AIT/Skin True Face _Texture3.
+
+    Authority:
+      ChaControl.ChangeEyebrowLayout/Tilt → _Texture3UV (tx,ty,sx,sy) / _Texture3Rotator
+      ChaShader.EyebrowTex/Color/Layout/Tilt = _Texture3 / _Color3 / _Texture3UV / _Texture3Rotator
+      Shader prop desc: Texture3 UV (tx,ty,sx,sy); stock AddTex is DXT1 white-on-black
+      (A=1), same slot as body underhair (mnpk).
+
+    UV (into UnityPy albedo; renderer uses v_img=1-mesh_v):
+      mesh UV → rotate about 0.5 by rotator → centered scale (zw) → subtract offset (xy).
+      Offset sign chosen so default ty=+0.1 hits fo_head brow-ridge UVs (~mesh_v 0.52)
+      against c_t_eyebrow_* stamp bounds — not CreateFaceTexture makeup space.
+
+    Coverage: min(RGB) silhouette × _Color3 (stock sheets are grayscale so min==R;
+    rejects non-black clear fill on some DLC sheets e.g. c_t_eyebrow_17).
+    Do NOT use blend_addtex — that path is CreateFaceTexture makeup and mis-reads A
+    after UV clip.
+    """
+    if eyebrow is None:
+        return base
+
+    src = np.asarray(eyebrow, dtype=np.float32)
+    if src.ndim == 2:
+        src = np.stack([src, src, src], axis=-1)
+    elif src.shape[2] >= 4:
+        src = src[..., :3]
+
+    h, w = int(base.shape[0]), int(base.shape[1])
+    ox, oy, sx, sy, rot = eyebrow_shader_uv_params(layout_rates, tilt_rate)
+    cos_r = float(np.cos(rot))
+    sin_r = float(np.sin(rot))
+
+    yy, xx = np.mgrid[0:h, 0:w]
+    # Bake matDraw eyebrow into UnityPy albedo (renderer: alb(u,1-mesh_v)).
+    #
+    # ChaControl → _Texture3UV (tx,ty,sx,sy) + _Texture3Rotator (radians).
+    # UV: rotate about 0.5, then centered scale (same zoom sense as eye layout /
+    # Lerp(2,0.5,*): larger s → smaller stamp), then subtract offset so default
+    # ty=+0.1 lifts the stamp onto brow-ridge mesh UVs (o_head ~ mesh_v 0.52).
+    # (Verified against fo_head UV vs c_t_eyebrow_* stamp bounds; TRANSFORM_TEX
+    # uv*s+offset without centering lands the stamp on the mouth island.)
+    u = (xx + 0.5) / float(w)
+    v_img = (yy + 0.5) / float(h)
+    mesh_u = u
+    mesh_v = 1.0 - v_img
+
+    cu = mesh_u - 0.5
+    cv = mesh_v - 0.5
+    ru = cu * cos_r - cv * sin_r
+    rv = cu * sin_r + cv * cos_r
+    su = (ru * sx) + 0.5 - ox
+    sv = (rv * sy) + 0.5 - oy
+
+    in_uv = (su >= 0.0) & (su <= 1.0) & (sv >= 0.0) & (sv <= 1.0)
+    samp = _sample_uv_bilinear(src, su, 1.0 - sv)
+    # Stock st_eyebrow / st_underhair are grayscale DXT1 (R=G=B white-on-black), so any
+    # channel equals the silhouette. Use min(RGB): identical to R on those sheets, and
+    # ignores the non-black clear fill on some DLC sheets (e.g. c_t_eyebrow_17 red paper).
+    mask = np.clip(np.min(samp[..., :3], axis=-1), 0.0, 1.0)
+    mask = np.where(in_uv, mask, 0.0)
+
+    col = np.array(
+        [float(eyebrow_color[i]) if i < len(eyebrow_color) else 1.0 for i in range(4)],
+        dtype=np.float32,
+    )
+    a = (mask * col[3])[..., None]
+    rgb = np.broadcast_to(col[:3], (h, w, 3))
+    out = base.copy()
+    out[..., :3] = np.clip(out[..., :3] * (1.0 - a) + rgb * a, 0.0, 1.0)
+    return out
+
+
 def compose_face_albedo(
     main_tex: np.ndarray,
     *,
@@ -164,6 +293,8 @@ def compose_face_albedo(
     mole_color: Sequence[float] = (1, 1, 1, 1),
     eyebrow: Optional[np.ndarray] = None,
     eyebrow_color: Sequence[float] = (0.2, 0.15, 0.12, 1),
+    eyebrow_layout: Sequence[float] = DEFAULT_EYEBROW_LAYOUT,
+    eyebrow_tilt: float = DEFAULT_EYEBROW_TILT,
     paint0: Optional[np.ndarray] = None,
     paint0_color: Sequence[float] = (1, 0, 0, 1),
     paint1: Optional[np.ndarray] = None,
@@ -183,8 +314,10 @@ def compose_face_albedo(
     base = blend_addtex(base, cheek, cheek_color, strength=0.85)
     base = blend_addtex(base, lip, lip_color, strength=1.0)
     base = blend_addtex(base, mole, mole_color, strength=1.0)
-    # ChangeEyebrowKind writes _Texture3 on face mat
-    base = blend_addtex(base, eyebrow, eyebrow_color, strength=1.0)
+    # matDraw ChangeEyebrowKind/Color/Layout/Tilt (not CreateFaceTexture)
+    base = blend_eyebrow_matdraw(
+        base, eyebrow, eyebrow_color, eyebrow_layout, eyebrow_tilt
+    )
     if occlusion is not None:
         ao = _resize_to(occlusion, (base.shape[0], base.shape[1]))
         # Soft AO — strong multiply crushed faces black under our flat lighting
