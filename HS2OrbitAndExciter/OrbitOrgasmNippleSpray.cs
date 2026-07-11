@@ -54,7 +54,7 @@ namespace HS2OrbitAndExciter
             get
             {
                 int n = HS2OrbitAndExciter.OrgasmNippleSprayBursts?.Value ?? 5;
-                return Mathf.Clamp(n, 2, 10);
+                return Mathf.Clamp(n, 2, 20);
             }
         }
 
@@ -66,6 +66,15 @@ namespace HS2OrbitAndExciter
 
         private static float SpeedEndMult =>
             Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd?.Value ?? 0.4f, 0.05f, 2f);
+
+        private static float AmountOverall =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmount?.Value ?? 1f, 0.2f, 8f);
+
+        private static float AmountStartWeight =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart?.Value ?? 1.5f, 0.2f, 8f);
+
+        private static float AmountEndWeight =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd?.Value ?? 0.5f, 0.1f, 5f);
 
         internal static void Reset()
         {
@@ -478,7 +487,27 @@ namespace HS2OrbitAndExciter
             _lastStatus = $"乳噴連×{bursts}";
             _burstRoutine = host.StartCoroutine(BurstRoutine(hScene, female, bursts, gen));
             HS2OrbitAndExciter.Log?.LogInfo(
-                $"Orbit: 高潮乳頭連噴 {bursts} 次（速 {SpeedStartMult:F1}→{SpeedEndMult:F1}，間隔 {BurstInterval:F2}s）");
+                $"Orbit: 高潮乳頭連噴 {bursts} 次（速 {SpeedStartMult:F1}→{SpeedEndMult:F1}，量 {AmountOverall:F1}×{AmountStartWeight:F1}→{AmountEndWeight:F1}，間隔 {BurstInterval:F2}s）");
+        }
+
+        private static float[] BuildAmountRateSteps(int bursts)
+        {
+            // ObiEmitterCtrl uses cumulative rate where rate*0.1 = fraction of NumParticles; sum≈10 ≈ full tank.
+            var steps = new float[bursts];
+            float wSum = 0f;
+            for (int b = 0; b < bursts; b++)
+            {
+                float t = bursts <= 1 ? 0f : b / (float)(bursts - 1);
+                steps[b] = Mathf.Lerp(AmountStartWeight, AmountEndWeight, t);
+                wSum += steps[b];
+            }
+
+            if (wSum < 0.001f)
+                wSum = 1f;
+            float budget = 10f * AmountOverall;
+            for (int b = 0; b < bursts; b++)
+                steps[b] = (steps[b] / wSum) * budget;
+            return steps;
         }
 
         private static IEnumerator BurstRoutine(HScene hScene, ChaControl female, int bursts, int gen)
@@ -498,10 +527,13 @@ namespace HS2OrbitAndExciter
                 yield break;
 
             float rateAcc = 0f;
-            float rateStep = 10f / bursts; // matches ObiEmitterCtrl: Lerp(0,Num, rate*0.1)
+            float[] rateSteps = BuildAmountRateSteps(bursts);
             float interval = BurstInterval;
             float startM = SpeedStartMult;
             float endM = SpeedEndMult;
+            float amtStart = AmountStartWeight;
+            float amtEnd = AmountEndWeight;
+            float amtAll = AmountOverall;
 
             for (int b = 0; b < bursts; b++)
             {
@@ -510,7 +542,8 @@ namespace HS2OrbitAndExciter
 
                 float t = bursts <= 1 ? 0f : b / (float)(bursts - 1);
                 float speedMult = Mathf.Lerp(startM, endM, t);
-                rateAcc += rateStep;
+                float amountMult = Mathf.Lerp(amtStart, amtEnd, t) * amtAll;
+                rateAcc += rateSteps[b];
 
                 var targets = new List<int>(ObiEmitters.Count);
                 int boneIdx = 0;
@@ -527,7 +560,7 @@ namespace HS2OrbitAndExciter
                         float speed = Mathf.Max(0.05f, baseSp * speedMult);
                         ctrl.Speed = speed;
                         ctrl.ObiEmitter.speed = speed;
-                        int target = Mathf.FloorToInt(Mathf.Lerp(0f, ctrl.ObiEmitter.NumParticles, rateAcc * 0.1f));
+                        int target = Mathf.FloorToInt(Mathf.Lerp(0f, ctrl.ObiEmitter.NumParticles, Mathf.Clamp01(rateAcc * 0.1f)));
                         targets[i] = Mathf.Clamp(target, 1, ctrl.ObiEmitter.NumParticles);
                         ctrl.ObiEmitter.playMode = ObiEmitter.PlayMode.Play;
                     }
@@ -588,7 +621,8 @@ namespace HS2OrbitAndExciter
                         main.startSpeed = Mathf.Max(0.05f, baseSp * speedMult);
                         if (!ps.gameObject.activeSelf)
                             ps.gameObject.SetActive(true);
-                        ps.Emit(Mathf.Max(4, Mathf.RoundToInt(12f * speedMult)));
+                        int emitCount = Mathf.Max(2, Mathf.RoundToInt(12f * amountMult));
+                        ps.Emit(emitCount);
                     }
                     catch (System.Exception ex)
                     {
@@ -596,7 +630,7 @@ namespace HS2OrbitAndExciter
                     }
                 }
 
-                _lastStatus = $"乳噴{b + 1}/{bursts}·速{speedMult:F1}";
+                _lastStatus = $"乳噴{b + 1}/{bursts}·速{speedMult:F1}·量{amountMult:F1}";
 
                 if (b + 1 < bursts)
                     yield return new WaitForSeconds(interval);

@@ -65,6 +65,12 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmNippleSpraySpeedStart;
         /// <summary>Last-burst speed multiplier vs emitter base.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSpraySpeedEnd;
+        /// <summary>Overall particle volume scale across all bursts (1 = default full tank share).</summary>
+        internal static ConfigEntry<float>? OrgasmNippleSprayAmount;
+        /// <summary>First-burst volume weight (relative; higher = more fluid on first pulse).</summary>
+        internal static ConfigEntry<float>? OrgasmNippleSprayAmountStart;
+        /// <summary>Last-burst volume weight (relative; each pulse volume leans toward this).</summary>
+        internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -135,13 +141,19 @@ namespace HS2OrbitAndExciter
             OrgasmNippleSprayRotZ = Config.Bind("Orbit", "OrgasmNippleSprayRotZ", 0f,
                 new ConfigDescription("Nipple spray local euler Z (degrees).", new AcceptableValueRange<float>(-180f, 180f)));
             OrgasmNippleSprayBursts = Config.Bind("Orbit", "OrgasmNippleSprayBursts", 5,
-                new ConfigDescription("Nipple spray pulses per orgasm (urine-like multi burst).", new AcceptableValueRange<int>(2, 10)));
+                new ConfigDescription("Nipple spray pulses per orgasm (urine-like multi burst).", new AcceptableValueRange<int>(2, 20)));
             OrgasmNippleSprayBurstInterval = Config.Bind("Orbit", "OrgasmNippleSprayBurstInterval", 0.35f,
                 new ConfigDescription("Seconds between nipple spray pulses.", new AcceptableValueRange<float>(0.1f, 1.5f)));
             OrgasmNippleSpraySpeedStart = Config.Bind("Orbit", "OrgasmNippleSpraySpeedStart", 1.8f,
                 new ConfigDescription("First pulse speed vs base (higher = stronger than old single spray).", new AcceptableValueRange<float>(0.5f, 4f)));
             OrgasmNippleSpraySpeedEnd = Config.Bind("Orbit", "OrgasmNippleSpraySpeedEnd", 0.4f,
                 new ConfigDescription("Last pulse speed vs base (each pulse gets weaker toward this).", new AcceptableValueRange<float>(0.05f, 2f)));
+            OrgasmNippleSprayAmount = Config.Bind("Orbit", "OrgasmNippleSprayAmount", 1f,
+                new ConfigDescription("Overall nipple spray volume (1 = default; higher = more fluid total).", new AcceptableValueRange<float>(0.2f, 8f)));
+            OrgasmNippleSprayAmountStart = Config.Bind("Orbit", "OrgasmNippleSprayAmountStart", 1.5f,
+                new ConfigDescription("First pulse volume weight (relative to later pulses).", new AcceptableValueRange<float>(0.2f, 8f)));
+            OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
+                new ConfigDescription("Last pulse volume weight (each pulse volume decreases toward this).", new AcceptableValueRange<float>(0.1f, 5f)));
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
