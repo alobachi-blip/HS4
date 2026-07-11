@@ -370,7 +370,7 @@ namespace HS2OrbitAndExciter
 
             try
             {
-                var sample = ParseColorSampleList(json);
+                var sample = ParseColorSampleList(json!);
                 if (sample == null || sample.Count <= ColorSampleSkipSkin)
                 {
                     HS2OrbitAndExciter.Log?.LogWarning(
