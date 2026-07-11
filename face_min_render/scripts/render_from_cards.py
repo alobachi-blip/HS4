@@ -287,6 +287,9 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
     cheek = layer("st_cheek_", mk.get("cheekId", 0), "cheek")
     eyeshadow = layer("st_eyeshadow_", mk.get("eyeshadowId", 0), "eyeshadow")
     mole = layer("st_mole_", card["mole_id"], "mole")
+    # Eyebrow uses _Texture3 + eyebrowLayout/Tilt on face matDraw (ChaControl.ChangeEyebrow*).
+    # Without that UV layout, the AddTex is a near-opaque sheet and would paint the whole face.
+    # Skip until layout bake is wired; still list-resolve for meta.
     eyebrow = layer("st_eyebrow_", card["eyebrow_id"], "eyebrow")
     paints = mk.get("paintInfo") or []
     paint0 = layer("st_paint_", (paints[0] or {}).get("id", 0) if paints else 0, "paint0")
@@ -320,7 +323,7 @@ def compose_card_face_tex(paths: dict, card: dict, tex_dir: Path) -> np.ndarray:
         lip_color=mk.get("lipColor") or (1, 1, 1, 1),
         mole=load_rgba(mole.get("path") if mole else None),
         mole_color=card["mole_color"],
-        eyebrow=load_rgba(eyebrow.get("path") if eyebrow else None),
+        eyebrow=None,  # needs ChangeEyebrowLayout UV; see above
         eyebrow_color=card["eyebrow_color"],
         paint0=load_rgba(paint0.get("path") if paint0 else None),
         paint0_color=(paints[0] or {}).get("color", (1, 0, 0, 1)) if paints else (1, 0, 0, 1),

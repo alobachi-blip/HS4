@@ -129,13 +129,18 @@ def blend_addtex(
         [float(color[i]) if i < len(color) else 1.0 for i in range(4)],
         dtype=np.float32,
     )
-    # HS2 makeup AddTex: typically solid RGB marker + alpha mask; tint comes from card color.
+    # HS2 makeup AddTex: typically solid RGB marker + alpha mask; tint from card color.
+    # Exception: st_eyebrow often ships as full-opaque alpha with RGB silhouette; the game
+    # places it via eyebrowLayout on _Texture3 — without layout, use RGB as coverage.
     if ov.shape[2] >= 4 and float(ov[..., 3].max()) >= 0.02:
         a = ov[..., 3:4] * col[3] * strength
         rgb = np.broadcast_to(col[:3], (*ov.shape[:2], 3)).copy()
-        # If texture has real luminance variation in RGB, modulate intensity
         lum = ov[..., :3].mean(axis=2, keepdims=True)
-        if float(lum.std()) > 0.04:
+        if float(ov[..., 3].min()) > 0.95 and float(lum.std()) > 0.02:
+            # opaque sheet → RGB silhouette (eyebrow / some mod sheets)
+            a = np.clip(ov[..., :3].max(axis=2, keepdims=True), 0, 1) * col[3] * strength
+            rgb = np.broadcast_to(col[:3], (*ov.shape[:2], 3)).copy()
+        elif float(lum.std()) > 0.04:
             rgb = rgb * np.clip(lum / max(float(lum.max()), 1e-6), 0, 1)
     else:
         rgb = ov[..., :3] * col[:3]
