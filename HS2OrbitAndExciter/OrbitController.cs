@@ -164,7 +164,7 @@ namespace HS2OrbitAndExciter
                 if (hId != _manualDirectorHSceneId)
                 {
                     _manualDirectorHSceneId = hId;
-                    OrbitManualDirector.OnHSceneEntered();
+                    OrbitManualDirector.OnHSceneEntered(hProbe);
                 }
             }
             else
@@ -246,6 +246,12 @@ namespace HS2OrbitAndExciter
             {
                 OrbitOrgasmTattoo.Toggle();
                 _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+            if (Input.GetKeyDown(OrbitManualHotkeys.BustRestoreKey))
+            {
+                if (OrbitOrgasmBustGrowth.TryRestore(hScene))
+                    _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.BellyResetKey))

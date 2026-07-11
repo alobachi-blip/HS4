@@ -12,7 +12,8 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier2 = KeyCode.LeftControl;
         private bool _visible;
         private bool _needSyncFromConfig; // 每次打開視窗時從 config 同步顯示，確保看到的是已保存的值
-        private Rect _windowRect = new Rect(100, 100, 480, 740);
+        private Rect _windowRect = new Rect(100, 100, 480, 640);
+        private Vector2 _scroll;
         private GUIStyle? _labelStyle;
         private bool _stylesInitialized;
         // Per-field strings so TextField isn't reset from config every frame (which hides typing)
@@ -71,12 +72,20 @@ namespace HS2OrbitAndExciter
             }
 
             InitStyles();
+            float maxH = Mathf.Max(280f, Screen.height - 48f);
+            if (_windowRect.height > maxH)
+                _windowRect.height = maxH;
+            if (_windowRect.width < 420f)
+                _windowRect.width = 420f;
             _windowRect = GUILayout.Window(9001, _windowRect, DrawWindow, "環視與興奮條 — 設定");
         }
 
         private void DrawWindow(int id)
         {
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+
+            float scrollH = Mathf.Max(160f, _windowRect.height - 56f);
+            _scroll = GUILayout.BeginScrollView(_scroll, false, true, GUILayout.Height(scrollH));
 
             GUILayout.BeginVertical(GUI.skin.box);
             foreach (var line in PluginBuildIdentity.GetGuiLines())
@@ -247,7 +256,7 @@ namespace HS2OrbitAndExciter
             GUILayout.Label("H 場景熱鍵", GUI.skin.box);
             GUILayout.Label("單鍵操作（勿同時按 Ctrl／Shift／Alt；環視開關不影響）：", _labelStyle);
             GUILayout.Label(
-                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢、T 高潮刺青開關",
+                OrbitManualHotkeys.HudLegend + " — G 換女主、H 換套裝、J 亂數穿著、K 切姿勢鏡頭、L 換姿勢、T 刺青、B 胸回復",
                 _labelStyle);
             GUILayout.Label(
                 "G 池排除同性格卡；<30 秒快換降權、≥60 秒久留優先；左下角面板顯示 G 池統計與上場秒數",
@@ -256,21 +265,112 @@ namespace HS2OrbitAndExciter
             GUILayout.Label(
                 OrbitManualHotkeys.PregnancyHudLegend + " — Y/U 為 PregnancyPlus；R 由本插件強制清腹（含 HS2 H 膨脹）",
                 _labelStyle);
+
+            GUILayout.Space(8);
+            GUILayout.Label("高潮特效", GUI.skin.box);
+            GUILayout.Label(
+                "女高潮時觸發：刺青／胸部變大／乳頭射精（複用男性射精 Obi／粒子）。左下角 HUD「高潮 …」列顯示狀態。",
+                _labelStyle);
+
             if (HS2OrbitAndExciter.OrgasmTattooEnabled != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("高潮刺青", GUILayout.Width(100));
+                GUILayout.Label("刺青", GUILayout.Width(100));
                 bool tattooOn = HS2OrbitAndExciter.OrgasmTattooEnabled.Value;
                 bool next = GUILayout.Toggle(tattooOn, tattooOn ? $"開（T）×{OrbitOrgasmTattoo.Count}" : "關（T）");
                 if (next != tattooOn)
                     HS2OrbitAndExciter.OrgasmTattooEnabled.Value = next;
                 GUILayout.EndHorizontal();
-                GUILayout.Label("st_paint 刺青：寫入皮膚 paint＋3D 貼花（非飾品欄）；T 開啟會立刻加一枚；大腿→臉", _labelStyle);
+                GUILayout.Label("貼花＋皮膚 paint，不會出現在飾品清單；H 換衣後自動重掛；G 換角清空", _labelStyle);
+            }
+
+            if (HS2OrbitAndExciter.OrgasmBustGrowEnabled != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("胸部變大", GUILayout.Width(100));
+                bool bustOn = HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value;
+                bool bustNext = GUILayout.Toggle(bustOn, bustOn ? "開" : "關");
+                if (bustNext != bustOn)
+                    HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value = bustNext;
+                GUILayout.EndHorizontal();
+                if (HS2OrbitAndExciter.OrgasmBustGrowPercent != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"每次 +{HS2OrbitAndExciter.OrgasmBustGrowPercent.Value:F0}%", GUILayout.Width(100));
+                    float p = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmBustGrowPercent.Value, 0f, 50f);
+                    if (Mathf.Abs(p - HS2OrbitAndExciter.OrgasmBustGrowPercent.Value) > 0.05f)
+                        HS2OrbitAndExciter.OrgasmBustGrowPercent.Value = Mathf.Round(p);
+                    GUILayout.EndHorizontal();
+                }
+                GUILayout.Label("相對目前胸サイズ倍率放大；B 鍵回復進 H／換角時的基準胸圍", _labelStyle);
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("回復胸部（B）", GUILayout.Width(140)))
+                    OrbitOrgasmBustGrowth.TryRestore(OrbitController.TryGetHScene());
+                GUILayout.Label(OrbitOrgasmBustGrowth.HudStatus, _labelStyle ?? GUI.skin.label);
+                GUILayout.EndHorizontal();
+            }
+
+            if (HS2OrbitAndExciter.OrgasmNippleSprayEnabled != null)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("乳頭射精", GUILayout.Width(100));
+                bool nipOn = HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value;
+                bool nipNext = GUILayout.Toggle(nipOn, nipOn ? "開" : "關");
+                if (nipNext != nipOn)
+                    HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value = nipNext;
+                GUILayout.Label(OrbitOrgasmNippleSpray.HudStatus, _labelStyle ?? GUI.skin.label);
+                GUILayout.EndHorizontal();
+                GUILayout.Label("複用男性射精特效掛左右乳頭；噴向不對時調下方偏移／旋轉（下次高潮自動套用；也可按重建）", _labelStyle);
+
+                if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"前伸 Z {HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value:F2}", GUILayout.Width(100));
+                    float z = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value, -0.1f, 0.1f);
+                    if (Mathf.Abs(z - HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value) > 0.001f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value = Mathf.Round(z * 100f) / 100f;
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSprayRotX != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"旋轉 X {HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value:F0}°", GUILayout.Width(100));
+                    float rx = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value, -180f, 180f);
+                    if (Mathf.Abs(rx - HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value) > 0.5f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value = Mathf.Round(rx);
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSprayRotY != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"旋轉 Y {HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value:F0}°", GUILayout.Width(100));
+                    float ry = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value, -180f, 180f);
+                    if (Mathf.Abs(ry - HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value) > 0.5f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value = Mathf.Round(ry);
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSprayRotZ != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"旋轉 Z {HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value:F0}°", GUILayout.Width(100));
+                    float rz = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value, -180f, 180f);
+                    if (Mathf.Abs(rz - HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value) > 0.5f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value = Mathf.Round(rz);
+                    GUILayout.EndHorizontal();
+                }
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("重建乳頭噴口", GUILayout.Width(140)))
+                    OrbitOrgasmNippleSpray.ForceRebuild(OrbitController.TryGetHScene());
+                GUILayout.Label("調完偏移／旋轉後按此立即套用", _labelStyle ?? GUI.skin.label);
+                GUILayout.EndHorizontal();
             }
 
             GUILayout.Space(8);
             GUILayout.Label("設定值會自動儲存，保持至下次變更。", _labelStyle);
             GUILayout.Label("環視：⌃⇧O 開關；⌃⇧I 狀態面板；⌃⇧P 本視窗。頂端為版本對照。", _labelStyle);
+
+            GUILayout.EndScrollView();
+
             if (GUILayout.Button("關閉"))
                 _visible = false;
 

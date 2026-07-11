@@ -45,6 +45,18 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmTattooScaleMin;
         /// <summary>Maximum size multiplier for orgasm tattoo decals.</summary>
         internal static ConfigEntry<float>? OrgasmTattooScaleMax;
+        /// <summary>When true, each female orgasm grows BustSize by OrgasmBustGrowPercent.</summary>
+        internal static ConfigEntry<bool>? OrgasmBustGrowEnabled;
+        /// <summary>Relative bust size increase per orgasm (percent), e.g. 15 = ×1.15.</summary>
+        internal static ConfigEntry<float>? OrgasmBustGrowPercent;
+        /// <summary>When true, each female orgasm plays semen (射精) fluid/particles from both nipples.</summary>
+        internal static ConfigEntry<bool>? OrgasmNippleSprayEnabled;
+        internal static ConfigEntry<float>? OrgasmNippleSprayOffsetX;
+        internal static ConfigEntry<float>? OrgasmNippleSprayOffsetY;
+        internal static ConfigEntry<float>? OrgasmNippleSprayOffsetZ;
+        internal static ConfigEntry<float>? OrgasmNippleSprayRotX;
+        internal static ConfigEntry<float>? OrgasmNippleSprayRotY;
+        internal static ConfigEntry<float>? OrgasmNippleSprayRotZ;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -96,13 +108,31 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("Minimum size multiplier for tattoo decals.", new AcceptableValueRange<float>(1f, 20f)));
             OrgasmTattooScaleMax = Config.Bind("Orbit", "OrgasmTattooScaleMax", 4.5f,
                 new ConfigDescription("Maximum size multiplier for tattoo decals.", new AcceptableValueRange<float>(1f, 20f)));
+            OrgasmBustGrowEnabled = Config.Bind("Orbit", "OrgasmBustGrowEnabled", true,
+                "When true, each female orgasm multiplies BustSize (胸サイズ) by (1 + percent/100), clamped to 0–1.");
+            OrgasmBustGrowPercent = Config.Bind("Orbit", "OrgasmBustGrowPercent", 15f,
+                new ConfigDescription("Relative bust growth per orgasm (percent). 15 = +15% of current size.", new AcceptableValueRange<float>(0f, 100f)));
+            OrgasmNippleSprayEnabled = Config.Bind("Orbit", "OrgasmNippleSprayEnabled", true,
+                "When true, each female orgasm reuses male semen (射精) Obi/particle emitters on both nipples.");
+            OrgasmNippleSprayOffsetX = Config.Bind("Orbit", "OrgasmNippleSprayOffsetX", 0f,
+                new ConfigDescription("Nipple spray local position X.", new AcceptableValueRange<float>(-0.2f, 0.2f)));
+            OrgasmNippleSprayOffsetY = Config.Bind("Orbit", "OrgasmNippleSprayOffsetY", 0f,
+                new ConfigDescription("Nipple spray local position Y.", new AcceptableValueRange<float>(-0.2f, 0.2f)));
+            OrgasmNippleSprayOffsetZ = Config.Bind("Orbit", "OrgasmNippleSprayOffsetZ", 0.02f,
+                new ConfigDescription("Nipple spray local position Z.", new AcceptableValueRange<float>(-0.2f, 0.2f)));
+            OrgasmNippleSprayRotX = Config.Bind("Orbit", "OrgasmNippleSprayRotX", 90f,
+                new ConfigDescription("Nipple spray local euler X (degrees).", new AcceptableValueRange<float>(-180f, 180f)));
+            OrgasmNippleSprayRotY = Config.Bind("Orbit", "OrgasmNippleSprayRotY", 0f,
+                new ConfigDescription("Nipple spray local euler Y (degrees).", new AcceptableValueRange<float>(-180f, 180f)));
+            OrgasmNippleSprayRotZ = Config.Bind("Orbit", "OrgasmNippleSprayRotZ", 0f,
+                new ConfigDescription("Nipple spray local euler Z (degrees).", new AcceptableValueRange<float>(-180f, 180f)));
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
 
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
-            PatchSafe(harmony, typeof(Patches.OrgasmTattooPatch));
+            PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopSonyuProc));

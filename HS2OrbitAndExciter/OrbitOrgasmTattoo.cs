@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using AIChara;
 using IllusionUtility.GetUtility;
@@ -8,28 +9,29 @@ using UnityEngine.Rendering;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Orgasm tattoos from maker <c>st_paint</c>:
-    /// 1) visible quad decal on body attach points (thigh → face);
-    /// 2) also writes body-paint slots so skin shows a tattoo.
-    /// Toggle with T (turning ON immediately places one sample).
+    /// Orgasm tattoos from maker <c>st_paint</c> (NOT accessory slots — will not appear in 飾品清單):
+    /// visible quad decals on body bones (thigh → face) + body-paint slots.
+    /// Survives H coordinate swap via <see cref="ReapplyAfterReloadRoutine"/>.
     /// </summary>
     internal static class OrbitOrgasmTattoo
     {
         private const float BaseSize = 0.22f;
+        private const float SurfaceOffset = 0.035f;
+        private const int ReapplySettleFrames = 6;
 
-        private static readonly string[] BodyParents =
+        private struct Stamp
         {
-            "N_Leg_L", "N_Leg_R", "N_Knee_L", "N_Knee_R",
-            "N_Kokan", "N_Waist", "N_Waist_f", "N_Waist_b", "N_Waist_L", "N_Waist_R",
-            "N_Back", "N_Back_L", "N_Back_R",
-            "N_Chest_f", "N_Chest", "N_Tikubi_L", "N_Tikubi_R",
-            "N_Elbo_L", "N_Elbo_R", "N_Arm_L", "N_Arm_R", "N_Shoulder_L", "N_Shoulder_R",
-            "N_Wrist_L", "N_Wrist_R", "N_Hand_L", "N_Hand_R",
-            "N_Neck", "N_Face",
-        };
+            public int PaintId;
+            public string ParentKey;
+            public Color Color;
+            public float Size;
+            public int LayoutId;
+            public Vector4 Layout;
+            public float Rotation;
+        }
 
-        /// <summary>Fallback bones if accessory parents missing.</summary>
-        private static readonly string[] BoneFallbacks =
+        /// <summary>Bone-first attach order (stable across clothes). Thigh → up → face last.</summary>
+        private static readonly string[] BodyParents =
         {
             "cf_J_LegUp01_L", "cf_J_LegUp01_R", "cf_J_Knee_L", "cf_J_Knee_R",
             "cf_J_Kokan", "cf_J_Kosi01", "cf_J_Kosi02",
@@ -38,24 +40,25 @@ namespace HS2OrbitAndExciter
             "cf_J_ArmUp00_L", "cf_J_ArmUp00_R", "cf_J_Shoulder_L", "cf_J_Shoulder_R",
             "cf_J_Hand_L", "cf_J_Hand_R",
             "cf_J_Neck", "cf_J_Head",
+            // Accessory parents as extras if bones missing on some cards.
+            "N_Leg_L", "N_Leg_R", "N_Waist", "N_Chest_f", "N_Back", "N_Face",
         };
 
+        private static readonly List<Stamp> Stamps = new List<Stamp>(32);
         private static readonly List<GameObject> Decals = new List<GameObject>(32);
         private static readonly List<Material> DecalMats = new List<Material>(32);
-        private static readonly List<string> SiteLabels = new List<string>(32);
         private static int[]? _paintIds;
         private static int[]? _layoutIds;
         private static bool _catalogTried;
         private static int _parentCursor;
-        private static int _paintSlot;
         private static int _lastHSceneId = -1;
         private static Shader? _decalShader;
         private static string _lastSiteLabel = "";
+        private static int _reapplyGen;
 
-        internal static int Count => Decals.Count;
-        /// <summary>Chinese label of the most recently placed tattoo site (for HUD).</summary>
+        internal static int Count => Stamps.Count;
         internal static string LastSiteLabel => _lastSiteLabel;
-        /// <summary>Compact HUD: count + last site, e.g. 刺3·左大腿.</summary>
+
         internal static string HudStatus
         {
             get
@@ -85,8 +88,7 @@ namespace HS2OrbitAndExciter
             Enabled = !Enabled;
             if (Enabled)
             {
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: T 高潮刺青 ON（上限 {GetMaxStamps()}）");
-                // Immediate sample so user can see it without waiting for orgasm.
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: T 高潮刺青 ON（上限 {GetMaxStamps()}；非飾品欄）");
                 TryAddOne(forceLog: true);
             }
             else
@@ -96,23 +98,13 @@ namespace HS2OrbitAndExciter
             return Enabled;
         }
 
+        /// <summary>Drop all tattoos (new H scene / G chara swap).</summary>
         internal static void ClearStamps()
         {
-            for (int i = 0; i < Decals.Count; i++)
-            {
-                if (Decals[i] != null)
-                    Object.Destroy(Decals[i]);
-            }
-            Decals.Clear();
-            for (int i = 0; i < DecalMats.Count; i++)
-            {
-                if (DecalMats[i] != null)
-                    Object.Destroy(DecalMats[i]);
-            }
-            DecalMats.Clear();
-            SiteLabels.Clear();
+            _reapplyGen++;
+            DestroyVisualsOnly();
+            Stamps.Clear();
             _parentCursor = 0;
-            _paintSlot = 0;
             _lastSiteLabel = "";
         }
 
@@ -123,6 +115,60 @@ namespace HS2OrbitAndExciter
             _catalogTried = false;
             _paintIds = null;
             _layoutIds = null;
+            _decalShader = null;
+        }
+
+        /// <summary>After H coordinate reload: wait for bones, then rebuild from stamps.</summary>
+        internal static IEnumerator ReapplyAfterReloadRoutine(ChaControl cha)
+        {
+            int gen = ++_reapplyGen;
+            for (int i = 0; i < ReapplySettleFrames; i++)
+                yield return null;
+
+            if (gen != _reapplyGen || cha == null || !cha.loadEnd || Stamps.Count == 0)
+                yield break;
+
+            ReapplyAfterReload(cha);
+
+            // Second pass: some parents appear a frame later after clothes settle.
+            yield return null;
+            yield return null;
+            if (gen != _reapplyGen || cha == null || !cha.loadEnd || Stamps.Count == 0)
+                yield break;
+            if (Decals.Count < Stamps.Count)
+                ReapplyAfterReload(cha);
+        }
+
+        /// <summary>After H coordinate reload: rebuild decals + body paint from remembered stamps.</summary>
+        internal static void ReapplyAfterReload(ChaControl? cha)
+        {
+            if (cha == null || Stamps.Count == 0)
+                return;
+
+            DestroyVisualsOnly();
+            EnsureCatalog(cha);
+
+            int hung = 0;
+            for (int i = 0; i < Stamps.Count; i++)
+            {
+                var s = Stamps[i];
+                ApplyBodyPaintSlot(cha, s, i);
+                var tex = LoadPaintTexture(cha, s.PaintId);
+                if (tex == null)
+                    continue;
+                if (!TryFindParent(cha, s.ParentKey, out Transform parent))
+                {
+                    HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 刺青重掛找不到 {s.ParentKey}");
+                    continue;
+                }
+                SpawnDecalVisual(cha, parent, s.ParentKey, tex, s.Color, s.Size, recordStamp: false);
+                hung++;
+            }
+
+            if (Stamps.Count > 0)
+                _lastSiteLabel = FormatSiteLabel(Stamps[Stamps.Count - 1].ParentKey);
+
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 刺青換衣後重掛 {hung}/{Stamps.Count}");
         }
 
         internal static void OnOrgasm(HSceneFlagCtrl? ctrlFlag)
@@ -177,14 +223,10 @@ namespace HS2OrbitAndExciter
 
             int paintId = _paintIds[Random.Range(0, _paintIds.Length)];
             var tex = LoadPaintTexture(cha, paintId);
-            if (tex == null)
+            for (int i = 0; i < 8 && tex == null; i++)
             {
-                // Retry a few ids.
-                for (int i = 0; i < 8 && tex == null; i++)
-                {
-                    paintId = _paintIds[Random.Range(0, _paintIds.Length)];
-                    tex = LoadPaintTexture(cha, paintId);
-                }
+                paintId = _paintIds[Random.Range(0, _paintIds.Length)];
+                tex = LoadPaintTexture(cha, paintId);
             }
             if (tex == null)
             {
@@ -192,54 +234,65 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            Color color = Color.HSVToRGB(Random.value, Random.Range(0.55f, 1f), Random.Range(0.5f, 1f));
-            color.a = 1f;
-            float size = BaseSize * Random.Range(GetScaleMin(), GetScaleMax());
-
-            // Skin paint (always try) — visible on body texture.
-            ApplyBodyPaint(cha, paintId, color);
-
-            // 3D decal on attach point.
-            if (!TryResolveParent(cha, out string parentKey, out Transform parent))
+            if (!TryResolveNextParent(cha, out string parentKey, out Transform parent))
             {
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 找不到身體掛點（貼花略過，已寫 body paint）");
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 找不到身體掛點");
                 return;
             }
 
+            Color color = Color.HSVToRGB(Random.value, Random.Range(0.55f, 1f), Random.Range(0.5f, 1f));
+            color.a = 1f;
+            float size = BaseSize * Random.Range(GetScaleMin(), GetScaleMax());
+            int layoutId = (_layoutIds != null && _layoutIds.Length > 0)
+                ? _layoutIds[Random.Range(0, _layoutIds.Length)]
+                : 0;
+            var layout = new Vector4(
+                Random.Range(0.05f, 0.35f),
+                Random.Range(0.05f, 0.35f),
+                Random.Range(0.2f, 0.8f),
+                Random.Range(0.2f, 0.8f));
+            float rotation = Random.value;
+
             int max = GetMaxStamps();
-            while (Decals.Count >= max)
+            while (Stamps.Count >= max)
                 DestroyOldest();
 
-            if (!TrySpawnDecal(cha, parent, parentKey, tex, color, size, paintId))
-                return;
+            var stamp = new Stamp
+            {
+                PaintId = paintId,
+                ParentKey = parentKey,
+                Color = color,
+                Size = size,
+                LayoutId = layoutId,
+                Layout = layout,
+                Rotation = rotation,
+            };
+            Stamps.Add(stamp);
+            ApplyBodyPaintSlot(cha, stamp, Stamps.Count - 1);
+            SpawnDecalVisual(cha, parent, parentKey, tex, color, size, recordStamp: true);
         }
 
-        private static void ApplyBodyPaint(ChaControl cha, int paintId, Color color)
+        private static void ApplyBodyPaintSlot(ChaControl cha, Stamp stamp, int stampIndex)
         {
             var paints = cha.fileBody?.paintInfo;
             if (paints == null || paints.Length < 2)
                 return;
 
-            int slot = _paintSlot % 2;
-            _paintSlot = slot + 1;
+            // Only the last two stamps fit in native paint slots.
+            int fromEnd = Stamps.Count - 1 - stampIndex;
+            if (fromEnd > 1)
+                return;
 
-            int layoutId = 0;
-            if (_layoutIds != null && _layoutIds.Length > 0)
-                layoutId = _layoutIds[Random.Range(0, _layoutIds.Length)];
+            int slot = fromEnd == 0 ? (Stamps.Count - 1) % 2 : (Stamps.Count - 2) % 2;
 
             var info = paints[slot];
-            info.id = paintId;
-            info.layoutId = layoutId;
-            info.color = color;
+            info.id = stamp.PaintId;
+            info.layoutId = stamp.LayoutId;
+            info.color = stamp.Color;
             info.glossPower = 0.4f;
             info.metallicPower = 0.2f;
-            // Large stamp: low layout.x/y → larger scale in CreateBodyTexture lerp.
-            info.layout = new Vector4(
-                Random.Range(0.05f, 0.35f),
-                Random.Range(0.05f, 0.35f),
-                Random.Range(0.2f, 0.8f),
-                Random.Range(0.2f, 0.8f));
-            info.rotation = Random.value;
+            info.layout = stamp.Layout;
+            info.rotation = stamp.Rotation;
 
             bool s0 = slot == 0;
             bool s1 = slot == 1;
@@ -250,41 +303,46 @@ namespace HS2OrbitAndExciter
             cha.CreateBodyTexture();
         }
 
-        private static bool TryResolveParent(ChaControl cha, out string key, out Transform parent)
+        private static bool TryResolveNextParent(ChaControl cha, out string key, out Transform parent)
         {
             key = "";
             parent = null!;
-
             for (int n = 0; n < BodyParents.Length; n++)
             {
                 key = PickParent();
-                parent = cha.GetAccessoryParentTransform(key);
-                if (parent != null)
+                if (TryFindParent(cha, key, out parent))
                     return true;
-            }
-
-            // Bone name fallbacks.
-            var root = cha.objBodyBone != null ? cha.objBodyBone.transform : null;
-            if (root == null)
-                return false;
-
-            int boneIdx = (_parentCursor - 1 + BoneFallbacks.Length) % BoneFallbacks.Length;
-            for (int n = 0; n < BoneFallbacks.Length; n++)
-            {
-                int i = (boneIdx + n) % BoneFallbacks.Length;
-                key = BoneFallbacks[i];
-                var t = root.FindLoop(key);
-                if (t != null)
-                {
-                    parent = t;
-                    return true;
-                }
             }
             return false;
         }
 
-        private static bool TrySpawnDecal(
-            ChaControl cha, Transform parent, string parentKey, Texture2D tex, Color color, float size, int paintId)
+        private static bool TryFindParent(ChaControl cha, string key, out Transform parent)
+        {
+            parent = null!;
+            var root = cha.objBodyBone != null ? cha.objBodyBone.transform : null;
+            if (root != null)
+            {
+                var bone = root.FindLoop(key);
+                if (bone != null)
+                {
+                    parent = bone;
+                    return true;
+                }
+            }
+
+            try
+            {
+                parent = cha.GetAccessoryParentTransform(key);
+                if (parent != null)
+                    return true;
+            }
+            catch { /* ignore */ }
+
+            return false;
+        }
+
+        private static void SpawnDecalVisual(
+            ChaControl cha, Transform parent, string parentKey, Texture2D tex, Color color, float size, bool recordStamp)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
             go.name = $"OrbitTattoo_{Decals.Count}_{parentKey}";
@@ -293,39 +351,50 @@ namespace HS2OrbitAndExciter
                 Object.Destroy(col);
 
             go.layer = cha.gameObject.layer;
+
+            Vector3 bodyCenter = cha.objBody != null
+                ? cha.objBody.transform.position
+                : cha.transform.position;
+            Vector3 outward = parent.position - bodyCenter;
+            if (outward.sqrMagnitude < 1e-6f)
+                outward = parent.TransformDirection(Vector3.forward);
+            outward.Normalize();
+
             go.transform.SetParent(parent, worldPositionStays: false);
-            go.transform.localPosition = new Vector3(0f, 0f, 0.025f);
-            go.transform.localRotation = Quaternion.identity;
+            go.transform.position = parent.position + outward * SurfaceOffset;
+            go.transform.rotation = Quaternion.LookRotation(outward, Vector3.up);
             go.transform.localScale = new Vector3(size, size, size);
 
             var mr = go.GetComponent<MeshRenderer>();
             if (mr == null)
             {
                 Object.Destroy(go);
-                return false;
+                return;
             }
 
-            var mat = CreateDecalMaterial(cha, tex, color);
+            var mat = CreateDecalMaterial(tex, color);
             if (mat == null)
             {
                 Object.Destroy(go);
                 HS2OrbitAndExciter.Log?.LogWarning("Orbit: 無法建立刺青材質");
-                return false;
+                return;
             }
 
             mr.sharedMaterial = mat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
+            mr.enabled = true;
 
             Decals.Add(go);
             DecalMats.Add(mat);
             string site = FormatSiteLabel(parentKey);
-            SiteLabels.Add(site);
             _lastSiteLabel = site;
 
-            HS2OrbitAndExciter.Log?.LogInfo(
-                $"Orbit: 高潮刺青 +1 位置={site}({parentKey}) paintId={paintId} size={size:F2} 共{Decals.Count}");
-            return true;
+            if (recordStamp)
+            {
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: 高潮刺青 +1 位置={site}({parentKey}) 材質={mat.shader?.name} 共{Stamps.Count}");
+            }
         }
 
         private static string FormatSiteLabel(string key)
@@ -341,16 +410,16 @@ namespace HS2OrbitAndExciter
                 case "N_Knee_R":
                 case "cf_J_Knee_R": return "右膝";
                 case "N_Kokan":
-                case "cf_J_Kokan": return "下腹";
+                case "cf_J_Kokan": return "股間";
                 case "N_Waist":
+                case "N_Waist_f":
                 case "cf_J_Kosi01": return "腰";
-                case "N_Waist_f": return "腰前";
                 case "N_Waist_b":
-                case "cf_J_Kosi02": return "腰後";
+                case "cf_J_Kosi02": return "後腰";
                 case "N_Waist_L": return "左腰";
                 case "N_Waist_R": return "右腰";
                 case "N_Back":
-                case "cf_J_Spine01": return "背中";
+                case "cf_J_Spine01": return "背";
                 case "N_Back_L": return "左背";
                 case "N_Back_R": return "右背";
                 case "cf_J_Spine02":
@@ -386,9 +455,9 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private static Material? CreateDecalMaterial(ChaControl cha, Texture2D tex, Color color)
+        private static Material? CreateDecalMaterial(Texture2D tex, Color color)
         {
-            var shader = GetDecalShader(cha);
+            var shader = GetDecalShader();
             if (shader == null)
                 return null;
 
@@ -401,63 +470,89 @@ namespace HS2OrbitAndExciter
                 mat.SetColor("_TintColor", color);
             if (mat.HasProperty("_Color1"))
                 mat.SetColor("_Color1", color);
+
+            // Standard fade / transparent setup when available.
+            if (mat.HasProperty("_Mode"))
+                mat.SetFloat("_Mode", 2f);
+            if (mat.HasProperty("_SrcBlend"))
+                mat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+            if (mat.HasProperty("_DstBlend"))
+                mat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+            if (mat.HasProperty("_ZWrite"))
+                mat.SetInt("_ZWrite", 0);
             if (mat.HasProperty("_Cull"))
                 mat.SetInt("_Cull", (int)CullMode.Off);
 
-            // Prefer cutout/alpha so paint edges show.
-            if (mat.HasProperty("_Mode"))
-                mat.SetFloat("_Mode", 1f);
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.renderQueue = (int)RenderQueue.Transparent;
             return mat;
         }
 
-        private static Shader? GetDecalShader(ChaControl cha)
+        /// <summary>Prefer simple transparent shaders — body skin shaders often make quads invisible.</summary>
+        private static Shader? GetDecalShader()
         {
             if (_decalShader != null)
                 return _decalShader;
 
-            // Prefer a shader already loaded in the character (HS2 often strips built-ins).
-            try
+            string[] candidates =
             {
-                if (cha.customTexCtrlBody?.matDraw != null && cha.customTexCtrlBody.matDraw.shader != null)
-                    _decalShader = cha.customTexCtrlBody.matDraw.shader;
+                "Unlit/Transparent",
+                "Legacy Shaders/Transparent/Diffuse",
+                "Sprites/Default",
+                "UI/Default",
+                "Standard",
+                "Diffuse",
+            };
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                var s = Shader.Find(candidates[i]);
+                if (s != null)
+                {
+                    _decalShader = s;
+                    HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 刺青 shader={candidates[i]}");
+                    return _decalShader;
+                }
             }
-            catch { /* ignore */ }
+            return null;
+        }
 
-            if (_decalShader == null && cha.objBody != null)
+        private static void DestroyVisualsOnly()
+        {
+            for (int i = 0; i < Decals.Count; i++)
             {
-                var r = cha.objBody.GetComponentInChildren<Renderer>();
-                if (r != null && r.sharedMaterial != null && r.sharedMaterial.shader != null)
-                    _decalShader = r.sharedMaterial.shader;
+                if (Decals[i] != null)
+                    Object.Destroy(Decals[i]);
             }
-
-            if (_decalShader == null)
+            Decals.Clear();
+            for (int i = 0; i < DecalMats.Count; i++)
             {
-                _decalShader = Shader.Find("Standard")
-                               ?? Shader.Find("Unlit/Transparent")
-                               ?? Shader.Find("Legacy Shaders/Transparent/Diffuse")
-                               ?? Shader.Find("Sprites/Default")
-                               ?? Shader.Find("Diffuse");
+                if (DecalMats[i] != null)
+                    Object.Destroy(DecalMats[i]);
             }
-            return _decalShader;
+            DecalMats.Clear();
         }
 
         private static void DestroyOldest()
         {
-            if (Decals.Count == 0)
-                return;
-            if (Decals[0] != null)
-                Object.Destroy(Decals[0]);
-            Decals.RemoveAt(0);
-            if (SiteLabels.Count > 0)
-                SiteLabels.RemoveAt(0);
+            if (Stamps.Count > 0)
+                Stamps.RemoveAt(0);
+            if (Decals.Count > 0)
+            {
+                if (Decals[0] != null)
+                    Object.Destroy(Decals[0]);
+                Decals.RemoveAt(0);
+            }
             if (DecalMats.Count > 0)
             {
                 if (DecalMats[0] != null)
                     Object.Destroy(DecalMats[0]);
                 DecalMats.RemoveAt(0);
             }
-            _lastSiteLabel = SiteLabels.Count > 0 ? SiteLabels[SiteLabels.Count - 1] : "";
+            _lastSiteLabel = Stamps.Count > 0
+                ? FormatSiteLabel(Stamps[Stamps.Count - 1].ParentKey)
+                : "";
         }
 
         private static string PickParent()

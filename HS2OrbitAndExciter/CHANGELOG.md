@@ -2,10 +2,18 @@
 
 ## 2026-07-11
 
+### 高潮乳頭射精
+
+- 女高潮時複用男性**射精** Obi emitter（失敗則退回 siru 粒子），掛到左右乳頭骨（`cf_J_Mune_Nip01_s_*` 等）並播放。
+- 設定：`OrgasmNippleSprayEnabled`（預設開）；局部偏移／旋轉 `OrgasmNippleSprayOffset*`／`Rot*`（方向不對時可調）。
+- **HUD／選單**：⌃⇧O 左下角「高潮 刺·胸·乳噴」列；⌃⇧P「高潮特效」區塊含刺青／胸／乳頭射精開關與旋轉滑桿、「重建乳頭噴口」。
+- H 進場／G 換角會重建 emitter。
+
 ### R 清腹＋高潮刺青
 
 - **R**：環視／H 場景中由本插件強制呼叫 PregnancyPlus `HS2Inflation(true)`／`ResetInflation`（並清 `_currentInflationLevel`），修正僅依賴 Preg+ Live Shortcut 時 HS2 H 膨脹清不掉的問題。
-- **T**：開關高潮刺青：使用製作模式 **st_paint 刺青貼圖** 做成透明貼花，掛在身體掛點（大腿→臉），不再誤用飾品目錄。大小 `OrgasmTattooScaleMin/Max`，上限 `OrgasmTattooMaxCount`。
+- **T**：開關高潮刺青：使用製作模式 **st_paint 刺青貼圖** 做成透明貼花，掛在身體掛點（大腿→臉），不再誤用飾品目錄。大小 `OrgasmTattooScaleMin/Max`，上限 `OrgasmTattooMaxCount`。H 換衣後自動重掛。
+- **高潮胸部**：每次女高潮將 `BustSize`（胸サイズ）×(1+percent/100)，預設 +15%（`OrgasmBustGrowEnabled`／`OrgasmBustGrowPercent`）。
 
 ## 2026-04-05
 

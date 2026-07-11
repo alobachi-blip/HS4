@@ -10,12 +10,14 @@ namespace HS2OrbitAndExciter
         private const KeyCode ToggleHotkey = KeyCode.I;
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 200f;
+        private const float AreaWidth = 260f;
         private const float Margin = 6f;
+        private const float MaxHeightFraction = 0.42f;
 
         private OrbitController? _orbit;
         private bool _panelVisible = true;
         private bool _stylesReady;
+        private Vector2 _scroll;
         private GUIStyle? _smallLabel;
         private GUIStyle? _smallBox;
 
@@ -92,12 +94,27 @@ namespace HS2OrbitAndExciter
             var box = _smallBox ?? GUI.skin.box;
             var lines = BuildLines(snap);
             float lineH = label.lineHeight;
-            float areaH = box.padding.vertical + lineH * lines.Length;
+            float contentH = box.padding.vertical + lineH * lines.Length + 4f;
+            float maxH = Mathf.Max(lineH * 4f, Screen.height * MaxHeightFraction);
+            float areaH = Mathf.Min(contentH, maxH);
+            bool needScroll = contentH > maxH + 0.5f;
+
             var area = new Rect(Margin, Screen.height - areaH - Margin, AreaWidth, areaH);
             GUILayout.BeginArea(area);
             GUILayout.BeginVertical(box);
-            for (int i = 0; i < lines.Length; i++)
-                GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
+            if (needScroll)
+            {
+                _scroll = GUILayout.BeginScrollView(_scroll, false, true,
+                    GUILayout.Height(areaH - box.padding.vertical));
+                for (int i = 0; i < lines.Length; i++)
+                    GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
+                GUILayout.EndScrollView();
+            }
+            else
+            {
+                for (int i = 0; i < lines.Length; i++)
+                    GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
+            }
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
@@ -123,21 +140,29 @@ namespace HS2OrbitAndExciter
 
             string assist = FormatAssistShort(snap.SuppressReasonKey);
             string manual = FormatManualPoolLine();
-            string tattooLine = OrbitOrgasmTattoo.Enabled
-                ? (OrbitOrgasmTattoo.Count > 0
-                    ? $"刺青×{OrbitOrgasmTattoo.Count} 剛加:{OrbitOrgasmTattoo.LastSiteLabel}"
-                    : "刺青開·尚未加")
-                : "刺青關(T)";
+            string orgasmFx = FormatOrgasmFxLine();
+
             return new[]
             {
                 $"環視·{status} {timer}",
                 assist,
-                "⌃⇧O/I/P QWE",
-                OrbitManualHotkeys.HudLegend + "·" + OrbitOrgasmTattoo.HudStatus,
-                tattooLine,
+                "⌃⇧O/I/P  " + OrbitManualHotkeys.HudLegend,
+                orgasmFx,
                 OrbitManualHotkeys.PregnancyHudLegend,
                 manual
             };
+        }
+
+        private static string FormatOrgasmFxLine()
+        {
+            string tattoo = OrbitOrgasmTattoo.Enabled
+                ? (OrbitOrgasmTattoo.Count > 0
+                    ? $"刺×{OrbitOrgasmTattoo.Count}·{OrbitOrgasmTattoo.LastSiteLabel}"
+                    : "刺開·0")
+                : "刺關(T)";
+            string bust = OrbitOrgasmBustGrowth.HudStatus;
+            string nipple = OrbitOrgasmNippleSpray.HudStatus;
+            return $"{OrbitManualHotkeys.OrgasmFxHudPrefix} {tattoo} · {bust} · {nipple}";
         }
 
         /// <summary>G pool: eligible count, strike-1 disliked, strike-2 excluded, long-stay preferred; on-stage timer.</summary>

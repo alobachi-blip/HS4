@@ -55,12 +55,17 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>Called when a new H scene instance is detected: incremental scan for new UserData png only.</summary>
-        internal static void OnHSceneEntered()
+        internal static void OnHSceneEntered(HScene? hScene = null)
         {
             EnsureFileCacheInitialized();
             MergeNewUserDataFiles();
             ResetPoseCameraCycle();
             OrbitOrgasmTattoo.OnHSceneEntered();
+            OrbitOrgasmBustGrowth.ResetHud();
+            OrbitOrgasmNippleSpray.Reset();
+            HScene? scene = hScene ?? OrbitController.TryGetHScene();
+            if (scene != null)
+                OrbitOrgasmBustGrowth.CaptureBaseline(OrbitHelpers.GetChaFemales(scene)?[0]);
         }
 
         internal static bool CanAcceptHotkey(HScene? hScene)
@@ -332,6 +337,9 @@ namespace HS2OrbitAndExciter
             SetActiveCharaAfterSwap(newPath);
 
             OrbitOrgasmTattoo.ClearStamps();
+            OrbitOrgasmBustGrowth.ResetHud();
+            OrbitOrgasmNippleSpray.Reset();
+            OrbitOrgasmBustGrowth.CaptureBaseline(cha);
 
             if (OrbitBehaviorHub.IsOrbitAssistActive())
             {
@@ -376,6 +384,9 @@ namespace HS2OrbitAndExciter
 
             cha.SetClothesStateAll(0);
             HS2OrbitAndExciter.Log?.LogInfo($"Orbit: H 換衣 {System.IO.Path.GetFileName(nextPath)}");
+
+            // Coordinate reload rebuilds body; wait a few frames so bones/parents exist.
+            yield return host.StartCoroutine(OrbitOrgasmTattoo.ReapplyAfterReloadRoutine(cha));
 
             if (OrbitBehaviorHub.IsOrbitAssistActive())
             {
