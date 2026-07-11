@@ -12,7 +12,9 @@
 ### R 清腹＋高潮刺青
 
 - **R**：環視／H 場景中由本插件強制呼叫 PregnancyPlus `HS2Inflation(true)`／`ResetInflation`（並清 `_currentInflationLevel`），修正僅依賴 Preg+ Live Shortcut 時 HS2 H 膨脹清不掉的問題。
-- **T**：開關高潮刺青：使用製作模式 **st_paint 刺青貼圖** 做成透明貼花，掛在身體掛點（大腿→臉），不再誤用飾品目錄。大小 `OrgasmTattooScaleMin/Max`，上限 `OrgasmTattooMaxCount`。H 換衣後自動重掛。
+- **T**：開啟高潮刺青並依序貼一張（連按可檢查掛點）；**Shift+T** 關閉。貼花用 st_paint，掛在身體掛點（大腿→臉），不進飾品欄。大小 `OrgasmTattooScaleMin/Max`，上限 `OrgasmTattooMaxCount`。H 換衣後自動重掛。
+- **掛點**：略過膝蓋／肘／腕／手／肩等關節（關節樞紐在肢體內，貼花會浮出）；優先 `N_*` 飾品掛點，再退回大腿／軀幹骨。
+- **刷新**：高潮當幀 `CreateBodyTexture` 常被 H 流程覆寫；改為立刻寫入後再於 EndOfFrame＋數幀重刷 paint 槽，避免只有第一次看得見。
 - **高潮胸部**：每次女高潮將 `BustSize`（胸サイズ）×(1+percent/100)，預設 +15%（`OrgasmBustGrowEnabled`／`OrgasmBustGrowPercent`）。
 
 ## 2026-04-05

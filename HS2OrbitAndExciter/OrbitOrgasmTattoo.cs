@@ -10,14 +10,17 @@ namespace HS2OrbitAndExciter
 {
     /// <summary>
     /// Orgasm tattoos from maker <c>st_paint</c> (NOT accessory slots — will not appear in 飾品清單):
-    /// visible quad decals on body bones (thigh → face) + body-paint slots.
+    /// visible quad decals on body attach points (thigh → face) + body-paint slots.
     /// Survives H coordinate swap via <see cref="ReapplyAfterReloadRoutine"/>.
+    /// Avoids joint parents (knee/elbow/wrist/hand/shoulder) — those float off the limb.
     /// </summary>
     internal static class OrbitOrgasmTattoo
     {
         private const float BaseSize = 0.22f;
-        private const float SurfaceOffset = 0.035f;
+        private const float AccessoryLocalZ = 0.025f;
+        private const float BoneSurfaceOffset = 0.028f;
         private const int ReapplySettleFrames = 6;
+        private const int PaintRefreshExtraFrames = 3;
 
         private struct Stamp
         {
@@ -30,18 +33,24 @@ namespace HS2OrbitAndExciter
             public float Rotation;
         }
 
-        /// <summary>Bone-first attach order (stable across clothes). Thigh → up → face last.</summary>
+        /// <summary>
+        /// Accessory parents first (correct local Z), then mid-limb/torso bones.
+        /// No knee / elbow / wrist / hand / shoulder — joint pivots sit inside the mesh.
+        /// </summary>
         private static readonly string[] BodyParents =
         {
-            "cf_J_LegUp01_L", "cf_J_LegUp01_R", "cf_J_Knee_L", "cf_J_Knee_R",
+            "N_Leg_L", "N_Leg_R",
+            "N_Kokan", "N_Waist", "N_Waist_f", "N_Waist_b", "N_Waist_L", "N_Waist_R",
+            "N_Back", "N_Back_L", "N_Back_R",
+            "N_Chest_f", "N_Chest", "N_Tikubi_L", "N_Tikubi_R",
+            "N_Arm_L", "N_Arm_R",
+            "N_Neck", "N_Face",
+            "cf_J_LegUp01_L", "cf_J_LegUp01_R",
             "cf_J_Kokan", "cf_J_Kosi01", "cf_J_Kosi02",
             "cf_J_Spine01", "cf_J_Spine02", "cf_J_Spine03",
             "cf_J_Mune00", "cf_J_Mune01_L", "cf_J_Mune01_R",
-            "cf_J_ArmUp00_L", "cf_J_ArmUp00_R", "cf_J_Shoulder_L", "cf_J_Shoulder_R",
-            "cf_J_Hand_L", "cf_J_Hand_R",
+            "cf_J_ArmUp00_L", "cf_J_ArmUp00_R",
             "cf_J_Neck", "cf_J_Head",
-            // Accessory parents as extras if bones missing on some cards.
-            "N_Leg_L", "N_Leg_R", "N_Waist", "N_Chest_f", "N_Back", "N_Face",
         };
 
         private static readonly List<Stamp> Stamps = new List<Stamp>(32);
@@ -55,6 +64,7 @@ namespace HS2OrbitAndExciter
         private static Shader? _decalShader;
         private static string _lastSiteLabel = "";
         private static int _reapplyGen;
+        private static int _paintRefreshGen;
 
         internal static int Count => Stamps.Count;
         internal static string LastSiteLabel => _lastSiteLabel;
@@ -83,25 +93,36 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        internal static bool Toggle()
+        /// <summary>T：開啟（若尚未開）並依序貼一張，方便連按檢查掛點。</summary>
+        internal static bool EnableAndStamp()
         {
-            Enabled = !Enabled;
-            if (Enabled)
+            if (!Enabled)
             {
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: T 高潮刺青 ON（上限 {GetMaxStamps()}；非飾品欄）");
-                TryAddOne(forceLog: true);
+                Enabled = true;
+                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: T 高潮刺青 ON（上限 {GetMaxStamps()}；連按 T 依序貼；Shift+T 關）");
             }
-            else
-            {
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: T 高潮刺青 OFF");
-            }
+            TryAddOne(forceLog: true);
             return Enabled;
+        }
+
+        /// <summary>Shift+T：關閉高潮自動貼圖（已貼的保留）。</summary>
+        internal static bool Disable()
+        {
+            if (!Enabled)
+            {
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: Shift+T 高潮刺青已是 OFF");
+                return false;
+            }
+            Enabled = false;
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: Shift+T 高潮刺青 OFF（已貼 {Count} 張保留）");
+            return false;
         }
 
         /// <summary>Drop all tattoos (new H scene / G chara swap).</summary>
         internal static void ClearStamps()
         {
             _reapplyGen++;
+            _paintRefreshGen++;
             DestroyVisualsOnly();
             Stamps.Clear();
             _parentCursor = 0;
@@ -169,6 +190,7 @@ namespace HS2OrbitAndExciter
                 _lastSiteLabel = FormatSiteLabel(Stamps[Stamps.Count - 1].ParentKey);
 
             HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 刺青換衣後重掛 {hung}/{Stamps.Count}");
+            ScheduleBodyPaintRefresh(cha);
         }
 
         internal static void OnOrgasm(HSceneFlagCtrl? ctrlFlag)
@@ -270,9 +292,60 @@ namespace HS2OrbitAndExciter
             Stamps.Add(stamp);
             ApplyBodyPaintSlot(cha, stamp, Stamps.Count - 1);
             SpawnDecalVisual(cha, parent, parentKey, tex, color, size, recordStamp: true);
+            // Orgasm / H systems often rebuild body tex after AddOrgasm; refresh again EoF + N frames.
+            ScheduleBodyPaintRefresh(cha);
         }
 
-        private static void ApplyBodyPaintSlot(ChaControl cha, Stamp stamp, int stampIndex)
+        /// <summary>
+        /// Re-push the last ≤2 stamps into paint slots after H-scene systems finish overwriting skin tex.
+        /// First CreateBodyTexture often wins only on the initial stamp; later orgasms get clobbered mid-frame.
+        /// </summary>
+        private static void ScheduleBodyPaintRefresh(ChaControl cha)
+        {
+            if (cha == null)
+                return;
+            int gen = ++_paintRefreshGen;
+            cha.StartCoroutine(BodyPaintRefreshRoutine(cha, gen));
+        }
+
+        private static IEnumerator BodyPaintRefreshRoutine(ChaControl cha, int gen)
+        {
+            yield return new WaitForEndOfFrame();
+            if (gen != _paintRefreshGen || cha == null || !cha.loadEnd || Stamps.Count == 0)
+                yield break;
+            ReapplyLatestBodyPaint(cha);
+
+            for (int i = 0; i < PaintRefreshExtraFrames; i++)
+                yield return null;
+
+            if (gen != _paintRefreshGen || cha == null || !cha.loadEnd || Stamps.Count == 0)
+                yield break;
+            ReapplyLatestBodyPaint(cha);
+        }
+
+        private static void ReapplyLatestBodyPaint(ChaControl cha)
+        {
+            int n = Stamps.Count;
+            if (n <= 0)
+                return;
+
+            int start = Mathf.Max(0, n - 2);
+            for (int i = start; i < n; i++)
+                ApplyBodyPaintSlot(cha, Stamps[i], i, createTexture: false);
+
+            // One rebuild after both slots are written.
+            var paints = cha.fileBody?.paintInfo;
+            if (paints == null || paints.Length < 2)
+                return;
+
+            cha.AddUpdateCMBodyTexFlags(inpBase: false, inpPaint01: true, inpPaint02: true, inpSunburn: false);
+            cha.AddUpdateCMBodyColorFlags(inpBase: false, inpPaint01: true, inpPaint02: true, inpSunburn: false);
+            cha.AddUpdateCMBodyGlossFlags(inpPaint01: true, inpPaint02: true);
+            cha.AddUpdateCMBodyLayoutFlags(inpPaint01: true, inpPaint02: true);
+            cha.CreateBodyTexture();
+        }
+
+        private static void ApplyBodyPaintSlot(ChaControl cha, Stamp stamp, int stampIndex, bool createTexture = true)
         {
             var paints = cha.fileBody?.paintInfo;
             if (paints == null || paints.Length < 2)
@@ -293,6 +366,9 @@ namespace HS2OrbitAndExciter
             info.metallicPower = 0.2f;
             info.layout = stamp.Layout;
             info.rotation = stamp.Rotation;
+
+            if (!createTexture)
+                return;
 
             bool s0 = slot == 0;
             bool s1 = slot == 1;
@@ -319,6 +395,19 @@ namespace HS2OrbitAndExciter
         private static bool TryFindParent(ChaControl cha, string key, out Transform parent)
         {
             parent = null!;
+
+            // Accessory attach points (N_*) live on the accessory tree, not bone FindLoop.
+            if (key.StartsWith("N_"))
+            {
+                try
+                {
+                    parent = cha.GetAccessoryParentTransform(key);
+                    if (parent != null)
+                        return true;
+                }
+                catch { /* ignore */ }
+            }
+
             var root = cha.objBodyBone != null ? cha.objBodyBone.transform : null;
             if (root != null)
             {
@@ -330,13 +419,16 @@ namespace HS2OrbitAndExciter
                 }
             }
 
-            try
+            if (!key.StartsWith("N_"))
             {
-                parent = cha.GetAccessoryParentTransform(key);
-                if (parent != null)
-                    return true;
+                try
+                {
+                    parent = cha.GetAccessoryParentTransform(key);
+                    if (parent != null)
+                        return true;
+                }
+                catch { /* ignore */ }
             }
-            catch { /* ignore */ }
 
             return false;
         }
@@ -351,18 +443,27 @@ namespace HS2OrbitAndExciter
                 Object.Destroy(col);
 
             go.layer = cha.gameObject.layer;
-
-            Vector3 bodyCenter = cha.objBody != null
-                ? cha.objBody.transform.position
-                : cha.transform.position;
-            Vector3 outward = parent.position - bodyCenter;
-            if (outward.sqrMagnitude < 1e-6f)
-                outward = parent.TransformDirection(Vector3.forward);
-            outward.Normalize();
-
             go.transform.SetParent(parent, worldPositionStays: false);
-            go.transform.position = parent.position + outward * SurfaceOffset;
-            go.transform.rotation = Quaternion.LookRotation(outward, Vector3.up);
+
+            // Accessory parents (N_*) have a correct outward local Z; bone pivots need body-center offset.
+            if (parentKey.StartsWith("N_"))
+            {
+                go.transform.localPosition = new Vector3(0f, 0f, AccessoryLocalZ);
+                go.transform.localRotation = Quaternion.identity;
+            }
+            else
+            {
+                Vector3 bodyCenter = cha.objBody != null
+                    ? cha.objBody.transform.position
+                    : cha.transform.position;
+                Vector3 outward = parent.position - bodyCenter;
+                if (outward.sqrMagnitude < 1e-6f)
+                    outward = parent.TransformDirection(Vector3.forward);
+                outward.Normalize();
+                go.transform.position = parent.position + outward * BoneSurfaceOffset;
+                go.transform.rotation = Quaternion.LookRotation(outward, Vector3.up);
+            }
+
             go.transform.localScale = new Vector3(size, size, size);
 
             var mr = go.GetComponent<MeshRenderer>();

@@ -101,7 +101,7 @@ namespace HS2OrbitAndExciter
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,
                 "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle visibility with Ctrl+Shift+I while orbit is on.");
             OrgasmTattooEnabled = Config.Bind("Orbit", "OrgasmTattooEnabled", true,
-                "When true, each female orgasm adds a st_paint tattoo (body paint + visible decal, thigh→face). Toggle in H with T; turning ON places one sample immediately.");
+                "When true, each female orgasm adds a st_paint tattoo. In H: T enables + places next stamp; Shift+T disables.");
             OrgasmTattooMaxCount = Config.Bind("Orbit", "OrgasmTattooMaxCount", 24,
                 new ConfigDescription("Max orgasm tattoo decals before oldest is removed.", new AcceptableValueRange<int>(1, 64)));
             OrgasmTattooScaleMin = Config.Bind("Orbit", "OrgasmTattooScaleMin", 2.5f,

@@ -203,13 +203,27 @@ namespace HS2OrbitAndExciter
         {
             if (hScene == null)
                 return;
+            // Block Ctrl/Alt chords (orbit uses Ctrl+Shift+O). Shift alone is reserved for Shift+T tattoo off.
             if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
-                return;
-            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 return;
             if (Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt))
                 return;
             if (Time.unscaledTime - _lastHotkeyTime < HotkeyCooldownSeconds)
+                return;
+
+            // T / Shift+T before the bare-Shift gate used by G/H/J/…
+            if (Input.GetKeyDown(OrbitManualHotkeys.TattooKey))
+            {
+                bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                if (shift)
+                    OrbitOrgasmTattoo.Disable();
+                else
+                    OrbitOrgasmTattoo.EnableAndStamp();
+                _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 return;
 
             if (Input.GetKeyDown(OrbitManualHotkeys.CharaKey))
@@ -240,12 +254,6 @@ namespace HS2OrbitAndExciter
             {
                 if (OrbitManualDirector.TryChangePose(hScene))
                     _lastHotkeyTime = Time.unscaledTime;
-                return;
-            }
-            if (Input.GetKeyDown(OrbitManualHotkeys.TattooKey))
-            {
-                OrbitOrgasmTattoo.Toggle();
-                _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.BustRestoreKey))

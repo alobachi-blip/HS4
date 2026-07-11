@@ -277,11 +277,11 @@ namespace HS2OrbitAndExciter
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("刺青", GUILayout.Width(100));
                 bool tattooOn = HS2OrbitAndExciter.OrgasmTattooEnabled.Value;
-                bool next = GUILayout.Toggle(tattooOn, tattooOn ? $"開（T）×{OrbitOrgasmTattoo.Count}" : "關（T）");
+                bool next = GUILayout.Toggle(tattooOn, tattooOn ? $"開（T貼）×{OrbitOrgasmTattoo.Count}" : "關（⇧T）");
                 if (next != tattooOn)
                     HS2OrbitAndExciter.OrgasmTattooEnabled.Value = next;
                 GUILayout.EndHorizontal();
-                GUILayout.Label("貼花＋皮膚 paint，不會出現在飾品清單；H 換衣後自動重掛；G 換角清空", _labelStyle);
+                GUILayout.Label("H：T＝開＋依序貼一張；Shift+T＝關。貼花＋皮膚 paint，不進飾品欄；換衣重掛；G 換角清空", _labelStyle);
             }
 
             if (HS2OrbitAndExciter.OrgasmBustGrowEnabled != null)
