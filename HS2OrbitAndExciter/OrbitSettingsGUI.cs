@@ -320,7 +320,45 @@ namespace HS2OrbitAndExciter
                     HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value = nipNext;
                 GUILayout.Label(OrbitOrgasmNippleSpray.HudStatus, _labelStyle ?? GUI.skin.label);
                 GUILayout.EndHorizontal();
-                GUILayout.Label("複用男性射精特效掛左右乳頭；噴向不對時調下方偏移／旋轉（下次高潮自動套用；也可按重建）", _labelStyle);
+                GUILayout.Label("複用男性射精；潮吹式多段連噴，開頭較強、之後遞減。偏移／旋轉下次高潮自動套用。", _labelStyle);
+
+                if (HS2OrbitAndExciter.OrgasmNippleSprayBursts != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"連噴次數 {HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value}", GUILayout.Width(100));
+                    float bn = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value, 2f, 10f);
+                    int bi = Mathf.RoundToInt(bn);
+                    if (bi != HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value)
+                        HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value = bi;
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"間隔 {HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value:F2}s", GUILayout.Width(100));
+                    float iv = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value, 0.1f, 1.2f);
+                    if (Mathf.Abs(iv - HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value) > 0.01f)
+                        HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value = Mathf.Round(iv * 100f) / 100f;
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"首噴力道 ×{HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value:F1}", GUILayout.Width(100));
+                    float ss = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value, 0.5f, 3.5f);
+                    if (Mathf.Abs(ss - HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value) > 0.05f)
+                        HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value = Mathf.Round(ss * 10f) / 10f;
+                    GUILayout.EndHorizontal();
+                }
+                if (HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd != null)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"末噴力道 ×{HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value:F1}", GUILayout.Width(100));
+                    float se = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value, 0.1f, 2f);
+                    if (Mathf.Abs(se - HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value) > 0.05f)
+                        HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value = Mathf.Round(se * 10f) / 10f;
+                    GUILayout.EndHorizontal();
+                }
 
                 if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ != null)
                 {

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using AIChara;
 using HarmonyLib;
@@ -10,6 +11,7 @@ namespace HS2OrbitAndExciter
 {
     /// <summary>
     /// Female orgasm: reuse male semen (射精) Obi emitters on left/right nipple bones.
+    /// Multi-burst like urine (潮吹): several pulses, first stronger than a single Play, each weaker.
     /// Falls back to cloning HParticleCtrl siru ParticleSystems when Obi is unavailable.
     /// </summary>
     internal static class OrbitOrgasmNippleSpray
@@ -34,17 +36,40 @@ namespace HS2OrbitAndExciter
         private static readonly List<ObiFluidCtrl> OwnedFluidCtrls = new List<ObiFluidCtrl>(4);
         private static readonly List<ParticleSystem> ParticleClones = new List<ParticleSystem>(4);
         private static readonly List<GameObject> OwnedObjects = new List<GameObject>(8);
+        private static readonly List<float> ObiBaseSpeeds = new List<float>(4);
+        private static readonly List<float> ParticleBaseSpeeds = new List<float>(4);
 
         private static int _boundFemaleId = -1;
         private static int _boundHSceneId = -1;
         private static string _lastStatus = "乳噴待命";
+        private static Coroutine? _burstRoutine;
+        private static int _burstGen;
 
         internal static bool Enabled => HS2OrbitAndExciter.OrgasmNippleSprayEnabled?.Value ?? true;
 
         internal static string HudStatus => !Enabled ? "乳噴關" : _lastStatus;
 
+        private static int BurstCount
+        {
+            get
+            {
+                int n = HS2OrbitAndExciter.OrgasmNippleSprayBursts?.Value ?? 5;
+                return Mathf.Clamp(n, 2, 10);
+            }
+        }
+
+        private static float BurstInterval =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval?.Value ?? 0.35f, 0.1f, 1.5f);
+
+        private static float SpeedStartMult =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart?.Value ?? 1.8f, 0.5f, 4f);
+
+        private static float SpeedEndMult =>
+            Mathf.Clamp(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd?.Value ?? 0.4f, 0.05f, 2f);
+
         internal static void Reset()
         {
+            StopBurstRoutine();
             ReleaseOwned();
             _boundFemaleId = -1;
             _boundHSceneId = -1;
@@ -54,6 +79,7 @@ namespace HS2OrbitAndExciter
         /// <summary>Drop and rebuild nipple emitters (after Offset/Rot change in settings).</summary>
         internal static void ForceRebuild(HScene? hScene)
         {
+            StopBurstRoutine();
             ReleaseOwned();
             _boundFemaleId = -1;
             _boundHSceneId = -1;
@@ -103,7 +129,7 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            PlayAll(hScene, cha);
+            StartBurstSequence(hScene, cha);
         }
 
         private static bool EnsureEmitters(HScene hScene, ChaControl female)
@@ -180,6 +206,7 @@ namespace HS2OrbitAndExciter
 
                 OwnedFluidCtrls.Add(fluid);
                 ObiEmitters.Add(emitter);
+                ObiBaseSpeeds.Add(ReadObiSpeed(emitter, setup.speed > 0f ? setup.speed : 1f));
                 made++;
             }
 
@@ -220,6 +247,7 @@ namespace HS2OrbitAndExciter
                 return false;
 
             var solver = Traverse.Create(obiCtrl).Field("solver").GetValue() as Component;
+            float srcSpeed = ReadObiSpeed(source, 1f);
             int made = 0;
             foreach (var parent in ResolveNippleParents(female))
             {
@@ -240,6 +268,7 @@ namespace HS2OrbitAndExciter
                 TryRegisterParticleRenderer(source, clone);
                 OwnedObjects.Add(go);
                 ObiEmitters.Add(clone);
+                ObiBaseSpeeds.Add(srcSpeed);
                 made++;
             }
 
@@ -295,7 +324,6 @@ namespace HS2OrbitAndExciter
             GameObject? srcGo = null;
             ParticleSystem? srcPs = null;
 
-            // Prefer PlayParticleID from male siru slot 0.
             int preferId = TryGetMalePlayParticleId(hScene);
             if (preferId >= 0 && preferId < lstParticle.Count)
                 TryReadParticleEntry(lstParticle[preferId], out srcGo, out srcPs);
@@ -331,6 +359,8 @@ namespace HS2OrbitAndExciter
 
                 OwnedObjects.Add(go);
                 ParticleClones.Add(ps);
+                var main = ps.main;
+                ParticleBaseSpeeds.Add(main.startSpeed.constantMax > 0.01f ? main.startSpeed.constantMax : 1f);
                 made++;
             }
 
@@ -431,18 +461,156 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private static void PlayAll(HScene hScene, ChaControl female)
+        private static void StartBurstSequence(HScene hScene, ChaControl female)
         {
-            float height = 0.5f;
-            try
+            var host = FindHost();
+            if (host == null)
             {
-                height = female.GetShapeBodyValue(0);
-            }
-            catch
-            {
-                // keep default
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 乳頭連噴無 Coroutine host");
+                return;
             }
 
+            StopBurstRoutine();
+            EnsureSolverActive(hScene);
+
+            int gen = ++_burstGen;
+            int bursts = BurstCount;
+            _lastStatus = $"乳噴連×{bursts}";
+            _burstRoutine = host.StartCoroutine(BurstRoutine(hScene, female, bursts, gen));
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: 高潮乳頭連噴 {bursts} 次（速 {SpeedStartMult:F1}→{SpeedEndMult:F1}，間隔 {BurstInterval:F2}s）");
+        }
+
+        private static IEnumerator BurstRoutine(HScene hScene, ChaControl female, int bursts, int gen)
+        {
+            var parents = new List<Transform>();
+            foreach (var p in ResolveNippleParents(female))
+                parents.Add(p);
+
+            // Stop any vanilla Play coroutine on emitters; KillAll once like urine timing sheet.
+            for (int i = 0; i < ObiEmitters.Count; i++)
+            {
+                try { ObiEmitters[i]?.Stop(); } catch { /* ignore */ }
+            }
+
+            yield return null;
+            if (gen != _burstGen)
+                yield break;
+
+            float rateAcc = 0f;
+            float rateStep = 10f / bursts; // matches ObiEmitterCtrl: Lerp(0,Num, rate*0.1)
+            float interval = BurstInterval;
+            float startM = SpeedStartMult;
+            float endM = SpeedEndMult;
+
+            for (int b = 0; b < bursts; b++)
+            {
+                if (gen != _burstGen)
+                    yield break;
+
+                float t = bursts <= 1 ? 0f : b / (float)(bursts - 1);
+                float speedMult = Mathf.Lerp(startM, endM, t);
+                rateAcc += rateStep;
+
+                var targets = new List<int>(ObiEmitters.Count);
+                int boneIdx = 0;
+                for (int i = 0; i < ObiEmitters.Count; i++)
+                {
+                    var ctrl = ObiEmitters[i];
+                    targets.Add(0);
+                    if (ctrl?.ObiEmitter == null)
+                        continue;
+                    try
+                    {
+                        ApplyLocalXform(ctrl.transform, parents, ref boneIdx);
+                        float baseSp = i < ObiBaseSpeeds.Count ? ObiBaseSpeeds[i] : 1f;
+                        float speed = Mathf.Max(0.05f, baseSp * speedMult);
+                        ctrl.Speed = speed;
+                        ctrl.ObiEmitter.speed = speed;
+                        int target = Mathf.FloorToInt(Mathf.Lerp(0f, ctrl.ObiEmitter.NumParticles, rateAcc * 0.1f));
+                        targets[i] = Mathf.Clamp(target, 1, ctrl.ObiEmitter.NumParticles);
+                        ctrl.ObiEmitter.playMode = ObiEmitter.PlayMode.Play;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭 Obi 連噴失敗: {ex.Message}");
+                    }
+                }
+
+                float guard = 0f;
+                while (guard < 1.5f)
+                {
+                    bool anyPending = false;
+                    for (int i = 0; i < ObiEmitters.Count; i++)
+                    {
+                        var obi = ObiEmitters[i]?.ObiEmitter;
+                        if (obi == null || targets[i] <= 0)
+                            continue;
+                        if (obi.ActiveParticles < obi.NumParticles && obi.ActiveParticles < targets[i])
+                        {
+                            anyPending = true;
+                            break;
+                        }
+                    }
+
+                    if (!anyPending)
+                        break;
+                    guard += Time.deltaTime;
+                    yield return null;
+                    if (gen != _burstGen)
+                        yield break;
+                }
+
+                for (int i = 0; i < ObiEmitters.Count; i++)
+                {
+                    try
+                    {
+                        if (ObiEmitters[i]?.ObiEmitter != null)
+                            ObiEmitters[i].ObiEmitter.playMode = ObiEmitter.PlayMode.Stop;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                boneIdx = 0;
+                for (int i = 0; i < ParticleClones.Count; i++)
+                {
+                    var ps = ParticleClones[i];
+                    if (ps == null)
+                        continue;
+                    try
+                    {
+                        ApplyLocalXform(ps.transform, parents, ref boneIdx);
+                        float baseSp = i < ParticleBaseSpeeds.Count ? ParticleBaseSpeeds[i] : 1f;
+                        var main = ps.main;
+                        main.startSpeed = Mathf.Max(0.05f, baseSp * speedMult);
+                        if (!ps.gameObject.activeSelf)
+                            ps.gameObject.SetActive(true);
+                        ps.Emit(Mathf.Max(4, Mathf.RoundToInt(12f * speedMult)));
+                    }
+                    catch (System.Exception ex)
+                    {
+                        HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭粒子連噴失敗: {ex.Message}");
+                    }
+                }
+
+                _lastStatus = $"乳噴{b + 1}/{bursts}·速{speedMult:F1}";
+
+                if (b + 1 < bursts)
+                    yield return new WaitForSeconds(interval);
+            }
+
+            if (gen == _burstGen)
+            {
+                _lastStatus = $"乳噴連×{bursts}完";
+                _burstRoutine = null;
+            }
+        }
+
+        private static void EnsureSolverActive(HScene hScene)
+        {
             var obiCtrl = Traverse.Create(hScene).Field("ctrlObi").GetValue() as ObiCtrl;
             var solver = obiCtrl != null
                 ? Traverse.Create(obiCtrl).Field("solver").GetValue() as Component
@@ -452,55 +620,62 @@ namespace HS2OrbitAndExciter
                 solver.gameObject.SetActive(true);
                 Traverse.Create(obiCtrl).Field("checkWait").SetValue(true);
             }
-
-            int played = 0;
-            var parents = new System.Collections.Generic.List<Transform>();
-            foreach (var p in ResolveNippleParents(female))
-                parents.Add(p);
-
-            int boneIdx = 0;
-            foreach (var emitter in ObiEmitters)
-            {
-                if (emitter == null)
-                    continue;
-                try
-                {
-                    ApplyLocalXform(emitter.transform, parents, ref boneIdx);
-                    emitter.Play(-1, height);
-                    played++;
-                }
-                catch (System.Exception ex)
-                {
-                    HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭 Obi.Play 失敗: {ex.Message}");
-                }
-            }
-
-            boneIdx = 0;
-            foreach (var ps in ParticleClones)
-            {
-                if (ps == null)
-                    continue;
-                try
-                {
-                    ApplyLocalXform(ps.transform, parents, ref boneIdx);
-                    if (!ps.gameObject.activeSelf)
-                        ps.gameObject.SetActive(true);
-                    ps.Simulate(0f, true, true);
-                    ps.Play(true);
-                    played++;
-                }
-                catch (System.Exception ex)
-                {
-                    HS2OrbitAndExciter.Log?.LogWarning($"Orbit: 乳頭粒子.Play 失敗: {ex.Message}");
-                }
-            }
-
-            _lastStatus = played > 0 ? $"乳噴×{played}" : "乳噴失敗";
-            if (played > 0)
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 高潮乳頭射精播放 ×{played}");
         }
 
-        private static void ApplyLocalXform(Transform t, System.Collections.Generic.List<Transform> parents, ref int boneIdx)
+        private static float ReadObiSpeed(ObiEmitterCtrl ctrl, float fallback)
+        {
+            try
+            {
+                var obi = ctrl?.ObiEmitter;
+                if (obi != null && obi.speed > 0.01f)
+                    return obi.speed;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return fallback > 0.01f ? fallback : 1f;
+        }
+
+        private static MonoBehaviour? FindHost()
+        {
+            var go = GameObject.Find("HS2OrbitAndExciterController");
+            if (go != null)
+            {
+                var c = go.GetComponent<OrbitController>();
+                if (c != null)
+                    return c;
+            }
+
+            return Object.FindObjectOfType<OrbitController>();
+        }
+
+        private static void StopBurstRoutine()
+        {
+            _burstGen++;
+            if (_burstRoutine == null)
+                return;
+            var host = FindHost();
+            if (host != null)
+                host.StopCoroutine(_burstRoutine);
+            _burstRoutine = null;
+
+            foreach (var ctrl in ObiEmitters)
+            {
+                try
+                {
+                    if (ctrl?.ObiEmitter != null)
+                        ctrl.ObiEmitter.playMode = ObiEmitter.PlayMode.Stop;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
+        private static void ApplyLocalXform(Transform t, List<Transform> parents, ref int boneIdx)
         {
             if (t == null)
                 return;
@@ -533,6 +708,7 @@ namespace HS2OrbitAndExciter
 
             OwnedFluidCtrls.Clear();
             ObiEmitters.Clear();
+            ObiBaseSpeeds.Clear();
 
             foreach (var go in OwnedObjects)
             {
@@ -542,6 +718,7 @@ namespace HS2OrbitAndExciter
 
             OwnedObjects.Clear();
             ParticleClones.Clear();
+            ParticleBaseSpeeds.Clear();
         }
     }
 }
