@@ -55,8 +55,9 @@ def render_textured(
     view: Literal["front", "side"] = "front",
     size: int = 512,
     skin_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0),
-    bg: Tuple[float, float, float] = (0.55, 0.58, 0.62),
+    bg: Tuple[float, float, float] = (0.62, 0.64, 0.68),
     extra_meshes: Optional[list] = None,
+    exposure: float = 1.35,
 ) -> np.ndarray:
     """Fast path: sample HS2 albedo at vertices; optional extra_meshes for eyes.
 
@@ -79,12 +80,19 @@ def render_textured(
     if view == "front":
         xy_all = all_v[:, [0, 1]]
         view_dir = np.array([0.0, 0.0, -1.0])
-        light = np.array([0.25, 0.45, -0.85], dtype=np.float64)
+        # Studio: key (cam-left-up) + fill (cam-right) + soft top
+        light_key = np.array([0.35, 0.55, -0.75], dtype=np.float64)
+        light_fill = np.array([-0.45, 0.25, -0.85], dtype=np.float64)
+        light_rim = np.array([0.1, 0.8, 0.4], dtype=np.float64)
     else:
         xy_all = np.column_stack([all_v[:, 2], all_v[:, 1]])
         view_dir = np.array([-1.0, 0.0, 0.0])
-        light = np.array([-0.75, 0.4, 0.3], dtype=np.float64)
-    light /= np.linalg.norm(light)
+        light_key = np.array([-0.85, 0.45, 0.25], dtype=np.float64)
+        light_fill = np.array([-0.55, 0.2, -0.7], dtype=np.float64)
+        light_rim = np.array([0.3, 0.7, 0.5], dtype=np.float64)
+    light_key /= np.linalg.norm(light_key)
+    light_fill /= np.linalg.norm(light_fill)
+    light_rim /= np.linalg.norm(light_rim)
 
     pad = 0.06 * max(float(np.ptp(xy_all[:, 0])), float(np.ptp(xy_all[:, 1])), 1e-6)
     xlim = (xy_all[:, 0].min() - pad, xy_all[:, 0].max() + pad)
@@ -95,6 +103,19 @@ def render_textured(
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_facecolor(bg)
+
+    def _shade(vn: np.ndarray) -> np.ndarray:
+        """Bright wrap lighting so faces stay readable (not crushed black)."""
+        # Prefer outward normals toward camera/lights; flip if mesh winding is inward.
+        n = vn
+        if float(np.mean(n @ (-view_dir))) < 0:
+            n = -n
+        wrap = 0.45
+        key = np.clip((n @ (-light_key) + wrap) / (1.0 + wrap), 0.0, 1.0)
+        fill = np.clip((n @ (-light_fill) + wrap) / (1.0 + wrap), 0.0, 1.0)
+        rim = np.clip(n @ (-light_rim), 0.0, 1.0) ** 2
+        ambient = 0.52
+        return ambient + 0.38 * key + 0.22 * fill + 0.12 * rim
 
     # Depth-sort faces across all meshes
     batches = []
@@ -120,8 +141,12 @@ def render_textured(
         if it.get("double_sided"):
             faces_v = f
         else:
-            visible = (fn @ view_dir) < -0.01
-            faces_v = f[visible] if visible.any() else f
+            # Face toward camera (handle either winding)
+            vis_a = (fn @ view_dir) < -0.01
+            vis_b = (fn @ view_dir) > 0.01
+            faces_v = f[vis_a] if vis_a.sum() >= vis_b.sum() else f[vis_b]
+            if faces_v.size == 0:
+                faces_v = f
         centroids = (v[faces_v[:, 0]] + v[faces_v[:, 1]] + v[faces_v[:, 2]]) / 3.0
         depth = centroids[:, 2] if view == "front" else -centroids[:, 0]
 
@@ -135,12 +160,12 @@ def render_textured(
             alpha_v = np.clip(alb_v[:, :3].max(axis=1), 0, 1)
         if occ is not None and not it.get("skip_ao"):
             ao = _sample_tex(occ, uv)[:, :3].mean(axis=1, keepdims=True)
-            rgb = rgb * (0.55 + 0.45 * ao)
+            rgb = rgb * (0.7 + 0.3 * ao)
         if it.get("unlit"):
-            col_v = np.clip(rgb, 0, 1)
+            col_v = np.clip(rgb * float(exposure), 0, 1)
         else:
-            ndl = np.clip((-vn) @ light, 0.0, 1.0)
-            col_v = np.clip(rgb * (0.28 + 0.72 * ndl)[:, None], 0, 1)
+            shade = _shade(vn)
+            col_v = np.clip(rgb * shade[:, None] * float(exposure), 0, 1)
         face_rgb = (col_v[faces_v[:, 0]] + col_v[faces_v[:, 1]] + col_v[faces_v[:, 2]]) / 3.0
         face_a = (alpha_v[faces_v[:, 0]] + alpha_v[faces_v[:, 1]] + alpha_v[faces_v[:, 2]]) / 3.0
         if it.get("use_alpha"):
@@ -162,12 +187,11 @@ def render_textured(
         polys = np.concatenate([b[1] for b in batches], axis=0)
         cols = np.concatenate([b[2] for b in batches], axis=0)
         order = np.argsort(depths)
-        # opaque first in painter: already depth sorted; alpha edges match fill
         coll = PolyCollection(
             polys[order],
             facecolors=cols[order],
             edgecolors=cols[order],
-            linewidths=0.25,
+            linewidths=0.2,
             antialiased=True,
             closed=True,
         )

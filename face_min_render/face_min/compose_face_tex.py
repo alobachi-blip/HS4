@@ -187,7 +187,8 @@ def compose_face_albedo(
     base = blend_addtex(base, eyebrow, eyebrow_color, strength=1.0)
     if occlusion is not None:
         ao = _resize_to(occlusion, (base.shape[0], base.shape[1]))
-        factor = 0.55 + 0.45 * ao[..., :3].mean(axis=2, keepdims=True)
+        # Soft AO — strong multiply crushed faces black under our flat lighting
+        factor = 0.78 + 0.22 * ao[..., :3].mean(axis=2, keepdims=True)
         base[..., :3] = np.clip(base[..., :3] * factor, 0, 1)
     return base
 
