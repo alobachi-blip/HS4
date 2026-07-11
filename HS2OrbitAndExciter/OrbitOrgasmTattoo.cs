@@ -60,7 +60,10 @@ namespace HS2OrbitAndExciter
         private static int[]? _layoutIds;
         /// <summary>bodypaint_layout id → Japanese Name (for matching decal site).</summary>
         private static Dictionary<int, string>? _layoutNames;
+        /// <summary>Maker 色見本（排除過淺膚色 index &lt; 17），刺青染色用。</summary>
+        private static Color[]? _tattooPalette;
         private static bool _catalogTried;
+        private const int ColorSampleSkipSkin = 17;
         private static int _parentCursor;
         private static int _lastHSceneId = -1;
         private static Shader? _decalShader;
@@ -139,6 +142,7 @@ namespace HS2OrbitAndExciter
             _paintIds = null;
             _layoutIds = null;
             _layoutNames = null;
+            _tattooPalette = null;
             _decalShader = null;
         }
 
@@ -268,8 +272,7 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            Color color = Color.HSVToRGB(Random.value, Random.Range(0.55f, 1f), Random.Range(0.5f, 1f));
-            color.a = 1f;
+            Color color = PickTattooColor();
             float size = BaseSize * Random.Range(GetScaleMin(), GetScaleMax());
             // Match body-paint layout region to the same site as the decal / HUD — never random UV.
             int layoutId = ResolveLayoutIdForParent(cha, parentKey);
@@ -309,6 +312,138 @@ namespace HS2OrbitAndExciter
                 $"Orbit: 高潮刺青 +1 位置={FormatSiteLabel(parentKey)}({parentKey}){layoutNote} 共{Stamps.Count}");
             // Orgasm / H systems often rebuild body tex after AddOrgasm; refresh again EoF + N frames.
             ScheduleBodyPaintRefresh(cha);
+        }
+
+        /// <summary>
+        /// Maker 色見本隨機色：跳過 index 0–16（膚色／過淺，刺青看不出），從 17 起抽。
+        /// </summary>
+        private static Color PickTattooColor()
+        {
+            EnsureTattooPalette();
+            if (_tattooPalette != null && _tattooPalette.Length > 0)
+            {
+                var c = _tattooPalette[Random.Range(0, _tattooPalette.Length)];
+                c.a = 1f;
+                return c;
+            }
+
+            // Fallback if presets missing.
+            var fallback = Color.HSVToRGB(Random.value, Random.Range(0.55f, 1f), Random.Range(0.35f, 0.85f));
+            fallback.a = 1f;
+            return fallback;
+        }
+
+        private static void EnsureTattooPalette()
+        {
+            if (_tattooPalette != null)
+                return;
+
+            string? json = null;
+            try
+            {
+                string path = UserData.Path + "Custom/ColorPresets.json";
+                if (System.IO.File.Exists(path))
+                    json = System.IO.File.ReadAllText(path);
+            }
+            catch { /* ignore */ }
+
+            if (string.IsNullOrEmpty(json))
+            {
+                try
+                {
+                    var ta = CommonLib.LoadAsset<TextAsset>("custom/colorsample.unity3d", "ColorPresets");
+                    if (ta != null)
+                    {
+                        json = ta.text;
+                        AssetBundleManager.UnloadAssetBundle("custom/colorsample.unity3d", isUnloadForceRefCount: true);
+                    }
+                }
+                catch { /* ignore */ }
+            }
+
+            if (string.IsNullOrEmpty(json))
+            {
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: 無法載入 ColorPresets，刺青改用 HSV 備援");
+                _tattooPalette = System.Array.Empty<Color>();
+                return;
+            }
+
+            try
+            {
+                var sample = ParseColorSampleList(json);
+                if (sample == null || sample.Count <= ColorSampleSkipSkin)
+                {
+                    HS2OrbitAndExciter.Log?.LogWarning(
+                        $"Orbit: ColorPresets 色見本過短 ({sample?.Count ?? 0})，刺青改用 HSV 備援");
+                    _tattooPalette = System.Array.Empty<Color>();
+                    return;
+                }
+
+                int n = sample.Count - ColorSampleSkipSkin;
+                var pal = new Color[n];
+                for (int i = 0; i < n; i++)
+                    pal[i] = sample[ColorSampleSkipSkin + i];
+                _tattooPalette = pal;
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: 刺青色票=色見本[{ColorSampleSkipSkin}..{sample.Count - 1}] 共{n}色（已排除膚色）");
+            }
+            catch (System.Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: ColorPresets 解析失敗: {ex.Message}");
+                _tattooPalette = System.Array.Empty<Color>();
+            }
+        }
+
+        /// <summary>Parse lstColorSample from ColorPresets.json without JsonUtility (stub UnityEngine).</summary>
+        private static List<Color>? ParseColorSampleList(string json)
+        {
+            const string key = "\"lstColorSample\"";
+            int keyAt = json.IndexOf(key, System.StringComparison.Ordinal);
+            if (keyAt < 0)
+                return null;
+            int arrStart = json.IndexOf('[', keyAt);
+            if (arrStart < 0)
+                return null;
+
+            var list = new List<Color>(80);
+            int i = arrStart + 1;
+            while (i < json.Length)
+            {
+                // skip whitespace / commas
+                while (i < json.Length && (json[i] == ' ' || json[i] == '\n' || json[i] == '\r' || json[i] == '\t' || json[i] == ','))
+                    i++;
+                if (i >= json.Length || json[i] == ']')
+                    break;
+                if (json[i] != '{')
+                    break;
+
+                int objEnd = json.IndexOf('}', i);
+                if (objEnd < 0)
+                    break;
+                string obj = json.Substring(i, objEnd - i + 1);
+                float r = ReadJsonFloat(obj, "r");
+                float g = ReadJsonFloat(obj, "g");
+                float b = ReadJsonFloat(obj, "b");
+                list.Add(new Color(r, g, b, 1f));
+                i = objEnd + 1;
+            }
+            return list;
+        }
+
+        private static float ReadJsonFloat(string obj, string field)
+        {
+            string needle = "\"" + field + "\":";
+            int at = obj.IndexOf(needle, System.StringComparison.Ordinal);
+            if (at < 0)
+                return 0f;
+            int start = at + needle.Length;
+            int end = start;
+            while (end < obj.Length && (char.IsDigit(obj[end]) || obj[end] == '.' || obj[end] == '-' || obj[end] == 'e' || obj[end] == 'E' || obj[end] == '+'))
+                end++;
+            if (float.TryParse(obj.Substring(start, end - start), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float v))
+                return v;
+            return 0f;
         }
 
         /// <summary>

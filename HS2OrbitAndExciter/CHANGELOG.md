@@ -7,6 +7,7 @@
 - 女高潮時複用男性**射精** Obi emitter（失敗則退回 siru 粒子），掛到左右乳頭骨（`cf_J_Mune_Nip01_s_*` 等）並播放。
 - 設定：`OrgasmNippleSprayEnabled`（預設開）；局部偏移／旋轉 `OrgasmNippleSprayOffset*`／`Rot*`（方向不對時可調）。
 - **HUD／選單**：⌃⇧O 左下角「高潮 刺·胸·乳噴」列；⌃⇧P「高潮特效」區塊含刺青／胸／乳頭射精開關與旋轉滑桿、「重建乳頭噴口」。
+- **連噴**：預設 5 段（如潮吹），首噴力道 ×1.8、末噴 ×0.4 遞減；可調次數／間隔／首末力道。
 - H 進場／G 換角會重建 emitter。
 
 ### R 清腹＋高潮刺青
@@ -17,6 +18,7 @@
 - **刷新**：高潮當幀 `CreateBodyTexture` 常被 H 流程覆寫；改為立刻寫入後再於 EndOfFrame＋數幀重刷 paint 槽，避免只有第一次看得見。
 - **穩定性**：先成功建立貼花再記入 stamp（避免 Count 脫勾）；換衣重掛改為一次 `CreateBodyTexture`。
 - **部位對齊**：body paint 的 `layoutId` 依掛點名稱匹配（如 左太もも），不再隨機 UV；對不到則略過 paint，只留貼花／HUD。
+- **顏色**：改抽製作模式色見本 `ColorPresets`（跳過 index 0–16 膚色），隨機自 17 起（灰／彩／深色／黑白）。
 - **高潮胸部**：每次女高潮將 `BustSize`（胸サイズ）×(1+percent/100)，預設 +15%（`OrgasmBustGrowEnabled`／`OrgasmBustGrowPercent`）。
 
 ## 2026-04-05
