@@ -11,12 +11,12 @@ namespace HS2OrbitAndExciter
         internal const KeyCode PoseCameraKey = KeyCode.K;
         internal const KeyCode PoseKey = KeyCode.L;
 
-        /// <summary>YUIOP 列：I＝切換狀態面板（Ctrl+Shift+I 仍可用）。</summary>
-        internal const KeyCode StatusHudKey = KeyCode.I;
+        /// <summary>YUIOP 列：I＝強制清空肚子（PregnancyPlus）；R 還給原版相機 Reset。</summary>
+        internal const KeyCode BellyResetKey = KeyCode.I;
         /// <summary>YUIOP 列：O＝停止／恢復環視轉動（不關協助；Ctrl+Shift+O 仍為開／關協助）。</summary>
         internal const KeyCode StopOrbitCameraKey = KeyCode.O;
-        /// <summary>YUIOP 列：P＝強制清空肚子（PregnancyPlus）；R 還給原版相機 Reset。</summary>
-        internal const KeyCode BellyResetKey = KeyCode.P;
+        /// <summary>YUIOP 列：P＝切換狀態面板（Ctrl+Shift+I 仍可用）。</summary>
+        internal const KeyCode StatusHudKey = KeyCode.P;
 
         /// <summary>Force leave Idle/AfterIdle — 語意改為「往前推」（依格：開幹／加速／選池）。</summary>
         internal const KeyCode StartSexKey = KeyCode.N;
@@ -31,7 +31,7 @@ namespace HS2OrbitAndExciter
 
         /// <summary>YUIOP 列：Y／U 由 Preg+；I／O／P 本外掛。</summary>
         internal const string PregnancyHudLegend =
-            "Y肚子+·U肚子-·I狀態面板·O停／恢復環視·P清空肚子";
+            "Y肚子+·U肚子-·I清空肚子·O停／恢復環視·P狀態面板";
 
         /// <summary>Orgasm FX line prefix for HUD / settings.</summary>
         internal const string OrgasmFxHudPrefix = "高潮";

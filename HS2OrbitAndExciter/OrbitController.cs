@@ -293,14 +293,13 @@ namespace HS2OrbitAndExciter
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
+            // YUIOP：I＝清腹；P＝狀態面板；O＝只停／恢復環視轉動（協助照常）
             if (Input.GetKeyDown(OrbitManualHotkeys.BellyResetKey))
             {
                 if (PregnancyPlusAssist.TryResetBelly(hScene))
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
-
-            // YUIOP：I＝狀態面板；O＝只停／恢復環視轉動（協助照常）
             if (Input.GetKeyDown(OrbitManualHotkeys.StatusHudKey))
             {
                 if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value != false

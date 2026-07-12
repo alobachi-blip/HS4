@@ -8,7 +8,7 @@ namespace HS2OrbitAndExciter
 {
     /// <summary>
     /// PregnancyPlus live shortcuts: Y/U are handled by Preg+ (step scaled by our patch).
-    /// R reset often fails for HS2 H-scene belly (<c>HS2Inflation</c> level), so we force deflate on hotkey P.
+    /// R reset often fails for HS2 H-scene belly (<c>HS2Inflation</c> level), so we force deflate on hotkey I.
     /// Optional inside-finish belly grow via <c>HS2Inflation(false)</c> (menu default on).
     /// </summary>
     internal static class PregnancyPlusAssist
@@ -125,7 +125,7 @@ namespace HS2OrbitAndExciter
             }
 
             if (any)
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: P 清腹（PregnancyPlus）");
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: I 清腹（PregnancyPlus）");
             return any;
         }
 

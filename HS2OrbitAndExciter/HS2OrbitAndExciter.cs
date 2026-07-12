@@ -129,7 +129,7 @@ namespace HS2OrbitAndExciter
             OverrideFaintness = Config.Bind("State", "OverrideFaintness", false,
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,
-                "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle with I or Ctrl+Shift+I while orbit is on.");
+                "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle with P or Ctrl+Shift+I while orbit is on.");
             OrgasmTattooEnabled = Config.Bind("Orbit", "OrgasmTattooEnabled", true,
                 "When true, each female orgasm adds a st_paint tattoo. In H: T enables + places next stamp; Shift+T disables.");
             OrgasmTattooMaxCount = Config.Bind("Orbit", "OrgasmTattooMaxCount", 24,
@@ -173,7 +173,7 @@ namespace HS2OrbitAndExciter
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
                 new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
             CumflationEnabled = Config.Bind("Orbit", "CumflationEnabled", true,
-                "When true, each inside finish grows PregnancyPlus H-scene belly one level (HS2Inflation). P clears.");
+                "When true, each inside finish grows PregnancyPlus H-scene belly one level (HS2Inflation). I clears.");
             VoiceTourEnabled = Config.Bind("VoiceTour", "VoiceTourEnabled", true,
                 "H voice tour: cycle Blank→Favor→…→Dependence→Broken by orgasm/houshi finish. Does not write card Favor/etc.");
             VoiceTourHitsPerStage = Config.Bind("VoiceTour", "VoiceTourHitsPerStage", 1,
@@ -242,7 +242,7 @@ namespace HS2OrbitAndExciter
             go.AddComponent<OrbitHSceneLateAssist>();
             go.AddComponent<OrbitSettingsGUI>();
             go.AddComponent<OrbitStatusHud>();
-            Log.LogInfo($"{PluginInfo.PLUGIN_NAME} v{PluginInfo.PLUGIN_VERSION} loaded. Settings: Ctrl+Shift+P; status HUD: I / Ctrl+Shift+I; stop orbit: O; clear belly: P.");
+            Log.LogInfo($"{PluginInfo.PLUGIN_NAME} v{PluginInfo.PLUGIN_VERSION} loaded. Settings: Ctrl+Shift+P; status HUD: P / Ctrl+Shift+I; stop orbit: O; clear belly: I.");
         }
     }
 }
