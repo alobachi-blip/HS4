@@ -43,6 +43,9 @@
     <Reference Include="UnityEngine.PhysicsModule" Condition="Exists('$(HS2Managed)\UnityEngine.PhysicsModule.dll')">
       <HintPath>$(HS2Managed)\UnityEngine.PhysicsModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule" Condition="Exists('$(HS2Managed)\UnityEngine.JSONSerializeModule.dll')">
+      <HintPath>$(HS2Managed)\UnityEngine.JSONSerializeModule.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>$(HS2Managed)\UnityEngine.UI.dll</HintPath>
     </Reference>
