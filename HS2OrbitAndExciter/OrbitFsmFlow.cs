@@ -11,8 +11,8 @@ namespace HS2OrbitAndExciter
     {
         /// <summary>閒置落地後再開幹的準備秒數（過程節奏）。</summary>
         internal const float IdleStartPrepSeconds = 1.0f;
-        /// <summary>一般高潮後短收尾餘裕（過程節奏 B1）。</summary>
-        internal const float AfterIdleShortSettleSeconds = 0.75f;
+        /// <summary>高潮後／虛脫：給使用者欣賞秒數，到時選池再開幹（維持 isFaintness）。</summary>
+        internal const float AfterIdleAppreciateSeconds = 5.0f;
         /// <summary>動作橋段按 N 加速時，感度一次加成。</summary>
         internal const float BridgeAccelerateFeelBoost = 0.15f;
         /// <summary>動作橋段按 N 加速時，速度加成。</summary>
@@ -24,16 +24,77 @@ namespace HS2OrbitAndExciter
         private static bool _afterIdleArmed;
         private static string _afterIdleMode = ""; // "short" | "special"
 
+        /// <summary>進 H／開協助後抽一次起始姿，避免總卡在預設接吻。</summary>
+        private static bool _entryPosePickPending;
+        private static float _entryPosePickDeadlineUnscaled = -1f;
+        private const float EntryPosePickTimeoutSeconds = 8f;
+
         private static OrbitFsmCell _lastCell = OrbitFsmCell.Unknown;
 
         internal static void Reset()
         {
             CancelIdleStartSchedule();
             CancelAfterIdleSchedule();
+            ClearEntryPosePick();
             _lastCell = OrbitFsmCell.Unknown;
         }
 
-        internal static void OnHSceneEntered() => Reset();
+        internal static void OnHSceneEntered()
+        {
+            Reset();
+            if (!OrbitBehaviorHub.IsOrbitAssistActive())
+                return;
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene != null
+                && (OrbitFsmCellClassifier.Classify(hScene) == OrbitFsmCell.AfterIdle
+                    || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene)))
+            {
+                OnEnteredAfterIdle(hScene, "進 H・高潮後欣賞");
+                return;
+            }
+            ArmEntryPosePick("h_enter");
+        }
+
+        /// <summary>開協助時：若已在高潮後／虛脫 → 走 5s 欣賞→選池；否則進場抽姿。</summary>
+        internal static void OnAssistStarted()
+        {
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene == null)
+                return;
+
+            if (OrbitFsmCellClassifier.Classify(hScene) == OrbitFsmCell.AfterIdle
+                || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+            {
+                ClearEntryPosePick();
+                OnEnteredAfterIdle(hScene, "協助開・高潮後欣賞");
+                return;
+            }
+
+            ArmEntryPosePick("orbit_on");
+        }
+
+        /// <summary>開協助／進場抽姿：進 H 後抽一次姿。</summary>
+        internal static void ArmEntryPosePick(string reason)
+        {
+            CancelIdleStartSchedule();
+            _entryPosePickPending = true;
+            _entryPosePickDeadlineUnscaled = Time.unscaledTime + EntryPosePickTimeoutSeconds;
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 排程進場抽姿（{reason}）");
+        }
+
+        private static void ClearEntryPosePick()
+        {
+            _entryPosePickPending = false;
+            _entryPosePickDeadlineUnscaled = -1f;
+        }
+
+        /// <summary>HUD：高潮後欣賞倒數（0＝未排程／已到）。</summary>
+        internal static float RemainingAfterIdleAppreciateSeconds()
+        {
+            if (!_afterIdleArmed || _afterIdleMode != "short" || _afterIdleDueUnscaled < 0f)
+                return 0f;
+            return Mathf.Max(0f, _afterIdleDueUnscaled - Time.unscaledTime);
+        }
 
         // ─── 選池 ───────────────────────────────────────────────
 
@@ -155,6 +216,7 @@ namespace HS2OrbitAndExciter
                 return;
 
             CancelIdleStartSchedule();
+            ClearEntryPosePick();
 
             if (OrbitFsmCellClassifier.IsSpecialAfterChain(hScene))
             {
@@ -165,14 +227,18 @@ namespace HS2OrbitAndExciter
             }
             else
             {
+                // 虛脫／高潮後：欣賞 N 秒 → 選池 → 開幹；不清 isFaintness（維持 D_ 姿池）
                 _afterIdleArmed = true;
                 _afterIdleMode = "short";
-                _afterIdleDueUnscaled = Time.unscaledTime + AfterIdleShortSettleSeconds;
+                _afterIdleDueUnscaled = Time.unscaledTime + AfterIdleAppreciateSeconds;
+                bool faint = hScene.ctrlFlag != null && hScene.ctrlFlag.isFaintness;
                 HS2OrbitAndExciter.Log?.LogInfo(
-                    $"Orbit: 高潮後約 {AfterIdleShortSettleSeconds:F1} 秒後選池（來源={source}）");
+                    $"Orbit: 高潮後欣賞約 {AfterIdleAppreciateSeconds:F0} 秒後選池" +
+                    $"（維持虛脫={(faint ? "是" : "否")}；來源={source}）");
             }
             OrbitStateMachineLog.Event("高潮後", "排程選池",
-                "{\"mode\":\"" + _afterIdleMode + "\",\"source\":\"" + (source ?? "") + "\"}");
+                "{\"mode\":\"" + _afterIdleMode + "\",\"sec\":" + AfterIdleAppreciateSeconds.ToString("F0")
+                + ",\"source\":\"" + (source ?? "") + "\"}");
         }
 
         internal static void CancelAfterIdleSchedule()
@@ -197,19 +263,66 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
+            TickEntryPosePick(hScene);
+
             var cell = OrbitFsmCellClassifier.Classify(hScene);
             if (cell != _lastCell)
             {
                 // 高潮動畫結束進 AfterIdle 不一定有換姿落地
                 if (cell == OrbitFsmCell.AfterIdle && !_afterIdleArmed)
                     OnEnteredAfterIdle(hScene, "狀態進入");
-                // 進 H 第一姿已是閒置：協助開啟時補排程
-                if (cell == OrbitFsmCell.Idle && _lastCell == OrbitFsmCell.Unknown && !_idleStartArmed)
+                // 進 H 第一姿已是閒置：未排進場抽姿時才補開幹
+                if (cell == OrbitFsmCell.Idle
+                    && _lastCell == OrbitFsmCell.Unknown
+                    && !_idleStartArmed
+                    && !_entryPosePickPending)
                     OnEnteredIdle(hScene, "協助開／進場");
                 _lastCell = cell;
             }
 
             TickAfterIdleToPool(hScene);
+        }
+
+        private static void TickEntryPosePick(HScene hScene)
+        {
+            if (!_entryPosePickPending)
+                return;
+
+            // 已在高潮後／虛脫：改走欣賞→選池，不要立刻進場抽姿
+            if (OrbitFsmCellClassifier.Classify(hScene) == OrbitFsmCell.AfterIdle
+                || OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+            {
+                ClearEntryPosePick();
+                if (!_afterIdleArmed)
+                    OnEnteredAfterIdle(hScene, "進場改高潮後欣賞");
+                return;
+            }
+
+            if (hScene.NowChangeAnim
+                || OrbitPoseDirector.IsPoseChangeInFlight
+                || OrbitPoseDirector.Phase == DirectorState.Changing
+                || OrbitPoseDirector.Phase == DirectorState.PoseQueued
+                || OrbitPoseDirector.Phase == DirectorState.Rebinding)
+                return;
+
+            if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
+                return;
+
+            if (RequestSelectPool(hScene, "entry"))
+            {
+                ClearEntryPosePick();
+                OrbitStateMachineLog.Event("選池", "進場抽姿", "{}");
+                return;
+            }
+
+            if (_entryPosePickDeadlineUnscaled > 0f
+                && Time.unscaledTime >= _entryPosePickDeadlineUnscaled)
+            {
+                ClearEntryPosePick();
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 進場抽姿逾時，沿用目前姿勢");
+                if (OrbitFsmCellClassifier.Classify(hScene) == OrbitFsmCell.Idle && !_idleStartArmed)
+                    OnEnteredIdle(hScene, "進場抽姿失敗");
+            }
         }
 
         private static void TickAfterIdleToPool(HScene hScene)
@@ -235,6 +348,10 @@ namespace HS2OrbitAndExciter
             }
 
             CancelAfterIdleSchedule();
+            // 選池在虛脫下只抽 nDownPtn 姿；故意不清 isFaintness
+            bool faint = hScene.ctrlFlag != null && hScene.ctrlFlag.isFaintness;
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: 高潮後欣賞結束→選池（維持虛脫={(faint ? "是" : "否")}）");
             RequestSelectPool(hScene, "高潮後自動");
         }
 

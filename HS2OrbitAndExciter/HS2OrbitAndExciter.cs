@@ -127,17 +127,17 @@ namespace HS2OrbitAndExciter
             EnableAfterProcAssistPostfixFallback = Config.Bind("Orbit", "EnableAfterProcAssistPostfixFallback", false,
                 "Fallback: run per-Proc AfterProc assist patch. Default false (late-assist only). Enable only if auto-advance stalls in your setup.");
             OrbitDistanceHead = Config.Bind("Orbit", "OrbitDistanceHead", 1.4f,
-                "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
+                new ConfigDescription("Body-focus orbit: distance multiplier vs character height (0 = extreme close-up; runtime floor ~0.02).", new AcceptableValueRange<float>(0f, 3f)));
             OrbitDistanceChest = Config.Bind("Orbit", "OrbitDistanceChest", 1.4f,
-                "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
+                new ConfigDescription("Body-focus orbit: distance multiplier vs character height (0 = extreme close-up; runtime floor ~0.02).", new AcceptableValueRange<float>(0f, 3f)));
             OrbitDistancePelvis = Config.Bind("Orbit", "OrbitDistancePelvis", 1.4f,
-                "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
+                new ConfigDescription("Body-focus orbit: distance multiplier vs character height (0 = extreme close-up; runtime floor ~0.02).", new AcceptableValueRange<float>(0f, 3f)));
             OrbitCircleZoomEnabled = Config.Bind("Orbit", "OrbitCircleZoomEnabled", true,
                 "When true, each rotation picks a random zoom between Near and Far multipliers (clear push-in / pull-back).");
             OrbitZoomNearMult = Config.Bind("Orbit", "OrbitZoomNearMult", 0.65f,
-                new ConfigDescription("Per-circle zoom-in multiplier vs focus distance (smaller = closer).", new AcceptableValueRange<float>(0.4f, 1f)));
+                new ConfigDescription("Per-circle zoom-in multiplier vs focus distance (0 = extreme close-up; if Near>Far they are swapped).", new AcceptableValueRange<float>(0f, 3f)));
             OrbitZoomFarMult = Config.Bind("Orbit", "OrbitZoomFarMult", 1.75f,
-                new ConfigDescription("Per-circle zoom-out multiplier vs focus distance (larger = farther).", new AcceptableValueRange<float>(1f, 2.5f)));
+                new ConfigDescription("Per-circle zoom-out multiplier vs focus distance (larger = farther; if Near>Far they are swapped).", new AcceptableValueRange<float>(0f, 3f)));
             OverrideFaintness = Config.Bind("State", "OverrideFaintness", false,
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,

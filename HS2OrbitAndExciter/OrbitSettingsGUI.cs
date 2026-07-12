@@ -19,6 +19,17 @@ namespace HS2OrbitAndExciter
         private bool _stylesInitialized;
         private bool _lastOverrideFaintness;
 
+        private static OrbitSettingsGUI? Instance { get; set; }
+
+        /// <summary>Ctrl+Shift+P 設定窗是否開啟（IMGUI 不經 EventSystem，需另查）。</summary>
+        internal static bool IsVisible => Instance != null && Instance._visible;
+
+        private void OnEnable() => Instance = this;
+        private void OnDisable()
+        {
+            if (Instance == this) Instance = null;
+        }
+
         private void InitStyles()
         {
             if (_stylesInitialized) return;
@@ -105,9 +116,9 @@ namespace HS2OrbitAndExciter
 
             GUILayout.Space(4);
             GUILayout.Label("焦點距離（相對全身長度）", label);
-            DrawFloatControl("頭部", null, HS2OrbitAndExciter.OrbitDistanceHead, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
-            DrawFloatControl("胸部", null, HS2OrbitAndExciter.OrbitDistanceChest, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
-            DrawFloatControl("骨盆", null, HS2OrbitAndExciter.OrbitDistancePelvis, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
+            DrawFloatControl("頭部", "0＝極近特寫", HS2OrbitAndExciter.OrbitDistanceHead, 0f, 3f, 0.01f, "F2", null, requestViewReapply: true);
+            DrawFloatControl("胸部", "0＝極近特寫", HS2OrbitAndExciter.OrbitDistanceChest, 0f, 3f, 0.01f, "F2", null, requestViewReapply: true);
+            DrawFloatControl("骨盆", "0＝極近特寫", HS2OrbitAndExciter.OrbitDistancePelvis, 0f, 3f, 0.01f, "F2", null, requestViewReapply: true);
 
             if (HS2OrbitAndExciter.OrbitCircleZoomEnabled != null)
             {
@@ -117,8 +128,8 @@ namespace HS2OrbitAndExciter
             }
             if (HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true)
             {
-                DrawFloatControl("拉近倍率", "越小越近", HS2OrbitAndExciter.OrbitZoomNearMult, 0.4f, 1f, 0.01f, "F2");
-                DrawFloatControl("拉遠倍率", "越大越遠", HS2OrbitAndExciter.OrbitZoomFarMult, 1f, 2.5f, 0.01f, "F2");
+                DrawFloatControl("拉近倍率", "0＝極近；與拉遠倒掛會自動對調", HS2OrbitAndExciter.OrbitZoomNearMult, 0f, 3f, 0.01f, "F2");
+                DrawFloatControl("拉遠倍率", "越大越遠；與拉近倒掛會自動對調", HS2OrbitAndExciter.OrbitZoomFarMult, 0f, 3f, 0.01f, "F2");
             }
 
             // ─── 流程 ───────────────────────────────────────────

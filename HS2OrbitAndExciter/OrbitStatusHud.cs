@@ -20,6 +20,7 @@ namespace HS2OrbitAndExciter
         private GUIStyle? _titleLabel;
         private GUIStyle? _bodyLabel;
         private GUIStyle? _dimLabel;
+        private GUIStyle? _alertLabel;
         private GUIStyle? _boxStyle;
 
         private void Awake()
@@ -74,6 +75,14 @@ namespace HS2OrbitAndExciter
                 padding = new RectOffset(0, 0, 0, 0),
                 margin = new RectOffset(0, 0, 0, 0)
             };
+            _alertLabel = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                wordWrap = true,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0)
+            };
+            _alertLabel.normal.textColor = new Color(1f, 0.22f, 0.18f, 1f);
             _boxStyle = new GUIStyle(GUI.skin.box)
             {
                 padding = new RectOffset(8, 8, 6, 6),
@@ -142,6 +151,7 @@ namespace HS2OrbitAndExciter
                 {
                     LineKind.Title => _titleLabel,
                     LineKind.Dim => _dimLabel,
+                    LineKind.Alert => _alertLabel,
                     _ => _bodyLabel
                 } ?? GUI.skin.label;
                 GUILayout.Label(lines[i].Text, style);
@@ -163,7 +173,11 @@ namespace HS2OrbitAndExciter
 
                 string wait = FormatWaiting(snap);
                 if (!string.IsNullOrEmpty(wait))
-                    list.Add(new HudLine(LineKind.Body, wait));
+                {
+                    bool appreciate = snap.SuppressReasonKey == OrbitAssistReasons.LongAppreciation
+                        && !OrbitBehaviorHub.IsMotionEscapeArmed();
+                    list.Add(new HudLine(appreciate ? LineKind.Alert : LineKind.Body, wait));
+                }
 
                 list.Add(new HudLine(LineKind.Body, FormatOrgasmFx()));
                 string pool = FormatPoolShort();
@@ -191,6 +205,8 @@ namespace HS2OrbitAndExciter
                 core = "正在換視角";
             else if (!OrbitBehaviorHub.IsOrbitCameraSpinning())
                 core = "相機已暫停（按 O 繼續）";
+            else if (OrbitBehaviorHub.ShouldPauseOrbitCameraForUi())
+                core = "相機暫停：操作選單中";
             else if (OrbitPoseDirector.ShouldFreezeCycleCounters)
                 core = OrbitPoseDirector.Phase == DirectorState.PosePending
                     ? "環視中・等待換姿勢"
@@ -198,8 +214,10 @@ namespace HS2OrbitAndExciter
             else
                 core = "環視轉動中";
 
-            if (snap.IsFaintness)
-                core += "・脫力";
+            // 虛脫只在高潮後 5s 欣賞窗提示；開幹後當一般流程，不一直掛「脫力」
+            float appreciate = OrbitFsmFlow.RemainingAfterIdleAppreciateSeconds();
+            if (appreciate > 0.05f)
+                core = $"高潮後欣賞中（{appreciate:F0}s）";
             return core;
         }
 
@@ -254,8 +272,8 @@ namespace HS2OrbitAndExciter
                     }
                 case OrbitAssistReasons.LongAppreciation:
                     return OrbitBehaviorHub.IsMotionEscapeArmed()
-                        ? "窺視／場所姿：可推進"
-                        : "窺視中：按 L 或 N 換下一姿勢";
+                        ? "欣賞姿：可推進"
+                        : "欣賞中：按 L／滾輪／N 可手動跳出";
                 case OrbitAssistReasons.AssistInterval:
                 case OrbitAssistReasons.CheckpointInterval: return "稍候再自動推進";
                 case OrbitAssistReasons.None: return "自動：就緒";
@@ -268,6 +286,10 @@ namespace HS2OrbitAndExciter
 
         private static string FormatTimedPlain(string suppressReasonKey)
         {
+            float afterAppreciate = OrbitFsmFlow.RemainingAfterIdleAppreciateSeconds();
+            if (afterAppreciate > 0.05f)
+                return $"虛脫欣賞 {afterAppreciate:F0}s→選池再開幹";
+
             float after = OrbitBehaviorHub.RemainingAfterIdleAutoEscapeSeconds();
             if (after > 0.05f)
                 return $"倒數脫離閒置 {after:F0}s";
@@ -357,7 +379,7 @@ namespace HS2OrbitAndExciter
                 list.Add(new HudLine(LineKind.Dim, "上次觸發：" + OrbitVoiceTour.LastTrigger));
         }
 
-        private enum LineKind { Title, Body, Dim }
+        private enum LineKind { Title, Body, Dim, Alert }
 
         private readonly struct HudLine
         {

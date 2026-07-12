@@ -53,6 +53,26 @@ namespace HS2OrbitAndExciter
         internal static bool IsOrbitCameraSpinning() => _orbitAssistActive && _orbitCameraSpinning;
         internal static bool IsPoseKickInFlight => _poseKickInFlight;
 
+        /// <summary>
+        /// 游標在遊戲 UI／設定窗上時暫停環視轉動，避免操作選單時畫面跟著轉。
+        /// </summary>
+        internal static bool ShouldPauseOrbitCameraForUi()
+        {
+            if (!_orbitAssistActive)
+                return false;
+            if (OrbitSettingsGUI.IsVisible)
+                return true;
+            try
+            {
+                if (ConfirmDialog.active)
+                    return true;
+            }
+            catch { /* ConfirmDialog 未載入 */ }
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+                return true;
+            return false;
+        }
+
         /// <summary>只停／恢復相機轉動；不關協助／FSM／FEEL。</summary>
         internal static void SetOrbitCameraSpinning(bool spinning)
         {
@@ -164,6 +184,7 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
+                OrbitFsmFlow.OnAssistStarted();
                 OrbitFaintnessAssist.ApplyOnAssistStart();
                 OrbitStatusHud.NotifyOrbitActivated();
             }

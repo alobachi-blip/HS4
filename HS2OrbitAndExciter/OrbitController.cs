@@ -420,7 +420,8 @@ namespace HS2OrbitAndExciter
             float dt = Time.deltaTime;
 
             bool spinning = OrbitBehaviorHub.IsOrbitCameraSpinning()
-                            && !OrbitManualDirector.IsCameraPaused;
+                            && !OrbitManualDirector.IsCameraPaused
+                            && !OrbitBehaviorHub.ShouldPauseOrbitCameraForUi();
 
             if (spinning)
             {
@@ -459,11 +460,15 @@ namespace HS2OrbitAndExciter
                 MaybePrecomputeNextCircle(hScene);
 
                 ApplyBodyAxisCamera(hScene, ctrl);
+                MaybeDetectFocusJump(hScene, ctrl);
+                MaybeLogFramingDiag(hScene, ctrl);
             }
             else
             {
                 // 停轉：仍用鎖定骨焦點，保留看部位與距離（不改 Rot，避免搶手控）
                 ApplyBoneFocusOnly(hScene, ctrl);
+                MaybeDetectFocusJump(hScene, ctrl);
+                MaybeLogFramingDiag(hScene, ctrl);
             }
 
             RefreshHudSnapshot(hScene, orbitTime, speedDegPerSec);
@@ -509,7 +514,7 @@ namespace HS2OrbitAndExciter
                 }
                 _plannedAxisMode = null;
                 _plannedStartAzimuth = null;
-                InvalidateLockedBasis();
+                InvalidateLockedBasis("換軸");
                 OrbitStateMachineLog.Event("環視", "換軸", OrbitBodyAxis.ModeLabel(_orbitAxisMode));
             }
         }
@@ -551,12 +556,13 @@ namespace HS2OrbitAndExciter
                 near = far;
                 far = t;
             }
-            near = Mathf.Clamp(near, 0.4f, 1f);
-            far = Mathf.Clamp(far, 1f, 2.5f);
-            // 明顯拉近或拉遠（各半）
+            near = Mathf.Max(0f, near);
+            far = Mathf.Max(near, far);
+            // 明顯拉近或拉遠（各半）；允許 <1 特寫與 >1 拉開
+            float mid = Mathf.Lerp(near, far, 0.5f);
             return UnityEngine.Random.value < 0.5f
-                ? UnityEngine.Random.Range(near, Mathf.Lerp(near, 1f, 0.35f))
-                : UnityEngine.Random.Range(Mathf.Lerp(1f, far, 0.35f), far);
+                ? UnityEngine.Random.Range(near, Mathf.Lerp(near, mid, 0.7f))
+                : UnityEngine.Random.Range(Mathf.Lerp(mid, far, 0.3f), far);
         }
 
         private bool IsPlannedAxisStillValid(HScene hScene)
@@ -634,20 +640,21 @@ namespace HS2OrbitAndExciter
                 var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
                 if (!live.Valid)
                     return false;
-                if (!TryLockBasis(chaFemales, focusIdx, live))
+                if (!TryLockBasis(chaFemales, focusIdx, live, _pendingLockReason ?? "fresh"))
                 {
                     basis = live;
                     return true;
                 }
+                _pendingLockReason = null;
             }
 
             if (!TryResolveLockedBasis(chaFemales, out basis))
             {
-                InvalidateLockedBasis();
+                InvalidateLockedBasis("resolve_fail");
                 var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
                 if (!live.Valid)
                     return false;
-                if (TryLockBasis(chaFemales, focusIdx, live))
+                if (TryLockBasis(chaFemales, focusIdx, live, "resolve_fail_relock"))
                     return TryResolveLockedBasis(chaFemales, out basis);
                 basis = live;
                 return true;
@@ -667,7 +674,11 @@ namespace HS2OrbitAndExciter
             return cha.objBodyBone != null ? cha.objBodyBone.transform : cha.transform;
         }
 
-        private bool TryLockBasis(ChaControl[] chaFemales, int focusIdx, OrbitBodyAxis.Basis live)
+        private bool TryLockBasis(
+            ChaControl[] chaFemales,
+            int focusIdx,
+            OrbitBodyAxis.Basis live,
+            string reason)
         {
             int femaleIdx = FemaleIndexFromFocus(focusIdx);
             var body = GetBodyRoot(chaFemales, femaleIdx);
@@ -680,6 +691,20 @@ namespace HS2OrbitAndExciter
             _lockedFacingLocal = body.InverseTransformDirection(live.Facing).normalized;
             _lockedRightLocal = body.InverseTransformDirection(live.Right).normalized;
             _lockedBasisValid = true;
+            _lockGen++;
+            _lastLockReason = reason ?? "lock";
+            _lastLockUnscaled = Time.unscaledTime;
+            OrbitStateMachineLog.Event(
+                "focus_lock",
+                _lastLockReason,
+                "{"
+                + "\"gen\":" + _lockGen
+                + ",\"focusIdx\":" + focusIdx
+                + ",\"female\":" + femaleIdx
+                + ",\"focusW\":[" + F3(live.FocusWorld.x) + "," + F3(live.FocusWorld.y) + "," + F3(live.FocusWorld.z) + "]"
+                + ",\"rootW\":[" + F3(body.position.x) + "," + F3(body.position.y) + "," + F3(body.position.z) + "]"
+                + ",\"local\":[" + F3(_lockedFocusLocal.x) + "," + F3(_lockedFocusLocal.y) + "," + F3(_lockedFocusLocal.z) + "]"
+                + "}");
             return true;
         }
 
@@ -707,9 +732,23 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        private void InvalidateLockedBasis()
+        private void InvalidateLockedBasis(string reason = "invalidate")
         {
+            if (_lockedBasisValid)
+            {
+                OrbitStateMachineLog.Event(
+                    "focus_lock",
+                    "invalidate",
+                    "{\"reason\":\"" + EscJson(reason) + "\",\"gen\":" + _lockGen + "}");
+            }
             _lockedBasisValid = false;
+            _pendingLockReason = reason;
+        }
+
+        private static string EscJson(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private static float NormalizeDeg(float deg)
@@ -786,9 +825,23 @@ namespace HS2OrbitAndExciter
             _hudSnapshotValid = true;
         }
 
-        /// <summary>Minimum camera distance in body-height units (legacy configs often had 0.3; too tight for full-body framing).</summary>
-        private const float OrbitDistanceMultMin = 1.35f;
+        private const float OrbitDistanceMultMin = 0f;
         private const float OrbitDistanceMultMax = 3f;
+        private const float OrbitZoomMultFloor = 0.02f;
+        /// <summary>鎖定焦點／身體根單幀位移超過此值 → 立刻打 focus_jump。</summary>
+        private const float FocusJumpWarnMeters = 2f;
+
+        private float _nextFramingLogUnscaled;
+        private int _lockGen;
+        private string _lastLockReason = "";
+        private string? _pendingLockReason;
+        private float _lastLockUnscaled;
+        private bool _framingHavePrev;
+        private Vector3 _prevFocusW;
+        private Vector3 _prevRootW;
+        private Vector3 _prevLiveChestW;
+        private Vector3 _prevLiveHeadW;
+        private Vector3 _prevLivePelvisW;
 
         /// <summary>Set camera distance = body height × config × circle zoom. Call after setting TargetPos.</summary>
         private static void SetDistanceForFocus(
@@ -804,8 +857,6 @@ namespace HS2OrbitAndExciter
             if (focusIndex == 0 || focusIndex == 3) mult = HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 1.4f;
             else if (focusIndex == 1 || focusIndex == 4) mult = HS2OrbitAndExciter.OrbitDistanceChest?.Value ?? 1.4f;
             else mult = HS2OrbitAndExciter.OrbitDistancePelvis?.Value ?? 1.4f;
-            if (mult < 1f)
-                mult = OrbitDistanceMultMin;
             mult = Mathf.Clamp(mult, OrbitDistanceMultMin, OrbitDistanceMultMax);
             float zoomLo = HS2OrbitAndExciter.OrbitZoomNearMult?.Value ?? 0.65f;
             float zoomHi = HS2OrbitAndExciter.OrbitZoomFarMult?.Value ?? 1.75f;
@@ -815,13 +866,271 @@ namespace HS2OrbitAndExciter
                 zoomLo = zoomHi;
                 zoomHi = t;
             }
-            mult *= Mathf.Clamp(circleZoomMult, zoomLo, zoomHi);
+            zoomLo = Mathf.Max(0f, zoomLo);
+            zoomHi = Mathf.Max(zoomLo, zoomHi);
+            float zoom = Mathf.Clamp(circleZoomMult, zoomLo, zoomHi);
+            // 實際倍率勿為 0，否則相機落在目標點
+            zoom = Mathf.Max(OrbitZoomMultFloor, zoom);
+            mult = Mathf.Max(OrbitZoomMultFloor, mult) * zoom;
             float d = bodyHeight * mult;
-            float minD = OrbitDistanceMultMin * bodyHeight * Mathf.Min(1f, zoomLo);
-            float maxD = OrbitDistanceMultMax * bodyHeight * Mathf.Max(1.25f, zoomHi);
+            float minD = bodyHeight * OrbitZoomMultFloor;
+            float maxD = OrbitDistanceMultMax * bodyHeight * Mathf.Max(1f, zoomHi);
             d = Mathf.Clamp(d, minD, maxD);
             ctrl.CameraDir = new Vector3(0f, 0f, -d);
         }
+
+        private struct FramingBones
+        {
+            public Vector3 RootW;
+            public Vector3 RootEuler;
+            public bool HasRoot;
+            public Vector3? Head;
+            public Vector3? Chest;
+            public Vector3? Pelvis;
+            public string Clip;
+            public string NowAnim;
+            public string Director;
+        }
+
+        private FramingBones SampleFramingBones(HScene hScene, int focusIdx)
+        {
+            var r = new FramingBones
+            {
+                Clip = "?",
+                NowAnim = "",
+                Director = OrbitPoseDirector.DebugStateName ?? ""
+            };
+            try
+            {
+                var flag = hScene.ctrlFlag;
+                if (flag?.nowAnimationInfo != null)
+                    r.NowAnim = flag.nowAnimationInfo.nameAnimation + "#id" + flag.nowAnimationInfo.id
+                                + ";down" + flag.nowAnimationInfo.nDownPtn;
+                var cha0 = OrbitHelpers.GetChaFemales(hScene);
+                var c0 = cha0 != null && cha0.Length > 0 ? cha0[0] : null;
+                if (c0?.animBody != null)
+                {
+                    var st = c0.animBody.GetCurrentAnimatorStateInfo(0);
+                    // 與 FSM SNAP 相同：優先用 shortNameHash 對不到就退 hash
+                    r.Clip = "h=" + st.fullPathHash;
+                }
+            }
+            catch { /* ignore */ }
+
+            int femaleIdx = focusIdx < 3 ? 0 : 1;
+            var cha = OrbitHelpers.GetChaFemales(hScene);
+            var body = GetBodyRoot(cha, femaleIdx);
+            if (body != null)
+            {
+                r.HasRoot = true;
+                r.RootW = body.position;
+                r.RootEuler = body.eulerAngles;
+            }
+            if (cha != null)
+            {
+                r.Head = OrbitHelpers.GetBonePosition(cha, femaleIdx, OrbitHelpers.BoneHead);
+                r.Chest = OrbitHelpers.GetBonePosition(cha, femaleIdx, OrbitHelpers.BoneChest);
+                r.Pelvis = OrbitHelpers.GetBonePosition(cha, femaleIdx, OrbitHelpers.BonePelvis);
+            }
+
+            // 補 clip 名稱（與 SNAP 一致）
+            try
+            {
+                var cArr = OrbitHelpers.GetChaFemales(hScene);
+                var c = cArr != null && femaleIdx < cArr.Length ? cArr[femaleIdx] : null;
+                if (c?.animBody != null)
+                {
+                    var st = c.animBody.GetCurrentAnimatorStateInfo(0);
+                    if (c.animBody.layerCount > 0)
+                    {
+                        // 嘗試讀取當前 state 名
+                        var clips = c.animBody.GetCurrentAnimatorClipInfo(0);
+                        if (clips != null && clips.Length > 0 && clips[0].clip != null)
+                            r.Clip = clips[0].clip.name;
+                        else
+                            r.Clip = "h=" + st.fullPathHash + ";n=" + st.normalizedTime.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+            }
+            catch { /* ignore */ }
+
+            return r;
+        }
+
+        private static string V3(Vector3 v) =>
+            "[" + F3(v.x) + "," + F3(v.y) + "," + F3(v.z) + "]";
+
+        private static string V3Opt(Vector3? v) =>
+            v.HasValue ? V3(v.Value) : "null";
+
+        /// <summary>每幀：鎖定焦點或身體根跳超過門檻立刻記 focus_jump。</summary>
+        private void MaybeDetectFocusJump(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            if (!_lastValidFocusWorld.HasValue)
+                return;
+
+            int focusIdx = BoneFocusIndex();
+            var bones = SampleFramingBones(hScene, focusIdx);
+            Vector3 focusW = _lastValidFocusWorld.Value;
+            Vector3 liveChest = bones.Chest ?? focusW;
+            Vector3 liveHead = bones.Head ?? focusW;
+            Vector3 livePelvis = bones.Pelvis ?? focusW;
+            Vector3 rootW = bones.HasRoot ? bones.RootW : focusW;
+
+            if (!_framingHavePrev)
+            {
+                _framingHavePrev = true;
+                _prevFocusW = focusW;
+                _prevRootW = rootW;
+                _prevLiveChestW = liveChest;
+                _prevLiveHeadW = liveHead;
+                _prevLivePelvisW = livePelvis;
+                return;
+            }
+
+            float dFocus = Vector3.Distance(focusW, _prevFocusW);
+            float dRoot = Vector3.Distance(rootW, _prevRootW);
+            float dChest = Vector3.Distance(liveChest, _prevLiveChestW);
+            float dHead = Vector3.Distance(liveHead, _prevLiveHeadW);
+            float dPelvis = Vector3.Distance(livePelvis, _prevLivePelvisW);
+            float errLive = bones.Chest.HasValue
+                ? Vector3.Distance(focusW, bones.Chest.Value)
+                : -1f;
+
+            bool jumped = dFocus >= FocusJumpWarnMeters || dRoot >= FocusJumpWarnMeters;
+            if (jumped)
+            {
+                string json =
+                    "{"
+                    + "\"t\":" + Time.unscaledTime.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"dFocus\":" + F3(dFocus)
+                    + ",\"dRoot\":" + F3(dRoot)
+                    + ",\"dChest\":" + F3(dChest)
+                    + ",\"dHead\":" + F3(dHead)
+                    + ",\"dPelvis\":" + F3(dPelvis)
+                    + ",\"errLiveChest\":" + F3(errLive)
+                    + ",\"locked\":" + (_lockedBasisValid ? "true" : "false")
+                    + ",\"lockGen\":" + _lockGen
+                    + ",\"lockReason\":\"" + EscJson(_lastLockReason) + "\""
+                    + ",\"lockAge\":" + F3(Time.unscaledTime - _lastLockUnscaled)
+                    + ",\"focusIdx\":" + focusIdx
+                    + ",\"clip\":\"" + EscJson(bones.Clip) + "\""
+                    + ",\"nowAnim\":\"" + EscJson(bones.NowAnim) + "\""
+                    + ",\"director\":\"" + EscJson(bones.Director) + "\""
+                    + ",\"focusW0\":" + V3(_prevFocusW)
+                    + ",\"focusW1\":" + V3(focusW)
+                    + ",\"rootW0\":" + V3(_prevRootW)
+                    + ",\"rootW1\":" + V3(rootW)
+                    + ",\"rootEul\":" + V3(bones.RootEuler)
+                    + ",\"chest0\":" + V3(_prevLiveChestW)
+                    + ",\"chest1\":" + V3(liveChest)
+                    + ",\"head1\":" + V3(liveHead)
+                    + ",\"pelvis1\":" + V3(livePelvis)
+                    + ",\"targetL\":" + V3(ctrl.TargetPos)
+                    + ",\"local\":" + V3(_lockedFocusLocal)
+                    + ",\"spin\":" + (OrbitBehaviorHub.IsOrbitCameraSpinning() ? "true" : "false")
+                    + "}";
+                OrbitStateMachineLog.Event("focus_jump", "warn", json);
+                HS2OrbitAndExciter.Log?.LogWarning("[OrbitFocusJump] " + json);
+            }
+
+            _prevFocusW = focusW;
+            _prevRootW = rootW;
+            _prevLiveChestW = liveChest;
+            _prevLiveHeadW = liveHead;
+            _prevLivePelvisW = livePelvis;
+        }
+
+        /// <summary>
+        /// 診斷「主角出畫面」：相對空間 + 根／live 骨。0.5s 一次。
+        /// </summary>
+        private void MaybeLogFramingDiag(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            float now = Time.unscaledTime;
+            if (now < _nextFramingLogUnscaled)
+                return;
+            _nextFramingLogUnscaled = now + 0.5f;
+
+            try
+            {
+                var cam = ctrl.thisCamera != null ? ctrl.thisCamera : Camera.main;
+                Vector3 camWorld = cam != null ? cam.transform.position : Vector3.zero;
+                Vector3 camFwd = cam != null ? cam.transform.forward : Vector3.forward;
+                Vector3 focusWorld = _lastValidFocusWorld ?? Vector3.zero;
+                Vector3 toFocus = focusWorld - camWorld;
+                float dist = toFocus.magnitude;
+                float along = dist > 1e-4f ? Vector3.Dot(toFocus.normalized, camFwd) : 0f;
+                Vector3 targetLocal = ctrl.TargetPos;
+                Vector3 camDir = ctrl.CameraDir;
+                Vector3 rot = cam != null ? cam.transform.eulerAngles : ctrl.CameraAngle;
+                int focusIdx = BoneFocusIndex();
+                var cha = OrbitHelpers.GetChaFemales(hScene);
+                float bodyH = cha != null ? OrbitHelpers.GetBodyHeight(cha, focusIdx < 3 ? 0 : 1) : 0f;
+                bool inFront = along > 0.05f;
+                bool approxInView = false;
+                if (cam != null && dist > 1e-3f)
+                {
+                    Vector3 vp = cam.WorldToViewportPoint(focusWorld);
+                    approxInView = vp.z > 0f && vp.x > -0.05f && vp.x < 1.05f && vp.y > -0.05f && vp.y < 1.05f;
+                }
+
+                var bones = SampleFramingBones(hScene, focusIdx);
+                float errChest = bones.Chest.HasValue
+                    ? Vector3.Distance(focusWorld, bones.Chest.Value)
+                    : -1f;
+                float errHead = bones.Head.HasValue
+                    ? Vector3.Distance(focusWorld, bones.Head.Value)
+                    : -1f;
+
+                string json =
+                    "{"
+                    + "\"t\":" + now.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"axis\":\"" + OrbitBodyAxis.ModeLabel(_orbitAxisMode) + "\""
+                    + ",\"phase\":" + _orbitPhase
+                    + ",\"az\":" + (_startRelativeAzimuth + _orbitAccumulatedDegrees).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"focusIdx\":" + focusIdx
+                    + ",\"zoom\":" + _circleZoomMult.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"bodyH\":" + bodyH.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"camW\":" + V3(camWorld)
+                    + ",\"focusW\":" + V3(focusWorld)
+                    + ",\"toFocus\":" + V3(toFocus)
+                    + ",\"dist\":" + F3(dist)
+                    + ",\"dotFwd\":" + F3(along)
+                    + ",\"inFront\":" + (inFront ? "true" : "false")
+                    + ",\"inView\":" + (approxInView ? "true" : "false")
+                    + ",\"targetL\":" + V3(targetLocal)
+                    + ",\"camDir\":" + V3(camDir)
+                    + ",\"rot\":" + V3(rot)
+                    + ",\"spin\":" + (OrbitBehaviorHub.IsOrbitCameraSpinning() ? "true" : "false")
+                    + ",\"locked\":" + (_lockedBasisValid ? "true" : "false")
+                    + ",\"lockGen\":" + _lockGen
+                    + ",\"lockReason\":\"" + EscJson(_lastLockReason) + "\""
+                    + ",\"lockAge\":" + F3(now - _lastLockUnscaled)
+                    + ",\"local\":" + V3(_lockedFocusLocal)
+                    + ",\"rootW\":" + (bones.HasRoot ? V3(bones.RootW) : "null")
+                    + ",\"rootEul\":" + (bones.HasRoot ? V3(bones.RootEuler) : "null")
+                    + ",\"liveHead\":" + V3Opt(bones.Head)
+                    + ",\"liveChest\":" + V3Opt(bones.Chest)
+                    + ",\"livePelvis\":" + V3Opt(bones.Pelvis)
+                    + ",\"errChest\":" + F3(errChest)
+                    + ",\"errHead\":" + F3(errHead)
+                    + ",\"clip\":\"" + EscJson(bones.Clip) + "\""
+                    + ",\"nowAnim\":\"" + EscJson(bones.NowAnim) + "\""
+                    + ",\"director\":\"" + EscJson(bones.Director) + "\""
+                    + "}";
+
+                OrbitStateMachineLog.Event("framing", approxInView ? "ok" : "out", json);
+                if (!approxInView || !inFront || errChest > FocusJumpWarnMeters)
+                    HS2OrbitAndExciter.Log?.LogWarning("[OrbitFraming] " + json);
+            }
+            catch (System.Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"[OrbitFraming] log failed: {ex.Message}");
+            }
+        }
+
+        private static string F3(float v) =>
+            v.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>
         /// Mirror vanilla <c>GlobalMethod.CameraKeyCtrl</c> in LateUpdate before orbit writes yaw so focus keys apply in the same frame as <see cref="CameraControl_Ver2.LateUpdate"/>.
@@ -863,7 +1172,7 @@ namespace HS2OrbitAndExciter
 
             SetDistanceForFocus(ctrl, chaFemales, newOpt, _circleZoomMult);
             _currentViewOption = newOpt;
-            InvalidateLockedBasis();
+            InvalidateLockedBasis("hotkey_focus");
             // 1A：立刻用骨焦點
             ApplyBoneFocusOnly(hScene, ctrl);
         }
@@ -925,7 +1234,7 @@ namespace HS2OrbitAndExciter
                 _currentViewOption = candidates[UnityEngine.Random.Range(0, candidates.Count)];
             else
                 _currentViewOption = current;
-            InvalidateLockedBasis();
+            InvalidateLockedBasis("randomize_view");
             ApplyCurrentViewOption(hScene, ctrl);
         }
 
@@ -997,7 +1306,8 @@ namespace HS2OrbitAndExciter
                 _circleZoomMult = 1f;
                 _plannedZoomMult = null;
                 _lastValidFocusWorld = null;
-                InvalidateLockedBasis();
+                InvalidateLockedBasis("orbit_enable");
+                _framingHavePrev = false;
                 _previousCameraUpWorld = null;
                 OrbitFloorNormal.ResetCache();
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
