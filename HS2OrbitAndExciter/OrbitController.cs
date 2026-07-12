@@ -11,7 +11,7 @@ namespace HS2OrbitAndExciter
     /// <summary>
     /// Drives orbit camera in H scene: Ctrl+Shift+O. Each <b>rotation</b> is one 360° leg around the body torso axis
     /// (head−pelvis); inbound reverses the same relative azimuth. Each full out+in is one <b>round-trip</b>.
-    /// Assist ≠ spinning: C toggles camera spin only. Cycle side effects go to <see cref="OrbitCycleCoordinator"/>.
+    /// Assist ≠ spinning: O toggles camera spin only. Cycle side effects go to <see cref="OrbitCycleCoordinator"/>.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class OrbitController : MonoBehaviour
@@ -300,7 +300,19 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            // §11：C＝只停／恢復環視轉動（協助照常；與 B／N 同排，避開 Item Layer Edit 的 V）
+            // YUIOP：I＝狀態面板；O＝只停／恢復環視轉動（協助照常）
+            if (Input.GetKeyDown(OrbitManualHotkeys.StatusHudKey))
+            {
+                if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value != false
+                    && (OrbitBehaviorHub.IsOrbitAssistActive()
+                        || OrbitVoiceTour.IsActive
+                        || (OrbitVoiceTour.Enabled && hScene != null)))
+                {
+                    OrbitStatusHud.SetPanelVisible(!OrbitStatusHud.GetPanelVisible());
+                    _lastHotkeyTime = Time.unscaledTime;
+                }
+                return;
+            }
             if (Input.GetKeyDown(OrbitManualHotkeys.StopOrbitCameraKey)
                 && OrbitBehaviorHub.IsOrbitAssistActive())
             {

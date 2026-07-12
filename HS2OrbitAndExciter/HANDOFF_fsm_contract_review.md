@@ -73,8 +73,9 @@ L＝手動選池；G＝換角；環視／衣／刺青等＝圖外正交
 ## §11 實作摘要（已完成）
 
 - `OrbitBodyAxis`：軀幹軸（頭−骨盆）＋面向；相對角 |Δ|≥60° 非整數；焦點俯仰。
-- `OrbitBehaviorHub`：協助 ≠ 轉動；開協助預設開始轉；**C** 只停／恢復轉動（與 B／N 同排；避開 Item Layer Edit 的 V）。
+- `OrbitBehaviorHub`：協助 ≠ 轉動；開協助預設開始轉；**O** 只停／恢復轉動（YUIOP 列）。
 - `OrbitController`：身體空間寫 `Rot`／`TargetPos`；每圈 zoom；預算下一圈；骨焦點優先；`ConfigVanish＝Shield`；停轉仍綁焦點。
+- **YUIOP**：Y／U＝Preg+ 肚子±；I＝狀態面板；O＝停轉；P＝清腹（R 還給原版相機 Reset）。
 - 穿牆：只強制 Shield，**未**自製 Linecast／補沙發 vanish 清單。
 
 ---
@@ -85,9 +86,9 @@ L＝手動選池；G＝換角；環視／衣／刺青等＝圖外正交
 
 **遊戲內建議驗：**
 1. Ctrl+Shift+O 開協助→相機繞身體軸；躺姿仍繞軀幹軸非鉛垂。
-2. C 停轉：流程／FEEL 續走；HUD 顯示「停轉」；停轉時換衣暫停。
-3. C 再按恢復轉；換焦（Q／W／E）不丟人；每圈相對角與遠近有變。
-4. 換衣仍綁圈數；穿牆靠 Shield。
+2. O 停轉：流程／FEEL 續走；HUD 顯示「停轉」；停轉時換衣暫停。
+3. O 再按恢復轉；換焦（Q／W／E）不丟人；每圈相對角與遠近有變。
+4. 換衣仍綁圈數；穿牆靠 Shield。P 清腹；R 應恢復原版相機重設。
 
 ---
 
@@ -118,7 +119,7 @@ L＝手動選池；G＝換角；環視／衣／刺青等＝圖外正交
 
 ## 對使用者說話模板
 
-契約實作切片已全部落地。請遊戲內驗 §11；停環視鍵為 **C**（ZXCVBNM 同排）。
+契約實作切片已全部落地。請遊戲內驗 §11；YUIOP＝Y／U 肚子±、I 面板、O 停轉、P 清腹。
 
 **給新對話的完整實作 PROMPT（含多 commit／push、重用既有碼）：**  
 [`PROMPT_fsm_implement.md`](PROMPT_fsm_implement.md)

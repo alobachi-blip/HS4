@@ -87,10 +87,10 @@ namespace HS2OrbitAndExciter
             GUILayout.Space(6);
             GUILayout.Label("使用方式", GUI.skin.box);
             GUILayout.Label(
-                "Ctrl+Shift+O：開啟／關閉環視協助（流程協助＋預設開始轉相機）。開啟後左下角可看狀態；Ctrl+Shift+I 切換狀態面板顯示。",
+                "Ctrl+Shift+O：開啟／關閉環視協助（流程協助＋預設開始轉相機）。開啟後左下角可看狀態；I 或 Ctrl+Shift+I 切換狀態面板顯示。",
                 label);
             GUILayout.Label(
-                "協助與轉動可分開：開協助後按 C 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
+                "協助與轉動可分開：開協助後按 O 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
                 label);
 
             // ─── 2. 環視相機 ───────────────────────────────────
@@ -107,7 +107,7 @@ namespace HS2OrbitAndExciter
             {
                 HS2OrbitAndExciter.OrbitStatusHudEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.OrbitStatusHudEnabled.Value,
-                    " 啟用左下角環視狀態面板（繁中；環視開啟時可用 Ctrl+Shift+I 切換顯示）");
+                    " 啟用左下角環視狀態面板（繁中；環視開啟時可用 I 或 Ctrl+Shift+I 切換顯示）");
             }
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == true)
             {
@@ -166,17 +166,17 @@ namespace HS2OrbitAndExciter
                 "G＝換女角色（池會排除同性格卡；短時間連換會降權、久留會優先）。H＝換套裝。J＝亂數穿著階段。K＝切換姿勢鏡頭。",
                 label);
             GUILayout.Label(
-                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。C＝只停／恢復環視轉動（不關協助；與 B／N 同排）。",
+                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。",
                 label);
             GUILayout.Label(
                 OrbitManualHotkeys.PregnancyHudLegend
-                + " — Y／U 由 PregnancyPlus 調整肚子；R 由本插件強制清空肚子（含 H 場景膨脹）。",
+                + " — Y／U 由 PregnancyPlus；I／O／P 本外掛（I＝面板、O＝停轉、P＝清腹）。R 留給原版相機重設。",
                 label);
             if (HS2OrbitAndExciter.CumflationEnabled != null)
             {
                 HS2OrbitAndExciter.CumflationEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.CumflationEnabled.Value,
-                    " 內射時肚子脹一級；愛撫／女女落地時肚子消一級（PregnancyPlus；R 仍可清空）");
+                    " 內射時肚子脹一級；愛撫／女女落地時肚子消一級（PregnancyPlus；P 可清空）");
             }
 
             // ─── 4. 脫力 ───────────────────────────────────────

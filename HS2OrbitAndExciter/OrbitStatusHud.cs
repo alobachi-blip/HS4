@@ -3,7 +3,7 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Minimal orbit status overlay (Traditional Chinese). Ctrl+Shift+I toggles while orbit is on.
+    /// Minimal orbit status overlay (Traditional Chinese). I or Ctrl+Shift+I toggles while orbit is on.
     /// </summary>
     public class OrbitStatusHud : MonoBehaviour
     {
