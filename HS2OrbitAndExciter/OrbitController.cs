@@ -64,14 +64,24 @@ namespace HS2OrbitAndExciter
         private float _circleZoomMult = 1f;
         private float? _plannedZoomMult;
 
+        /// <summary>平滑後的焦點／軸向，降低手部與姿勢動畫造成的鏡頭晃動。</summary>
+        private bool _smoothBasisValid;
+        private Vector3 _smoothFocusWorld;
+        private Vector3 _smoothTorsoUp = Vector3.up;
+        private Vector3 _smoothFacing = Vector3.forward;
+        private Vector3 _smoothRight = Vector3.right;
+        /// <summary>焦點跟隨時間常數（秒）；愈大愈穩、愈慢跟動作。</summary>
+        private const float CameraFocusSmoothSeconds = 1.15f;
+        /// <summary>繞軸方向時間常數（秒）；比焦點更長，避免軀幹／手臂晃動帶轉鏡頭。</summary>
+        private const float CameraAxisSmoothSeconds = 2.6f;
+
         private static float GetOrbitFeelAddPerSecond()
         {
-            // §3／§21：感度有最小值，約 10 秒推進一循環階段（0.1／秒）
-            const float MinPerStageBudget = 0.1f;
-            var v = HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? MinPerStageBudget;
-            if (v <= 0f)
-                return MinPerStageBudget; // 協助開時不允許完全不加（避免卡死）
-            return Mathf.Max(v, MinPerStageBudget);
+            // 尊重使用者設定（含 0.001）；0＝不加（只靠遊戲／滑鼠）
+            var v = HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f;
+            if (v < 0f)
+                return 0f;
+            return v;
         }
 
         private const float OrbitSpeedAddPerSecond = 0.35f;
@@ -497,6 +507,7 @@ namespace HS2OrbitAndExciter
                 }
                 _plannedAxisMode = null;
                 _plannedStartAzimuth = null;
+                ResetSmoothBasis();
                 OrbitStateMachineLog.Event("環視", "換軸", OrbitBodyAxis.ModeLabel(_orbitAxisMode));
             }
         }
@@ -576,10 +587,11 @@ namespace HS2OrbitAndExciter
                 return;
 
             int focusIdx = BoneFocusIndex();
-            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
-            if (!basis.Valid)
+            var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!live.Valid)
                 return;
 
+            var basis = SmoothBasis(live);
             _lastValidFocusWorld = basis.FocusWorld;
             Vector3 localFocus = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
             ctrl.TargetPos = localFocus;
@@ -606,12 +618,47 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || ctrl.transBase == null)
                 return;
             int focusIdx = BoneFocusIndex();
-            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
-            if (!basis.Valid)
+            var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!live.Valid)
                 return;
+            var basis = SmoothBasis(live);
             _lastValidFocusWorld = basis.FocusWorld;
             ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
             SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
+        /// <summary>指數平滑焦點與軀幹軸；軸向比焦點更鈍，過濾姿勢／手部高頻晃動。</summary>
+        private OrbitBodyAxis.Basis SmoothBasis(OrbitBodyAxis.Basis live)
+        {
+            if (!_smoothBasisValid)
+            {
+                _smoothFocusWorld = live.FocusWorld;
+                _smoothTorsoUp = live.TorsoUp;
+                _smoothFacing = live.Facing;
+                _smoothRight = live.Right;
+                _smoothBasisValid = true;
+                return live;
+            }
+
+            float dt = Time.deltaTime;
+            float kFocus = 1f - Mathf.Exp(-dt / Mathf.Max(0.05f, CameraFocusSmoothSeconds));
+            float kAxis = 1f - Mathf.Exp(-dt / Mathf.Max(0.05f, CameraAxisSmoothSeconds));
+            _smoothFocusWorld = Vector3.Lerp(_smoothFocusWorld, live.FocusWorld, kFocus);
+            _smoothTorsoUp = Vector3.Slerp(_smoothTorsoUp, live.TorsoUp, kAxis).normalized;
+            _smoothFacing = Vector3.Slerp(_smoothFacing, live.Facing, kAxis).normalized;
+            // 由平滑後的 up／facing 重建 right，保持正交
+            _smoothRight = Vector3.Cross(_smoothTorsoUp, _smoothFacing).normalized;
+            if (_smoothRight.sqrMagnitude < 1e-6f)
+                _smoothRight = live.Right;
+            _smoothFacing = Vector3.Cross(_smoothRight, _smoothTorsoUp).normalized;
+
+            return new OrbitBodyAxis.Basis(
+                _smoothFocusWorld, _smoothTorsoUp, _smoothFacing, _smoothRight, true);
+        }
+
+        private void ResetSmoothBasis()
+        {
+            _smoothBasisValid = false;
         }
 
         private static float NormalizeDeg(float deg)
@@ -765,6 +812,7 @@ namespace HS2OrbitAndExciter
 
             SetDistanceForFocus(ctrl, chaFemales, newOpt, _circleZoomMult);
             _currentViewOption = newOpt;
+            ResetSmoothBasis();
             // 1A：立刻用骨焦點
             ApplyBoneFocusOnly(hScene, ctrl);
         }
@@ -826,6 +874,7 @@ namespace HS2OrbitAndExciter
                 _currentViewOption = candidates[UnityEngine.Random.Range(0, candidates.Count)];
             else
                 _currentViewOption = current;
+            ResetSmoothBasis();
             ApplyCurrentViewOption(hScene, ctrl);
         }
 
@@ -897,6 +946,7 @@ namespace HS2OrbitAndExciter
                 _circleZoomMult = 1f;
                 _plannedZoomMult = null;
                 _lastValidFocusWorld = null;
+                ResetSmoothBasis();
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);

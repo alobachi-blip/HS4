@@ -1,3 +1,4 @@
+using System.Globalization;
 using UnityEngine;
 
 namespace HS2OrbitAndExciter
@@ -39,6 +40,8 @@ namespace HS2OrbitAndExciter
             if (Event.current != null && Event.current.type == EventType.KeyDown
                 && Event.current.keyCode == MenuHotkey && Event.current.control && Event.current.shift)
             {
+                if (_visible)
+                    FlushFeelFromField();
                 _visible = !_visible;
                 if (_visible) _needSyncFromConfig = true;
                 Event.current.Use();
@@ -51,7 +54,8 @@ namespace HS2OrbitAndExciter
                 _orbitTimeStr = HS2OrbitAndExciter.OrbitTimePer360.Value.ToString("F1");
                 _orbitCountRandomStr = (HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0).ToString();
                 _excitementDelayStr = (HS2OrbitAndExciter.ExcitementTriggerDelaySeconds?.Value ?? 0f).ToString("F1");
-                _feelAddPerSecStr = (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f).ToString("F2");
+                _feelAddPerSecStr = (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f)
+                    .ToString("G", CultureInfo.InvariantCulture);
                 _orbitDistHeadStr = (HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 1.4f).ToString("F2");
                 _orbitDistChestStr = (HS2OrbitAndExciter.OrbitDistanceChest?.Value ?? 1.4f).ToString("F2");
                 _orbitDistPelvisStr = (HS2OrbitAndExciter.OrbitDistancePelvis?.Value ?? 1.4f).ToString("F2");
@@ -221,17 +225,14 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit != null)
             {
                 GUILayout.Label(
-                    "環視開啟時，每秒自動累加感度條（0＝只靠遊戲／滑鼠；0.1≈約 10 秒滿條）。",
+                    "環視開啟時，每秒自動累加感度條（0＝只靠遊戲／滑鼠；0.1≈約 10 秒滿條；可用 0.001 很慢）。請用小數點（例 0.001）。",
                     label);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("每秒感度增加量：", label, GUILayout.Width(160));
                 GUI.SetNextControlName("FeelAddPerSec");
-                _feelAddPerSecStr = GUILayout.TextField(_feelAddPerSecStr, GUILayout.Width(60));
-                if (float.TryParse(_feelAddPerSecStr, out float feel) && feel >= 0f && feel <= 5f)
-                {
-                    if (feel > 0f && feel < 0.01f) feel = 0.01f;
+                _feelAddPerSecStr = GUILayout.TextField(_feelAddPerSecStr, GUILayout.Width(80));
+                if (TryParseFloatInvariant(_feelAddPerSecStr, out float feel) && feel >= 0f && feel <= 5f)
                     HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.Value = feel;
-                }
                 GUILayout.EndHorizontal();
             }
             if (HS2OrbitAndExciter.ExcitementTriggerDelaySeconds != null)
@@ -438,10 +439,33 @@ namespace HS2OrbitAndExciter
             GUILayout.EndScrollView();
 
             if (GUILayout.Button("關閉"))
+            {
+                FlushFeelFromField();
                 _visible = false;
+            }
 
             GUILayout.EndVertical();
             GUI.DragWindow(new Rect(0, 0, _windowRect.width, 20));
+        }
+
+        /// <summary>用不變地區解析小數（接受 0.001 與 0,001），避免地區設定吃掉小數點。</summary>
+        private static bool TryParseFloatInvariant(string text, out float value)
+        {
+            value = 0f;
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+            string s = text.Trim().Replace(',', '.');
+            return float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        private void FlushFeelFromField()
+        {
+            if (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit == null)
+                return;
+            if (!TryParseFloatInvariant(_feelAddPerSecStr, out float feel) || feel < 0f || feel > 5f)
+                return;
+            HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.Value = feel;
+            try { HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.ConfigFile.Save(); } catch { /* ignore */ }
         }
 
         private void DrawDistField(
