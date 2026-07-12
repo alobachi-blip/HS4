@@ -5,9 +5,9 @@
 ### §11 環視身體軸向（切片 9）
 
 - 新增 `OrbitBodyAxis`：以頭−骨盆為軀幹軸＋面向建身體空間；相對角 |Δ|≥60°、非整數；依焦點小幅俯仰。
-- 協助 ≠ 轉動：`OrbitBehaviorHub` 拆 `_orbitAssistActive`／`_orbitCameraSpinning`；**V** 只停／恢復轉動（流程／FEEL 續走）。
+- 協助 ≠ 轉動：`OrbitBehaviorHub` 拆 `_orbitAssistActive`／`_orbitCameraSpinning`；**C** 只停／恢復轉動（與 B／N 同排；避開 Item Layer Edit 的 V）。
 - `OrbitController`：繞身體軸寫 `Rot`＋骨焦點；每圈換相對角與 zoom；空檔預算下一圈；姿預設相機機率≈0.05；貫徹 `ConfigVanish＝Shield`；停轉仍綁焦點。
-- HUD：「停轉」與「換角中」分開；選單說明協助／轉動可分、V 鍵、軀幹軸用語。
+- HUD：「停轉」與「換角中」分開；選單說明協助／轉動可分、C 鍵、軀幹軸用語。
 - 未做：自製 Linecast、補沙發 vanish 清單（契約優先既有 Shield）。
 
 ### FSM 契約實作（切片 1～8＋設定選單）

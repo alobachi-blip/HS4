@@ -90,7 +90,7 @@ namespace HS2OrbitAndExciter
                 "Ctrl+Shift+O：開啟／關閉環視協助（流程協助＋預設開始轉相機）。開啟後左下角可看狀態；Ctrl+Shift+I 切換狀態面板顯示。",
                 label);
             GUILayout.Label(
-                "協助與轉動可分開：開協助後按 V 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
+                "協助與轉動可分開：開協助後按 C 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
                 label);
 
             // ─── 2. 環視相機 ───────────────────────────────────
@@ -166,7 +166,7 @@ namespace HS2OrbitAndExciter
                 "G＝換女角色（池會排除同性格卡；短時間連換會降權、久留會優先）。H＝換套裝。J＝亂數穿著階段。K＝切換姿勢鏡頭。",
                 label);
             GUILayout.Label(
-                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。V＝只停／恢復環視轉動（不關協助）。",
+                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。C＝只停／恢復環視轉動（不關協助；與 B／N 同排）。",
                 label);
             GUILayout.Label(
                 OrbitManualHotkeys.PregnancyHudLegend
