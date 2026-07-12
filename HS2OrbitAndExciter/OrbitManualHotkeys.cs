@@ -11,29 +11,46 @@ namespace HS2OrbitAndExciter
         internal const KeyCode PoseCameraKey = KeyCode.K;
         internal const KeyCode PoseKey = KeyCode.L;
 
-        /// <summary>YUIOP 列：I＝強制清空肚子（PregnancyPlus）；R 還給原版相機 Reset。</summary>
         internal const KeyCode BellyResetKey = KeyCode.I;
-        /// <summary>YUIOP 列：O＝停止／恢復環視轉動（不關協助；Ctrl+Shift+O 仍為開／關協助）。</summary>
         internal const KeyCode StopOrbitCameraKey = KeyCode.O;
-        /// <summary>YUIOP 列：P＝切換狀態面板（Ctrl+Shift+I 仍可用）。</summary>
         internal const KeyCode StatusHudKey = KeyCode.P;
 
-        /// <summary>Force leave Idle/AfterIdle — 語意改為「往前推」（依格：開幹／加速／選池）。</summary>
         internal const KeyCode StartSexKey = KeyCode.N;
-        /// <summary>T = enable + place next stamp; Shift+T = disable.</summary>
         internal const KeyCode TattooKey = KeyCode.T;
-        /// <summary>Restore bust size to H-enter / G-swap baseline.</summary>
         internal const KeyCode BustRestoreKey = KeyCode.B;
 
-        /// <summary>熱鍵圖例（說清楚、不自創縮詞）。</summary>
+        /// <summary>設定畫面最上方：完整熱鍵一覽（使用者第一眼看到）。</summary>
+        internal const string SettingsHotkeysBlock =
+            "【總開關】\n"
+            + "  Ctrl+Shift+O　開／關環視協助\n"
+            + "  Ctrl+Shift+P　開／關本設定\n"
+            + "  Ctrl+Shift+I　或　P　顯示／隱藏左下狀態\n"
+            + "\n"
+            + "【環視中（勿同時按 Ctrl／Shift／Alt）】\n"
+            + "  O　暫停／繼續相機轉動（協助仍開著）\n"
+            + "  Q／W／E　焦點＝頭／胸／骨盆\n"
+            + "  Shift+Q／W／E　第二女角焦點\n"
+            + "\n"
+            + "【流程】\n"
+            + "  G　換女角　 H　換套裝　 J　亂數穿著\n"
+            + "  K　換鏡頭　 L　換姿勢　 N　往前推（開幹／加速／選池）\n"
+            + "\n"
+            + "【特效／肚子】\n"
+            + "  T　貼下一張刺青　 Shift+T　關閉自動刺青\n"
+            + "  B　胸部回復基準\n"
+            + "  Y／U　肚子＋／－（需 PregnancyPlus）\n"
+            + "  I　清空肚子";
+
+        /// <summary>HUD 精簡熱鍵提醒。</summary>
+        internal const string HudLegendCompact =
+            "G女角 H套裝 J穿著 K鏡頭 L姿勢 N推進 | O停轉 P面板 | T刺青 B胸";
+
         internal const string HudLegend =
             "G換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
 
-        /// <summary>YUIOP 列：Y／U 由 Preg+；I／O／P 本外掛。</summary>
         internal const string PregnancyHudLegend =
-            "Y肚子+·U肚子-·I清空肚子·O停／恢復環視·P狀態面板";
+            "Y肚子+·U肚子-·I清空·O停轉·P面板";
 
-        /// <summary>Orgasm FX line prefix for HUD / settings.</summary>
-        internal const string OrgasmFxHudPrefix = "高潮";
+        internal const string OrgasmFxHudPrefix = "特效";
     }
 }

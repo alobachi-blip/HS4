@@ -1,37 +1,32 @@
-using System.Globalization;
 using UnityEngine;
 
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// In-game settings window. Toggle with Ctrl+Shift+P. Values write to BepInEx config (auto-saved).
+    /// In-game settings. Ctrl+Shift+P. Sliders for numeric values; hotkeys listed first.
     /// </summary>
     public class OrbitSettingsGUI : MonoBehaviour
     {
         private const KeyCode MenuHotkey = KeyCode.P;
+        /// <summary>上下限跨度超過此倍率時改用數值框（並顯示上下限）。</summary>
+        private const float MaxSliderSpanRatio = 80f;
+
         private bool _visible;
-        private bool _needSyncFromConfig;
-        private Rect _windowRect = new Rect(80, 60, 500, 680);
+        private Rect _windowRect = new Rect(80, 60, 520, 700);
         private Vector2 _scroll;
         private GUIStyle? _labelStyle;
+        private GUIStyle? _sectionStyle;
         private bool _stylesInitialized;
-
-        private string _orbitTimeStr = "";
-        private string _orbitCountRandomStr = "";
-        private string _excitementDelayStr = "";
-        private string _feelAddPerSecStr = "";
-        private string _orbitDistHeadStr = "";
-        private string _orbitDistChestStr = "";
-        private string _orbitDistPelvisStr = "";
-        private string _orbitZoomNearStr = "";
-        private string _orbitZoomFarStr = "";
-
         private bool _lastOverrideFaintness;
 
         private void InitStyles()
         {
             if (_stylesInitialized) return;
             _labelStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
+            _sectionStyle = new GUIStyle(GUI.skin.box)
+            {
+                padding = new RectOffset(8, 8, 4, 4)
+            };
             _stylesInitialized = true;
         }
 
@@ -40,42 +35,22 @@ namespace HS2OrbitAndExciter
             if (Event.current != null && Event.current.type == EventType.KeyDown
                 && Event.current.keyCode == MenuHotkey && Event.current.control && Event.current.shift)
             {
-                if (_visible)
-                    FlushFeelFromField();
                 _visible = !_visible;
-                if (_visible) _needSyncFromConfig = true;
                 Event.current.Use();
             }
             if (!_visible) return;
-
-            if (Event.current != null && Event.current.type == EventType.Layout && _needSyncFromConfig
-                && HS2OrbitAndExciter.OrbitTimePer360 != null)
-            {
-                _orbitTimeStr = HS2OrbitAndExciter.OrbitTimePer360.Value.ToString("F1");
-                _orbitCountRandomStr = (HS2OrbitAndExciter.OrbitCountBeforeRandom?.Value ?? 0).ToString();
-                _excitementDelayStr = (HS2OrbitAndExciter.ExcitementTriggerDelaySeconds?.Value ?? 0f).ToString("F1");
-                _feelAddPerSecStr = (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f)
-                    .ToString("G", CultureInfo.InvariantCulture);
-                _orbitDistHeadStr = (HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 1.4f).ToString("F2");
-                _orbitDistChestStr = (HS2OrbitAndExciter.OrbitDistanceChest?.Value ?? 1.4f).ToString("F2");
-                _orbitDistPelvisStr = (HS2OrbitAndExciter.OrbitDistancePelvis?.Value ?? 1.4f).ToString("F2");
-                _orbitZoomNearStr = (HS2OrbitAndExciter.OrbitZoomNearMult?.Value ?? 0.65f).ToString("F2");
-                _orbitZoomFarStr = (HS2OrbitAndExciter.OrbitZoomFarMult?.Value ?? 1.75f).ToString("F2");
-                _lastOverrideFaintness = HS2OrbitAndExciter.OverrideFaintness?.Value ?? false;
-                _needSyncFromConfig = false;
-            }
 
             InitStyles();
             float maxH = Mathf.Max(280f, Screen.height - 48f);
             if (_windowRect.height > maxH)
                 _windowRect.height = maxH;
             if (_windowRect.width < 480f)
-                _windowRect.width = 500f;
+                _windowRect.width = 520f;
             _windowRect = GUILayout.Window(
                 9001,
                 _windowRect,
                 DrawWindow,
-                "環視與流程協助 — 設定（Ctrl+Shift+P）");
+                "環視協助 — 設定（Ctrl+Shift+P）");
         }
 
         private void DrawWindow(int id)
@@ -86,131 +61,82 @@ namespace HS2OrbitAndExciter
             float scrollH = Mathf.Max(160f, _windowRect.height - 56f);
             _scroll = GUILayout.BeginScrollView(_scroll, false, true, GUILayout.Height(scrollH));
 
-            GUILayout.BeginVertical(GUI.skin.box);
-            foreach (var line in PluginBuildIdentity.GetGuiLines())
-                GUILayout.Label(line, label);
-            GUILayout.EndVertical();
+            // ─── 熱鍵（開頭）───────────────────────────────────
+            Section("可用熱鍵");
+            GUILayout.Label(OrbitManualHotkeys.SettingsHotkeysBlock, label);
 
-            // ─── 1. 使用方式 ───────────────────────────────────
-            GUILayout.Space(6);
-            GUILayout.Label("使用方式", GUI.skin.box);
-            GUILayout.Label(
-                "Ctrl+Shift+O：開啟／關閉環視協助（流程協助＋預設開始轉相機）。開啟後左下角可看狀態；P 或 Ctrl+Shift+I 切換狀態面板顯示。",
-                label);
-            GUILayout.Label(
-                "協助與轉動可分開：開協助後按 O 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
-                label);
-
-            // ─── 2. 環視相機 ───────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("環視相機", GUI.skin.box);
-            GUILayout.Label(
-                "名詞：單向繞當前軸 360°＝一次「旋轉」；去程加回程＝一次「迴轉」。三種繞軸輪替（軀幹／鉛垂／側向），與上次不同；無 zoom／俯仰搖晃。",
-                label);
-            GUILayout.Label(
-                "開協助時擋手控相機；關掉 Ctrl+Shift+O 後還原滑鼠／鍵盤調視角。穿牆：每張地圖只掃描一次並存 map_vanish 快取。",
-                label);
-
+            // ─── 狀態面板 ───────────────────────────────────────
+            Section("狀態面板（左下角）");
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
             {
                 HS2OrbitAndExciter.OrbitStatusHudEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.OrbitStatusHudEnabled.Value,
-                    " 啟用左下角環視狀態面板（繁中；環視開啟時可用 P 或 Ctrl+Shift+I 切換顯示）");
+                    " 顯示狀態面板（環視／語音巡禮進行中）");
             }
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == true)
             {
                 bool pv = OrbitStatusHud.GetPanelVisible();
-                pv = GUILayout.Toggle(pv, " 目前顯示狀態面板");
+                pv = GUILayout.Toggle(pv, " 目前正在顯示");
                 OrbitStatusHud.SetPanelVisible(pv);
             }
 
-            if (HS2OrbitAndExciter.OrbitTimePer360 != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("轉動速度：單向 360° 秒數（越小越快；預設 10）：", label, GUILayout.Width(300));
-                GUI.SetNextControlName("OrbitTimePer360");
-                _orbitTimeStr = GUILayout.TextField(_orbitTimeStr, GUILayout.Width(60));
-                if (float.TryParse(_orbitTimeStr, out float v) && v > 0.1f && v <= 120f)
-                    HS2OrbitAndExciter.OrbitTimePer360.Value = v;
-                GUILayout.EndHorizontal();
-            }
+            // ─── 環視相機 ───────────────────────────────────────
+            Section("環視相機");
+            GUILayout.Label("開啟協助後相機自動環繞；關掉協助才恢復手動調視角。", label);
 
-            if (HS2OrbitAndExciter.OrbitCountBeforeRandom != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("每幾次旋轉亂數焦點與水平角（0＝關閉亂數）：", label, GUILayout.Width(280));
-                GUI.SetNextControlName("OrbitCountBeforeRandom");
-                _orbitCountRandomStr = GUILayout.TextField(_orbitCountRandomStr, GUILayout.Width(60));
-                if (int.TryParse(_orbitCountRandomStr, out int n) && n >= 0 && n <= 99)
-                    HS2OrbitAndExciter.OrbitCountBeforeRandom.Value = n;
-                GUILayout.EndHorizontal();
-            }
+            DrawFloatControl(
+                "轉一圈要幾秒",
+                "越小越快",
+                HS2OrbitAndExciter.OrbitTimePer360,
+                0.5f, 60f, 0.1f, "F1", "秒");
+
+            DrawIntControl(
+                "幾圈後亂數換焦點／角度",
+                "0＝不亂數",
+                HS2OrbitAndExciter.OrbitCountBeforeRandom,
+                0, 20);
 
             if (HS2OrbitAndExciter.ClothesChangeEnabled != null)
             {
                 HS2OrbitAndExciter.ClothesChangeEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.ClothesChangeEnabled.Value,
-                    " 依上方「每幾次旋轉」切換衣物階段（次數為 0 時改為每迴轉一次）");
+                    " 依上面圈數順便換衣物階段（圈數為 0 時改為來回一趟換一次）");
             }
 
-            GUILayout.Label("焦點基準距離（全身長倍率，建議 1.35～3；每圈 zoom 以此為 1.0）", label);
-            DrawDistField("頭部焦點距離", "OrbitDistHead", ref _orbitDistHeadStr, HS2OrbitAndExciter.OrbitDistanceHead);
-            DrawDistField("胸部焦點距離", "OrbitDistChest", ref _orbitDistChestStr, HS2OrbitAndExciter.OrbitDistanceChest);
-            DrawDistField("骨盆焦點距離", "OrbitDistPelvis", ref _orbitDistPelvisStr, HS2OrbitAndExciter.OrbitDistancePelvis);
+            GUILayout.Space(4);
+            GUILayout.Label("焦點距離（相對全身長度）", label);
+            DrawFloatControl("頭部", null, HS2OrbitAndExciter.OrbitDistanceHead, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
+            DrawFloatControl("胸部", null, HS2OrbitAndExciter.OrbitDistanceChest, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
+            DrawFloatControl("骨盆", null, HS2OrbitAndExciter.OrbitDistancePelvis, 1f, 3f, 0.01f, "F2", null, requestViewReapply: true);
 
             if (HS2OrbitAndExciter.OrbitCircleZoomEnabled != null)
             {
                 HS2OrbitAndExciter.OrbitCircleZoomEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.OrbitCircleZoomEnabled.Value,
-                    " 每圈亂數拉近／拉遠（關掉則固定距離、無 zoom）");
+                    " 每圈隨機拉近／拉遠");
             }
             if (HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true)
             {
-                GUILayout.Label("Zoom 限度（相對上方焦點距離；預設近 0.65／遠 1.75，比舊版明顯）：", label);
-                DrawFloatField("拉近倍率（越小越近）", "OrbitZoomNear", ref _orbitZoomNearStr, HS2OrbitAndExciter.OrbitZoomNearMult, 0.4f, 1f);
-                DrawFloatField("拉遠倍率（越大越遠）", "OrbitZoomFar", ref _orbitZoomFarStr, HS2OrbitAndExciter.OrbitZoomFarMult, 1f, 2.5f);
+                DrawFloatControl("拉近倍率", "越小越近", HS2OrbitAndExciter.OrbitZoomNearMult, 0.4f, 1f, 0.01f, "F2");
+                DrawFloatControl("拉遠倍率", "越大越遠", HS2OrbitAndExciter.OrbitZoomFarMult, 1f, 2.5f, 0.01f, "F2");
             }
 
-            GUILayout.Label(
-                "已停用／退役：依迴轉換姿勢（ChangePoseOnCycle）、環視自動選動作、檢查點逾時強制跳關。換段請用選池（L）與流程熱鍵。",
-                label);
-
-            // ─── 3. 流程熱鍵 ───────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("流程熱鍵", GUI.skin.box);
-            GUILayout.Label("單鍵操作（勿同時按 Ctrl／Shift／Alt；與環視開關無關）：", label);
-            GUILayout.Label(OrbitManualHotkeys.HudLegend, label);
-            GUILayout.Label(
-                "L＝手動選池（各流程格皆換姿勢）。N＝依目前格往前推：閒置＝立即開始進行；動作橋段＝加速感度與速度；高潮後閒置／窺視＝選池。",
-                label);
-            GUILayout.Label(
-                "G＝換女角色（池會排除同性格卡；短時間連換會降權、久留會優先）。H＝換套裝。J＝亂數穿著階段。K＝切換姿勢鏡頭。",
-                label);
-            GUILayout.Label(
-                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。",
-                label);
-            GUILayout.Label(
-                OrbitManualHotkeys.PregnancyHudLegend
-                + " — Y／U 由 PregnancyPlus；I／O／P 本外掛（I＝清腹、O＝停轉、P＝面板）。R 留給原版相機重設。",
-                label);
+            // ─── 流程 ───────────────────────────────────────────
+            Section("流程");
             if (HS2OrbitAndExciter.CumflationEnabled != null)
             {
                 HS2OrbitAndExciter.CumflationEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.CumflationEnabled.Value,
-                    " 內射時肚子脹一級；愛撫／女女落地時肚子消一級（PregnancyPlus；I 可清空）");
+                    " 內射時肚子脹一級；愛撫／女女落地消一級（需 PregnancyPlus）");
             }
 
-            // ─── 4. 脫力 ───────────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("脫力", GUI.skin.box);
-            GUILayout.Label(
-                $"協助開啟時：脫力次數門檻改為 {OrbitFaintnessAssist.TargetGotoFaintnessCount}；並暫時忽略遊戲「弱體化停止」（WeakStop），關閉協助後還原。",
-                label);
+            // ─── 脫力 ───────────────────────────────────────────
+            Section("脫力");
             if (HS2OrbitAndExciter.OverrideFaintness != null)
             {
                 bool newFaintness = GUILayout.Toggle(
                     HS2OrbitAndExciter.OverrideFaintness.Value,
-                    " 強制脫力開／關（影響可用姿勢表與鏡頭）");
+                    " 強制脫力（影響可用姿勢與鏡頭）");
                 HS2OrbitAndExciter.OverrideFaintness.Value = newFaintness;
                 if (newFaintness != _lastOverrideFaintness)
                 {
@@ -219,409 +145,273 @@ namespace HS2OrbitAndExciter
                 }
             }
 
-            // ─── 5. 感度 ───────────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("感度", GUI.skin.box);
-            if (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit != null)
-            {
-                GUILayout.Label(
-                    "環視開啟時，每秒自動累加感度條（0＝只靠遊戲／滑鼠；0.1≈約 10 秒滿條；可用 0.001 很慢）。請用小數點（例 0.001）。",
-                    label);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("每秒感度增加量：", label, GUILayout.Width(160));
-                GUI.SetNextControlName("FeelAddPerSec");
-                _feelAddPerSecStr = GUILayout.TextField(_feelAddPerSecStr, GUILayout.Width(80));
-                if (TryParseFloatInvariant(_feelAddPerSecStr, out float feel) && feel >= 0f && feel <= 5f)
-                    HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.Value = feel;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.ExcitementTriggerDelaySeconds != null)
-            {
-                GUILayout.Label(
-                    "感度條滿後，再等幾秒才自動觸發高潮（0＝立刻；滑鼠點擊仍可立刻觸發）。",
-                    label);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("滿條後延遲秒數：", label, GUILayout.Width(160));
-                GUI.SetNextControlName("ExcitementTriggerDelay");
-                _excitementDelayStr = GUILayout.TextField(_excitementDelayStr, GUILayout.Width(60));
-                if (float.TryParse(_excitementDelayStr, out float delay) && delay >= 0f && delay <= 10f)
-                {
-                    HS2OrbitAndExciter.ExcitementTriggerDelaySeconds.Value = delay;
-                    Patches.ExciterState.DelaySecondsAtFull = delay;
-                }
-                GUILayout.EndHorizontal();
-            }
+            // ─── 感度 ───────────────────────────────────────────
+            Section("感度");
+            DrawFloatControl(
+                "每秒自動加感度",
+                "0＝只用遊戲本身；約 0.1＝十秒左右滿條",
+                HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit,
+                0f, 1f, 0.001f, "F3");
+            DrawFloatControl(
+                "滿條後再等多久才自動高潮",
+                "0＝立刻；手動點擊仍可立刻高潮",
+                HS2OrbitAndExciter.ExcitementTriggerDelaySeconds,
+                0f, 10f, 0.1f, "F1", "秒",
+                onChanged: v => Patches.ExciterState.DelaySecondsAtFull = v);
 
-            // ─── 6. 語音巡禮 ───────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("語音巡禮", GUI.skin.box);
-            GUILayout.Label(
-                "依女高潮／侍奉射精／插入內射，依序切換音庫（青澀→好意→享樂→隷属→嫌悪→依存→壊れ）。不改卡片好感等數值；進度可依角色記住。",
-                label);
+            // ─── 語音巡禮 ───────────────────────────────────────
+            Section("語音巡禮");
+            GUILayout.Label("依高潮／射精依序切換音庫階段。", label);
             if (HS2OrbitAndExciter.VoiceTourEnabled != null)
             {
                 HS2OrbitAndExciter.VoiceTourEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.VoiceTourEnabled.Value,
                     " 啟用語音巡禮");
             }
-            if (HS2OrbitAndExciter.VoiceTourHitsPerStage != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(
-                    $"每一語音階段需要幾次觸發（目前 {HS2OrbitAndExciter.VoiceTourHitsPerStage.Value}）",
-                    GUILayout.Width(260));
-                float h = GUILayout.HorizontalSlider(HS2OrbitAndExciter.VoiceTourHitsPerStage.Value, 1f, 10f);
-                int hi = Mathf.RoundToInt(h);
-                if (hi != HS2OrbitAndExciter.VoiceTourHitsPerStage.Value)
-                    HS2OrbitAndExciter.VoiceTourHitsPerStage.Value = hi;
-                GUILayout.EndHorizontal();
-            }
+            DrawIntControl(
+                "每階段要幾次才進下一段",
+                null,
+                HS2OrbitAndExciter.VoiceTourHitsPerStage,
+                1, 10);
             if (HS2OrbitAndExciter.VoiceTourLoop != null)
             {
                 HS2OrbitAndExciter.VoiceTourLoop.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.VoiceTourLoop.Value,
-                    " 到「壊れ」後從頭循環");
+                    " 最後一段後從頭循環");
             }
             if (HS2OrbitAndExciter.VoiceTourPersistProgress != null)
             {
                 HS2OrbitAndExciter.VoiceTourPersistProgress.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.VoiceTourPersistProgress.Value,
-                    " 依角色記住進度（換人再回來可續接）");
+                    " 依角色記住進度");
             }
             if (HS2OrbitAndExciter.VoiceTourResetOnNewH != null)
             {
                 HS2OrbitAndExciter.VoiceTourResetOnNewH.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.VoiceTourResetOnNewH.Value,
-                    " 每次進入 H 場景從第一階段重來（忽略已記住進度）");
+                    " 每次進 H 都從第一段重來");
             }
             if (HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish != null)
             {
                 HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.VoiceTourCountHoushiMaleFinish.Value,
-                    " 侍奉體外／口內射精也算一次觸發（插入內射一律計算）");
+                    " 侍奉射精也算一次（插入內射一律算）");
             }
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("重置目前角色語音進度", GUILayout.Width(200)))
+            if (GUILayout.Button("重置目前角色進度", GUILayout.Width(160)))
                 OrbitVoiceTour.ResetCurrentCharacterProgress();
             GUILayout.Label(
-                $"現況：{OrbitVoiceTour.CurrentLabelZh} {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}",
+                $"現在：{OrbitVoiceTour.CurrentLabelZh}  {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}",
                 label);
             GUILayout.EndHorizontal();
 
-            // ─── 7. 高潮特效 ───────────────────────────────────
-            GUILayout.Space(8);
-            GUILayout.Label("高潮特效", GUI.skin.box);
-            GUILayout.Label(
-                "女高潮時可觸發：身體刺青貼花、胸部變大、乳頭潮吹（複用女角色潮吹／噴尿視覺）。左下角狀態面板會顯示目前狀態。",
-                label);
+            // ─── 高潮特效 ───────────────────────────────────────
+            Section("高潮特效");
 
             if (HS2OrbitAndExciter.OrgasmTattooEnabled != null)
             {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("高潮刺青", GUILayout.Width(100));
-                bool tattooOn = HS2OrbitAndExciter.OrgasmTattooEnabled.Value;
-                bool next = GUILayout.Toggle(
-                    tattooOn,
-                    tattooOn ? $"開啟（T 貼下一張）×{OrbitOrgasmTattoo.Count}" : "關閉（Shift+T）");
-                if (next != tattooOn)
-                    HS2OrbitAndExciter.OrgasmTattooEnabled.Value = next;
-                GUILayout.EndHorizontal();
-                GUILayout.Label(
-                    "H 場景：T＝開啟並依序貼一張；Shift+T＝關閉自動貼。貼花掛在身體掛點，不進飾品欄；換衣會重掛；G 換角色會清空。",
-                    label);
-
-                if (HS2OrbitAndExciter.OrgasmTattooMaxCount != null)
+                HS2OrbitAndExciter.OrgasmTattooEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.OrgasmTattooEnabled.Value,
+                    $" 高潮刺青（已貼 {OrbitOrgasmTattoo.Count} 張；T 貼下一張）");
+                if (HS2OrbitAndExciter.OrgasmTattooEnabled.Value)
                 {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"最多張數 {HS2OrbitAndExciter.OrgasmTattooMaxCount.Value}", GUILayout.Width(100));
-                    float mc = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmTattooMaxCount.Value, 1f, 64f);
-                    int mi = Mathf.RoundToInt(mc);
-                    if (mi != HS2OrbitAndExciter.OrgasmTattooMaxCount.Value)
-                        HS2OrbitAndExciter.OrgasmTattooMaxCount.Value = mi;
-                    GUILayout.EndHorizontal();
-                }
-                if (HS2OrbitAndExciter.OrgasmTattooScaleMin != null)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"最小倍率 ×{HS2OrbitAndExciter.OrgasmTattooScaleMin.Value:F1}", GUILayout.Width(100));
-                    float smin = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmTattooScaleMin.Value, 1f, 20f);
-                    if (Mathf.Abs(smin - HS2OrbitAndExciter.OrgasmTattooScaleMin.Value) > 0.05f)
-                        HS2OrbitAndExciter.OrgasmTattooScaleMin.Value = Mathf.Round(smin * 10f) / 10f;
-                    GUILayout.EndHorizontal();
-                }
-                if (HS2OrbitAndExciter.OrgasmTattooScaleMax != null)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"最大倍率 ×{HS2OrbitAndExciter.OrgasmTattooScaleMax.Value:F1}", GUILayout.Width(100));
-                    float smax = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmTattooScaleMax.Value, 1f, 20f);
-                    if (Mathf.Abs(smax - HS2OrbitAndExciter.OrgasmTattooScaleMax.Value) > 0.05f)
-                        HS2OrbitAndExciter.OrgasmTattooScaleMax.Value = Mathf.Round(smax * 10f) / 10f;
-                    GUILayout.EndHorizontal();
+                    DrawIntControl("最多張數", null, HS2OrbitAndExciter.OrgasmTattooMaxCount, 1, 64);
+                    DrawFloatControl("最小倍率", null, HS2OrbitAndExciter.OrgasmTattooScaleMin, 1f, 20f, 0.1f, "F1", "×");
+                    DrawFloatControl("最大倍率", null, HS2OrbitAndExciter.OrgasmTattooScaleMax, 1f, 20f, 0.1f, "F1", "×");
                 }
             }
 
             if (HS2OrbitAndExciter.OrgasmBustGrowEnabled != null)
             {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("高潮胸部變大", GUILayout.Width(100));
-                bool bustOn = HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value;
-                bool bustNext = GUILayout.Toggle(bustOn, bustOn ? "開啟" : "關閉");
-                if (bustNext != bustOn)
-                    HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value = bustNext;
-                GUILayout.EndHorizontal();
-                if (HS2OrbitAndExciter.OrgasmBustGrowPercent != null)
+                HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value,
+                    " 高潮胸部變大");
+                if (HS2OrbitAndExciter.OrgasmBustGrowEnabled.Value)
                 {
+                    DrawFloatControl("每次增大", null, HS2OrbitAndExciter.OrgasmBustGrowPercent, 0f, 50f, 1f, "F0", "%");
                     GUILayout.BeginHorizontal();
-                    GUILayout.Label($"每次 +{HS2OrbitAndExciter.OrgasmBustGrowPercent.Value:F0}%", GUILayout.Width(100));
-                    float p = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmBustGrowPercent.Value, 0f, 50f);
-                    if (Mathf.Abs(p - HS2OrbitAndExciter.OrgasmBustGrowPercent.Value) > 0.05f)
-                        HS2OrbitAndExciter.OrgasmBustGrowPercent.Value = Mathf.Round(p);
+                    if (GUILayout.Button("立刻回復胸部（B）", GUILayout.Width(160)))
+                        OrbitOrgasmBustGrowth.TryRestore(OrbitController.TryGetHScene());
+                    GUILayout.Label(OrbitOrgasmBustGrowth.HudStatus, label);
                     GUILayout.EndHorizontal();
                 }
-                GUILayout.Label("相對目前胸サイズ倍率放大；B 鍵回復進入 H／換角色時的基準胸圍。", label);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("回復胸部（B）", GUILayout.Width(140)))
-                    OrbitOrgasmBustGrowth.TryRestore(OrbitController.TryGetHScene());
-                GUILayout.Label(OrbitOrgasmBustGrowth.HudStatus, label);
-                GUILayout.EndHorizontal();
             }
 
             if (HS2OrbitAndExciter.OrgasmNippleSprayEnabled != null)
             {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("乳頭潮吹", GUILayout.Width(100));
-                bool nipOn = HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value;
-                bool nipNext = GUILayout.Toggle(nipOn, nipOn ? "開啟" : "關閉");
-                if (nipNext != nipOn)
-                    HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value = nipNext;
-                GUILayout.Label(OrbitOrgasmNippleSpray.HudStatus, label);
-                GUILayout.EndHorizontal();
-                GUILayout.Label(
-                    "複用女角色潮吹／噴尿視覺；預設自訂連噴（先強後弱）。可改跟遊戲潮吹節奏。偏移／旋轉於下次高潮套用。",
-                    label);
-
-                if (HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm != null)
+                HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value,
+                    " 乳頭潮吹");
+                if (HS2OrbitAndExciter.OrgasmNippleSprayEnabled.Value)
                 {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("噴出節奏", GUILayout.Width(100));
-                    bool nativeOn = HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm.Value;
-                    bool nativeNext = GUILayout.Toggle(
-                        nativeOn,
-                        nativeOn ? "跟遊戲潮吹節奏" : "自訂連噴（先強後弱）");
-                    if (nativeNext != nativeOn)
+                    GUILayout.Label(OrbitOrgasmNippleSpray.HudStatus, label);
+                    if (HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm != null)
+                    {
+                        bool nativeOn = HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm.Value;
+                        bool nativeNext = GUILayout.Toggle(
+                            nativeOn,
+                            nativeOn ? " 節奏：跟遊戲潮吹" : " 節奏：自訂連噴（先強後弱）");
                         HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm.Value = nativeNext;
+                    }
+
+                    bool nativeRhythm = HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm?.Value ?? false;
+                    if (!nativeRhythm)
+                        DrawNippleSpraySliders();
+                    else
+                        GUILayout.Label("（跟遊戲節奏時，下面連噴參數不會用到）", label);
+
+                    DrawNipplePoseSliders();
+
+                    GUILayout.BeginHorizontal();
+                    if (GUILayout.Button("重建噴口", GUILayout.Width(120)))
+                        OrbitOrgasmNippleSpray.ForceRebuild(OrbitController.TryGetHScene());
+                    if (GUILayout.Button("重設預設值", GUILayout.Width(120)))
+                        OrbitOrgasmNippleSpray.ResetSettingsToDefaults(OrbitController.TryGetHScene());
                     GUILayout.EndHorizontal();
                 }
-
-                bool nativeRhythm = HS2OrbitAndExciter.OrgasmNippleSprayUseNativeUrineRhythm?.Value ?? false;
-                if (nativeRhythm)
-                    GUILayout.Label("（目前跟遊戲潮吹節奏；下列連噴參數暫不套用）", label);
-
-                DrawNippleSpraySliders();
-
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("重建乳頭噴口", GUILayout.Width(140)))
-                    OrbitOrgasmNippleSpray.ForceRebuild(OrbitController.TryGetHScene());
-                if (GUILayout.Button("重設為預設", GUILayout.Width(120)))
-                    OrbitOrgasmNippleSpray.ResetSettingsToDefaults(OrbitController.TryGetHScene());
-                GUILayout.EndHorizontal();
-                GUILayout.Label(
-                    "預設：偏移 (0, 0, 0.02)／旋轉 (90, 0, 0)；連噴 5 次、先強後弱。重設後自動重建噴口。",
-                    label);
             }
 
-            GUILayout.Space(8);
-            GUILayout.Label("設定值會自動儲存，保持至下次變更。", label);
-            GUILayout.Label(
-                "熱鍵：Ctrl+Shift+O 環視協助；Ctrl+Shift+I 狀態面板；Ctrl+Shift+P 本視窗。頂端為建置對照。",
-                label);
+            GUILayout.Space(10);
+            GUILayout.Label("變更會自動儲存。", label);
 
             GUILayout.EndScrollView();
 
             if (GUILayout.Button("關閉"))
-            {
-                FlushFeelFromField();
                 _visible = false;
-            }
 
             GUILayout.EndVertical();
             GUI.DragWindow(new Rect(0, 0, _windowRect.width, 20));
         }
 
-        /// <summary>用不變地區解析小數（接受 0.001 與 0,001），避免地區設定吃掉小數點。</summary>
-        private static bool TryParseFloatInvariant(string text, out float value)
+        private void Section(string title)
         {
-            value = 0f;
-            if (string.IsNullOrWhiteSpace(text))
-                return false;
-            string s = text.Trim().Replace(',', '.');
-            return float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+            GUILayout.Space(8);
+            GUILayout.Label(title, _sectionStyle ?? GUI.skin.box);
         }
 
-        private void FlushFeelFromField()
-        {
-            if (HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit == null)
-                return;
-            if (!TryParseFloatInvariant(_feelAddPerSecStr, out float feel) || feel < 0f || feel > 5f)
-                return;
-            HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.Value = feel;
-            try { HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit.ConfigFile.Save(); } catch { /* ignore */ }
-        }
-
-        private void DrawDistField(
+        /// <summary>
+        /// 跨度合理 → 拉 bar；跨度太大 → 數值框並顯示上下限。
+        /// </summary>
+        private void DrawFloatControl(
             string title,
-            string controlName,
-            ref string text,
-            BepInEx.Configuration.ConfigEntry<float>? entry)
-        {
-            DrawFloatField(title, controlName, ref text, entry, 1f, 3f, requestViewReapply: true);
-        }
-
-        private void DrawFloatField(
-            string title,
-            string controlName,
-            ref string text,
+            string? hint,
             BepInEx.Configuration.ConfigEntry<float>? entry,
             float min,
             float max,
-            bool requestViewReapply = false)
+            float step,
+            string format,
+            string? unit = null,
+            bool requestViewReapply = false,
+            System.Action<float>? onChanged = null)
         {
             if (entry == null) return;
             var label = _labelStyle ?? GUI.skin.label;
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(title + "：", label, GUILayout.Width(160));
-            GUI.SetNextControlName(controlName);
-            text = GUILayout.TextField(text, GUILayout.Width(50));
-            if (float.TryParse(text, out float v) && v >= min && v <= max)
+            float cur = Mathf.Clamp(entry.Value, min, max);
+            string unitSuffix = string.IsNullOrEmpty(unit) ? "" : " " + unit;
+            string valueText = cur.ToString(format) + unitSuffix;
+
+            // 跨度太大（例如 0.1～上千）才改數值框；一般參數一律拉 bar。
+            float span = max - min;
+            bool useSlider = span <= 200f
+                || (min > 0.0001f && max / min <= MaxSliderSpanRatio);
+
+            if (useSlider)
             {
-                entry.Value = v;
-                if (requestViewReapply)
-                    OrbitController.RequestViewReapply();
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"{title}  {valueText}", label, GUILayout.Width(200));
+                float next = GUILayout.HorizontalSlider(cur, min, max);
+                if (step > 0f)
+                    next = Mathf.Round(next / step) * step;
+                next = Mathf.Clamp(next, min, max);
+                if (Mathf.Abs(next - entry.Value) > step * 0.4f)
+                {
+                    entry.Value = next;
+                    onChanged?.Invoke(next);
+                    if (requestViewReapply)
+                        OrbitController.RequestViewReapply();
+                }
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"{min.ToString(format)}", GUILayout.Width(48));
+                GUILayout.FlexibleSpace();
+                if (!string.IsNullOrEmpty(hint))
+                    GUILayout.Label(hint, label);
+                GUILayout.FlexibleSpace();
+                GUILayout.Label($"{max.ToString(format)}", GUILayout.Width(48));
+                GUILayout.EndHorizontal();
             }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"{title}（{min.ToString(format)}～{max.ToString(format)}）", label, GUILayout.Width(260));
+                string field = GUILayout.TextField(cur.ToString(format), GUILayout.Width(72));
+                if (float.TryParse(field, out float parsed))
+                {
+                    parsed = Mathf.Clamp(parsed, min, max);
+                    if (Mathf.Abs(parsed - entry.Value) > 0.0001f)
+                    {
+                        entry.Value = parsed;
+                        onChanged?.Invoke(parsed);
+                        if (requestViewReapply)
+                            OrbitController.RequestViewReapply();
+                    }
+                }
+                GUILayout.Label(unitSuffix, GUILayout.Width(28));
+                GUILayout.EndHorizontal();
+                if (!string.IsNullOrEmpty(hint))
+                    GUILayout.Label(hint, label);
+            }
+        }
+
+        private void DrawIntControl(
+            string title,
+            string? hint,
+            BepInEx.Configuration.ConfigEntry<int>? entry,
+            int min,
+            int max)
+        {
+            if (entry == null) return;
+            var label = _labelStyle ?? GUI.skin.label;
+            int cur = Mathf.Clamp(entry.Value, min, max);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"{title}  {cur}", label, GUILayout.Width(200));
+            float slid = GUILayout.HorizontalSlider(cur, min, max);
+            int next = Mathf.RoundToInt(slid);
+            next = Mathf.Clamp(next, min, max);
+            if (next != entry.Value)
+                entry.Value = next;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"{min}", GUILayout.Width(48));
+            GUILayout.FlexibleSpace();
+            if (!string.IsNullOrEmpty(hint))
+                GUILayout.Label(hint, label);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label($"{max}", GUILayout.Width(48));
             GUILayout.EndHorizontal();
         }
 
         private void DrawNippleSpraySliders()
         {
-            if (HS2OrbitAndExciter.OrgasmNippleSprayBursts != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"連噴次數 {HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value}", GUILayout.Width(100));
-                float bn = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value, 2f, 20f);
-                int bi = Mathf.RoundToInt(bn);
-                if (bi != HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value)
-                    HS2OrbitAndExciter.OrgasmNippleSprayBursts.Value = bi;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"間隔 {HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value:F2}s", GUILayout.Width(100));
-                float iv = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value, 0.1f, 1.2f);
-                if (Mathf.Abs(iv - HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value) > 0.01f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval.Value = Mathf.Round(iv * 100f) / 100f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"首噴力道 ×{HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value:F1}", GUILayout.Width(100));
-                float ss = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value, 0.5f, 3.5f);
-                if (Mathf.Abs(ss - HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value) > 0.05f)
-                    HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart.Value = Mathf.Round(ss * 10f) / 10f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"末噴力道 ×{HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value:F1}", GUILayout.Width(100));
-                float se = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value, 0.1f, 2f);
-                if (Mathf.Abs(se - HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value) > 0.05f)
-                    HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd.Value = Mathf.Round(se * 10f) / 10f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayAmount != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"總噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value:F1}", GUILayout.Width(100));
-                float am = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value, 0.2f, 24f);
-                if (Mathf.Abs(am - HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value) > 0.05f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayAmount.Value = Mathf.Round(am * 10f) / 10f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayAmountStart != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"首噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value:F1}", GUILayout.Width(100));
-                float as0 = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value, 0.2f, 24f);
-                if (Mathf.Abs(as0 - HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value) > 0.05f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayAmountStart.Value = Mathf.Round(as0 * 10f) / 10f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"末噴量 ×{HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value:F1}", GUILayout.Width(100));
-                float ae = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value, 0.1f, 15f);
-                if (Mathf.Abs(ae - HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value) > 0.05f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd.Value = Mathf.Round(ae * 10f) / 10f;
-                GUILayout.EndHorizontal();
-            }
+            DrawIntControl("連噴次數", null, HS2OrbitAndExciter.OrgasmNippleSprayBursts, 2, 20);
+            DrawFloatControl("間隔", null, HS2OrbitAndExciter.OrgasmNippleSprayBurstInterval, 0.1f, 1.2f, 0.01f, "F2", "秒");
+            DrawFloatControl("首噴力道", null, HS2OrbitAndExciter.OrgasmNippleSpraySpeedStart, 0.5f, 3.5f, 0.1f, "F1", "×");
+            DrawFloatControl("末噴力道", null, HS2OrbitAndExciter.OrgasmNippleSpraySpeedEnd, 0.1f, 2f, 0.1f, "F1", "×");
+            DrawFloatControl("總噴量", null, HS2OrbitAndExciter.OrgasmNippleSprayAmount, 0.2f, 24f, 0.1f, "F1", "×");
+            DrawFloatControl("首噴量", null, HS2OrbitAndExciter.OrgasmNippleSprayAmountStart, 0.2f, 24f, 0.1f, "F1", "×");
+            DrawFloatControl("末噴量", null, HS2OrbitAndExciter.OrgasmNippleSprayAmountEnd, 0.1f, 15f, 0.1f, "F1", "×");
+        }
 
-            if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetX != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"偏移 X {HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value:F2}", GUILayout.Width(100));
-                float ox = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value, -0.1f, 0.1f);
-                if (Mathf.Abs(ox - HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value) > 0.001f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayOffsetX.Value = Mathf.Round(ox * 100f) / 100f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetY != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"偏移 Y {HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value:F2}", GUILayout.Width(100));
-                float oy = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value, -0.1f, 0.1f);
-                if (Mathf.Abs(oy - HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value) > 0.001f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayOffsetY.Value = Mathf.Round(oy * 100f) / 100f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"前伸 Z {HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value:F2}", GUILayout.Width(100));
-                float z = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value, -0.1f, 0.1f);
-                if (Mathf.Abs(z - HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value) > 0.001f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ.Value = Mathf.Round(z * 100f) / 100f;
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayRotX != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"旋轉 X {HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value:F0}°", GUILayout.Width(100));
-                float rx = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value, -180f, 180f);
-                if (Mathf.Abs(rx - HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value) > 0.5f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayRotX.Value = Mathf.Round(rx);
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayRotY != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"旋轉 Y {HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value:F0}°", GUILayout.Width(100));
-                float ry = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value, -180f, 180f);
-                if (Mathf.Abs(ry - HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value) > 0.5f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayRotY.Value = Mathf.Round(ry);
-                GUILayout.EndHorizontal();
-            }
-            if (HS2OrbitAndExciter.OrgasmNippleSprayRotZ != null)
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"旋轉 Z {HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value:F0}°", GUILayout.Width(100));
-                float rz = GUILayout.HorizontalSlider(HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value, -180f, 180f);
-                if (Mathf.Abs(rz - HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value) > 0.5f)
-                    HS2OrbitAndExciter.OrgasmNippleSprayRotZ.Value = Mathf.Round(rz);
-                GUILayout.EndHorizontal();
-            }
+        private void DrawNipplePoseSliders()
+        {
+            GUILayout.Label("噴口位置／角度（下次高潮套用）", _labelStyle ?? GUI.skin.label);
+            DrawFloatControl("偏移 X", null, HS2OrbitAndExciter.OrgasmNippleSprayOffsetX, -0.1f, 0.1f, 0.01f, "F2");
+            DrawFloatControl("偏移 Y", null, HS2OrbitAndExciter.OrgasmNippleSprayOffsetY, -0.1f, 0.1f, 0.01f, "F2");
+            DrawFloatControl("前伸 Z", null, HS2OrbitAndExciter.OrgasmNippleSprayOffsetZ, -0.1f, 0.1f, 0.01f, "F2");
+            DrawFloatControl("旋轉 X", null, HS2OrbitAndExciter.OrgasmNippleSprayRotX, -180f, 180f, 1f, "F0", "°");
+            DrawFloatControl("旋轉 Y", null, HS2OrbitAndExciter.OrgasmNippleSprayRotY, -180f, 180f, 1f, "F0", "°");
+            DrawFloatControl("旋轉 Z", null, HS2OrbitAndExciter.OrgasmNippleSprayRotZ, -180f, 180f, 1f, "F0", "°");
         }
     }
 }

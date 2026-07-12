@@ -3,28 +3,24 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Minimal orbit status overlay (Traditional Chinese). P or Ctrl+Shift+I toggles while orbit is on.
+    /// Left-bottom status HUD. Clear “what’s happening now” layout. P / Ctrl+Shift+I toggle.
     /// </summary>
     public class OrbitStatusHud : MonoBehaviour
     {
         private const KeyCode ToggleHotkey = KeyCode.I;
-        private const KeyCode Modifier = KeyCode.LeftShift;
-        private const KeyCode Modifier2 = KeyCode.LeftControl;
-        private const float AreaWidth = 300f;
-        private const float Margin = 6f;
-        private const float MaxHeightFraction = 0.32f;
-        /// <summary>
-        /// Clearance above the bottom H UI strip (Finish / 跳出 buttons ≈ 1–2 rows).
-        /// Measured as ~72–90px per button row; use ~2 rows + padding.
-        /// </summary>
+        private const float AreaWidth = 320f;
+        private const float Margin = 8f;
+        private const float MaxHeightFraction = 0.36f;
         private const float BottomUiClearance = 176f;
 
         private OrbitController? _orbit;
         private bool _panelVisible = true;
         private bool _stylesReady;
         private Vector2 _scroll;
-        private GUIStyle? _smallLabel;
-        private GUIStyle? _smallBox;
+        private GUIStyle? _titleLabel;
+        private GUIStyle? _bodyLabel;
+        private GUIStyle? _dimLabel;
+        private GUIStyle? _boxStyle;
 
         private void Awake()
         {
@@ -57,17 +53,30 @@ namespace HS2OrbitAndExciter
         private void InitStyles()
         {
             if (_stylesReady) return;
-            _smallLabel = new GUIStyle(GUI.skin.label)
+            _titleLabel = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 11,
-                wordWrap = false,
-                clipping = TextClipping.Clip,
+                fontSize = 13,
+                wordWrap = true,
+                padding = new RectOffset(0, 0, 0, 2),
+                margin = new RectOffset(0, 0, 0, 0)
+            };
+            _bodyLabel = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                wordWrap = true,
                 padding = new RectOffset(0, 0, 0, 0),
                 margin = new RectOffset(0, 0, 0, 0)
             };
-            _smallBox = new GUIStyle(GUI.skin.box)
+            _dimLabel = new GUIStyle(GUI.skin.label)
             {
-                padding = new RectOffset(4, 4, 2, 2),
+                fontSize = 11,
+                wordWrap = true,
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0)
+            };
+            _boxStyle = new GUIStyle(GUI.skin.box)
+            {
+                padding = new RectOffset(8, 8, 6, 6),
                 margin = new RectOffset(0, 0, 0, 0)
             };
             _stylesReady = true;
@@ -94,280 +103,190 @@ namespace HS2OrbitAndExciter
                 return;
 
             bool orbitOn = OrbitBehaviorHub.IsOrbitAssistActive();
-            bool voiceTourHud = OrbitVoiceTour.IsActive || (OrbitVoiceTour.Enabled && OrbitController.TryGetHScene() != null);
+            bool voiceTourHud = OrbitVoiceTour.IsActive
+                || (OrbitVoiceTour.Enabled && OrbitController.TryGetHScene() != null);
             if (!orbitOn && !voiceTourHud)
                 return;
 
             InitStyles();
-            var label = _smallLabel ?? GUI.skin.label;
-            var box = _smallBox ?? GUI.skin.box;
-            var lines = orbitOn && _orbit.TryGetCachedHudSnapshot(out var snap)
-                ? BuildLines(snap)
-                : BuildVoiceTourOnlyLines();
-            // Always append voice tour block when relevant
-            lines = AppendVoiceTourLines(lines);
-            float lineH = label.lineHeight;
-            float contentH = box.padding.vertical + lineH * lines.Length + 4f;
-            float maxH = Mathf.Max(lineH * 4f, Screen.height * MaxHeightFraction);
+            var lines = BuildDisplayLines(orbitOn);
+            float lineH = (_bodyLabel ?? GUI.skin.label).lineHeight + 2f;
+            float contentH = (_boxStyle ?? GUI.skin.box).padding.vertical + lineH * lines.Length + 8f;
+            float maxH = Mathf.Max(lineH * 5f, Screen.height * MaxHeightFraction);
             float areaH = Mathf.Min(contentH, maxH);
             bool needScroll = contentH > maxH + 0.5f;
 
             var area = new Rect(Margin, Screen.height - areaH - Margin - BottomUiClearance, AreaWidth, areaH);
             GUILayout.BeginArea(area);
-            GUILayout.BeginVertical(box);
+            GUILayout.BeginVertical(_boxStyle ?? GUI.skin.box);
             if (needScroll)
             {
                 _scroll = GUILayout.BeginScrollView(_scroll, false, true,
-                    GUILayout.Height(areaH - box.padding.vertical));
-                for (int i = 0; i < lines.Length; i++)
-                    GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
+                    GUILayout.Height(areaH - (_boxStyle ?? GUI.skin.box).padding.vertical));
+                DrawLines(lines);
                 GUILayout.EndScrollView();
             }
             else
             {
-                for (int i = 0; i < lines.Length; i++)
-                    GUILayout.Label(lines[i], label, GUILayout.Height(lineH));
+                DrawLines(lines);
             }
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
 
-        private static string[] BuildLines(in OrbitHudSnapshot snap)
+        private void DrawLines(HudLine[] lines)
         {
-            string status;
-            if (snap.CameraPaused)
-                status = "換角中";
-            else if (!OrbitBehaviorHub.IsOrbitCameraSpinning())
-                status = "停轉";
-            else if (OrbitPoseDirector.ShouldFreezeCycleCounters)
-                status = OrbitPoseDirector.Phase == DirectorState.PosePending
-                    ? "運轉·換姿待"
-                    : "運轉·換姿";
-            else
-                status = "運轉";
-            if (snap.IsFaintness)
-                status += "·虛脫";
-
-            string leg = snap.Phase == 0 ? "去" : "回";
-            string timer = snap.WaitingPrep
-                ? $"準 {snap.PrepRemainSeconds:F0}s"
-                : $"{leg} {snap.TimeToCompleteCurrentRotation:F0}s";
-
-            string next = FormatNextHint(snap);
-            if (!string.IsNullOrEmpty(next))
-                timer += " " + next;
-
-            string assist = FormatAssistShort(snap.SuppressReasonKey);
-            string lockLine = FormatTimedLockLine(snap.SuppressReasonKey);
-            string manual = FormatManualPoolLine();
-            string orgasmFx = FormatOrgasmFxLine();
-            string fsm = OrbitStateMachineLog.LogPath != null
-                ? "FSM→LogOutput/HS2OrbitAndExciter_fsm.ndjson"
-                : "FSM log n/a";
-
-            if (!string.IsNullOrEmpty(lockLine))
+            for (int i = 0; i < lines.Length; i++)
             {
-                return new[]
+                var style = lines[i].Kind switch
                 {
-                    $"環視·{status} {timer}",
-                    assist,
-                    lockLine,
-                    "⌃⇧O/I/P  " + OrbitManualHotkeys.HudLegend,
-                    orgasmFx,
-                    OrbitManualHotkeys.PregnancyHudLegend,
-                    manual,
-                    fsm
-                };
+                    LineKind.Title => _titleLabel,
+                    LineKind.Dim => _dimLabel,
+                    _ => _bodyLabel
+                } ?? GUI.skin.label;
+                GUILayout.Label(lines[i].Text, style);
+            }
+        }
+
+        private HudLine[] BuildDisplayLines(bool orbitOn)
+        {
+            var list = new System.Collections.Generic.List<HudLine>(16);
+
+            if (orbitOn && _orbit != null && _orbit.TryGetCachedHudSnapshot(out var snap))
+            {
+                list.Add(new HudLine(LineKind.Title, "現在：" + FormatNowStatus(snap)));
+                list.Add(new HudLine(LineKind.Body, FormatProgress(snap)));
+
+                string next = FormatNextHint(snap);
+                if (!string.IsNullOrEmpty(next))
+                    list.Add(new HudLine(LineKind.Body, "接著：" + next));
+
+                string wait = FormatWaiting(snap);
+                if (!string.IsNullOrEmpty(wait))
+                    list.Add(new HudLine(LineKind.Body, wait));
+
+                list.Add(new HudLine(LineKind.Body, FormatOrgasmFx()));
+                string pool = FormatPoolShort();
+                if (!string.IsNullOrEmpty(pool))
+                    list.Add(new HudLine(LineKind.Dim, pool));
+            }
+            else
+            {
+                list.Add(new HudLine(LineKind.Title, "現在：語音巡禮（環視未開）"));
             }
 
-            return new[]
-            {
-                $"環視·{status} {timer}",
-                assist,
-                "⌃⇧O/I/P  " + OrbitManualHotkeys.HudLegend,
-                orgasmFx,
-                OrbitManualHotkeys.PregnancyHudLegend,
-                manual,
-                fsm
-            };
+            AppendVoiceTour(list);
+
+            list.Add(new HudLine(LineKind.Dim, "──"));
+            list.Add(new HudLine(LineKind.Dim, OrbitManualHotkeys.HudLegendCompact));
+            list.Add(new HudLine(LineKind.Dim, "Ctrl+Shift+O 協助｜Ctrl+Shift+P 設定｜P 隱藏本面板"));
+
+            return list.ToArray();
         }
 
-        private static string[] BuildVoiceTourOnlyLines()
+        private static string FormatNowStatus(in OrbitHudSnapshot snap)
         {
-            return new[]
-            {
-                "語音巡禮 HUD",
-                "⌃⇧I 隱藏 · 設定 VoiceTour"
-            };
+            string core;
+            if (snap.CameraPaused)
+                core = "正在換視角";
+            else if (!OrbitBehaviorHub.IsOrbitCameraSpinning())
+                core = "相機已暫停（按 O 繼續）";
+            else if (OrbitPoseDirector.ShouldFreezeCycleCounters)
+                core = OrbitPoseDirector.Phase == DirectorState.PosePending
+                    ? "環視中・等待換姿勢"
+                    : "環視中・正在換姿勢";
+            else
+                core = "環視轉動中";
+
+            if (snap.IsFaintness)
+                core += "・脫力";
+            return core;
         }
 
-        private static string[] AppendVoiceTourLines(string[] baseLines)
+        private static string FormatProgress(in OrbitHudSnapshot snap)
         {
-            var extra = FormatVoiceTourLines();
-            if (extra.Length == 0)
-                return baseLines;
-            var merged = new string[baseLines.Length + extra.Length];
-            for (int i = 0; i < baseLines.Length; i++)
-                merged[i] = baseLines[i];
-            for (int i = 0; i < extra.Length; i++)
-                merged[baseLines.Length + i] = extra[i];
-            return merged;
+            if (snap.WaitingPrep)
+                return $"準備中…還有 {snap.PrepRemainSeconds:F0} 秒";
+
+            string leg = snap.Phase == 0 ? "去程" : "回程";
+            return $"{leg}還有 {snap.TimeToCompleteCurrentRotation:F0} 秒轉完";
         }
 
-        private static string[] FormatVoiceTourLines()
+        private static string FormatWaiting(in OrbitHudSnapshot snap)
         {
-            if (!OrbitVoiceTour.Enabled)
-                return new[] { "語音巡禮：關" };
-
-            if (!OrbitVoiceTour.IsActive && OrbitController.TryGetHScene() == null)
-                return new[] { "語音巡禮：待機（進H開始）" };
-
-            var def = OrbitVoiceTour.Stages[
-                OrbitVoiceTour.StageIndex >= 0 && OrbitVoiceTour.StageIndex < OrbitVoiceTour.StageCount
-                    ? OrbitVoiceTour.StageIndex
-                    : 0];
-            string num = def.StateNum >= 0 ? def.StateNum.ToString() : "—";
-            string persist = OrbitVoiceTour.PersistProgress ? "記住" : "不存檔";
-            string loop = OrbitVoiceTour.Loop ? "Loop開" : "Loop關";
-            string key = string.IsNullOrEmpty(OrbitVoiceTour.CharKey) ? "—" : OrbitVoiceTour.CharKey!;
-
-            return new[]
-            {
-                $"語音·{OrbitVoiceTour.CurrentLabelZh} {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}",
-                $"Num{num} · 擊{OrbitVoiceTour.HitsInStage}/{OrbitVoiceTour.HitsPerStage} · {OrbitVoiceTour.LastTrigger}",
-                $"鍵:{TrimKey(key)} · {persist} · {loop}",
-                "說明:高潮/男射精換音庫·不改卡片",
-                "推進:女高潮+侍奉體外口內+插入內射",
-                "進度:依角色記住·換人再回來不重來"
-            };
+            string assist = FormatAssistPlain(snap.SuppressReasonKey);
+            string timed = FormatTimedPlain(snap.SuppressReasonKey);
+            if (!string.IsNullOrEmpty(timed) && timed != assist)
+                return assist + "｜" + timed;
+            return assist;
         }
 
-        private static string TrimKey(string key)
-        {
-            if (key.Length <= 18) return key;
-            return key.Substring(0, 16) + "…";
-        }
-
-        private static string FormatOrgasmFxLine()
-        {
-            string tattoo = OrbitOrgasmTattoo.Enabled
-                ? (OrbitOrgasmTattoo.Count > 0
-                    ? $"刺×{OrbitOrgasmTattoo.Count}·{OrbitOrgasmTattoo.LastSiteLabel}"
-                    : "刺開·0")
-                : "刺關(T)";
-            string bust = OrbitOrgasmBustGrowth.HudStatus;
-            string nipple = OrbitOrgasmNippleSpray.HudStatus;
-            return $"{OrbitManualHotkeys.OrgasmFxHudPrefix} {tattoo} · {bust} · {nipple}";
-        }
-
-        /// <summary>G pool: eligible count, strike-1 disliked, strike-2 excluded, long-stay preferred; on-stage timer.</summary>
-        private static string FormatManualPoolLine()
-        {
-            var s = OrbitManualDirector.GetHudStats();
-            if (s.CharaPool <= 0 && !s.OnStageTracked)
-                return "G池·未掃";
-
-            string line = $"G池{s.CharaPool}";
-            if (s.Disliked > 0)
-                line += $" 降{s.Disliked}";
-            if (s.Excluded > 0)
-                line += $" 排{s.Excluded}";
-            if (s.Preferred > 0)
-                line += $" 優{s.Preferred}";
-            if (s.OnStageTracked && s.OnStageSeconds >= 0f)
-            {
-                if (s.OnStageSeconds < 30f)
-                    line += $" ·{s.OnStageSeconds:F0}s";
-                else if (s.OnStageSeconds >= 60f)
-                    line += $" ·{s.OnStageSeconds:F0}s久";
-            }
-            return line;
-        }
-
-        private static string FormatAssistShort(string reasonKey)
+        private static string FormatAssistPlain(string reasonKey)
         {
             switch (reasonKey)
             {
-                case OrbitAssistReasons.PointerOverUi: return "自動·UI上（移開游標）";
+                case OrbitAssistReasons.PointerOverUi: return "暫停自動：游標在 UI 上";
                 case OrbitAssistReasons.OrbitStartGrace:
                     {
                         float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
-                        return g > 0.05f ? $"自動·緩衝 {g:F1}s" : "自動·緩衝";
+                        return g > 0.05f ? $"剛啟動緩衝 {g:F0}s" : "剛啟動緩衝";
                     }
-                case OrbitAssistReasons.InputForcus: return "自動·輸入中";
+                case OrbitAssistReasons.InputForcus: return "暫停自動：正在輸入";
                 case OrbitAssistReasons.PoseQueued:
-                case OrbitAssistReasons.SelectionListPresentLegacy: return "自動·選姿中";
+                case OrbitAssistReasons.SelectionListPresentLegacy: return "正在選姿勢";
                 case OrbitAssistReasons.Changing:
                 case OrbitAssistReasons.NowChangeAnim:
-                case OrbitAssistReasons.PoseTransitionLegacy: return "自動·換姿中";
-                case OrbitAssistReasons.Rebinding: return "自動·換姿綁定";
-                case OrbitAssistReasons.PosePending: return "自動·換姿待（高潮後）";
-                case OrbitAssistReasons.MouseHolding: return "自動·按住";
+                case OrbitAssistReasons.PoseTransitionLegacy: return "正在換姿勢";
+                case OrbitAssistReasons.Rebinding: return "換姿勢綁定中";
+                case OrbitAssistReasons.PosePending: return "高潮後等待換姿勢";
+                case OrbitAssistReasons.MouseHolding: return "暫停自動：按住滑鼠";
                 case OrbitAssistReasons.RecentUiClick:
                     {
                         float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
-                        return u > 0.05f ? $"自動·UI點擊 {u:F1}s" : "自動·UI點擊";
+                        return u > 0.05f ? $"剛點過 UI，再等 {u:F0}s" : "剛點過 UI";
                     }
-                case OrbitAssistReasons.ManualBusy: return "自動·換角中";
-                case OrbitAssistReasons.NowOrgasm: return "鎖·高潮中（等結束）";
+                case OrbitAssistReasons.ManualBusy: return "手動換角中";
+                case OrbitAssistReasons.NowOrgasm: return "高潮進行中";
                 case OrbitAssistReasons.OrgasmQuiet:
                     {
                         float q = OrbitBehaviorHub.RemainingOrgasmQuietSeconds();
-                        return q > 0.05f ? $"鎖·高潮後安靜 {q:F1}s" : "鎖·高潮後安靜";
+                        return q > 0.05f ? $"高潮後安靜 {q:F0}s" : "高潮後安靜";
                     }
                 case OrbitAssistReasons.LongAppreciation:
                     return OrbitBehaviorHub.IsMotionEscapeArmed()
-                        ? "窺視／場所姿·可推進"
-                        : "窺視·按 L 或 N 換下一姿勢";
-                case OrbitAssistReasons.AssistInterval: return "自動·節流";
-                case OrbitAssistReasons.CheckpointInterval: return "自動·節流";
-                case OrbitAssistReasons.CheckpointLegacyCooldown: return "自動·節流";
-                case OrbitAssistReasons.None: return "自動·就緒";
-                default: return string.IsNullOrEmpty(reasonKey) || reasonKey == OrbitAssistReasons.None
-                    ? "自動·就緒"
-                    : $"自動·{reasonKey}";
+                        ? "窺視／場所姿：可推進"
+                        : "窺視中：按 L 或 N 換下一姿勢";
+                case OrbitAssistReasons.AssistInterval:
+                case OrbitAssistReasons.CheckpointInterval: return "稍候再自動推進";
+                case OrbitAssistReasons.None: return "自動：就緒";
+                default:
+                    return string.IsNullOrEmpty(reasonKey) || reasonKey == OrbitAssistReasons.None
+                        ? "自動：就緒"
+                        : "狀態：" + reasonKey;
             }
         }
 
-        /// <summary>Extra line for timed waits that are not (only) CanAutoAdvance reasons.</summary>
-        private static string FormatTimedLockLine(string suppressReasonKey)
+        private static string FormatTimedPlain(string suppressReasonKey)
         {
             float after = OrbitBehaviorHub.RemainingAfterIdleAutoEscapeSeconds();
             if (after > 0.05f)
-                return $"倒數·脫離AfterIdle {after:F1}s";
+                return $"倒數脫離閒置 {after:F0}s";
 
             float idle = OrbitBehaviorHub.RemainingIdleAutoEscapeSeconds();
             if (idle > 0.05f)
-                return $"倒數·脫離Idle {idle:F1}s";
+                return $"倒數脫離待機 {idle:F0}s";
 
-            // Mirror timed suppress on its own line when assist line is crowded / for clarity.
             if (suppressReasonKey == OrbitAssistReasons.OrgasmQuiet)
             {
                 float q = OrbitBehaviorHub.RemainingOrgasmQuietSeconds();
-                if (q > 0.05f)
-                    return $"倒數·高潮後 {q:F1}s";
+                if (q > 0.05f) return $"倒數 {q:F0}s";
             }
-            if (suppressReasonKey == OrbitAssistReasons.OrbitStartGrace)
-            {
-                float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
-                if (g > 0.05f)
-                    return $"倒數·緩衝 {g:F1}s";
-            }
-            if (suppressReasonKey == OrbitAssistReasons.RecentUiClick)
-            {
-                float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
-                if (u > 0.05f)
-                    return $"倒數·UI {u:F1}s";
-            }
-
             return "";
         }
 
-        /// <summary>Only show the nearest upcoming cycle event, ultra-compact.</summary>
         private static string FormatNextHint(in OrbitHudSnapshot snap)
         {
             float rotT = snap.SingleRotationSeconds;
-            float rtT = snap.RoundTripSeconds;
             if (rotT <= 0f) return "";
 
             float bestSec = float.MaxValue;
@@ -376,25 +295,79 @@ namespace HS2OrbitAndExciter
             if (snap.RotationsUntilRandom == 1)
             {
                 float sec = snap.TimeToCompleteCurrentRotation;
-                if (sec < bestSec) { bestSec = sec; best = "亂"; }
+                if (sec < bestSec) { bestSec = sec; best = $"亂數換焦點（約 {sec:F0}s）"; }
             }
             if (snap.RotationsUntilClothes == OrbitHudSnapshot.ClothesHintNextRoundTrip)
             {
                 float sec = snap.TimeToCompleteCurrentRoundTrip;
-                if (sec < bestSec) { bestSec = sec; best = "衣"; }
+                if (sec < bestSec) { bestSec = sec; best = $"換衣（約 {sec:F0}s）"; }
             }
             else if (snap.RotationsUntilClothes == 1)
             {
                 float sec = snap.TimeToCompleteCurrentRotation;
-                if (sec < bestSec) { bestSec = sec; best = "衣"; }
+                if (sec < bestSec) { bestSec = sec; best = $"換衣（約 {sec:F0}s）"; }
             }
             if (snap.RoundTripsUntilPose == 1)
             {
                 float sec = snap.TimeToCompleteCurrentRoundTrip;
-                if (sec < bestSec) { bestSec = sec; best = "姿"; }
+                if (sec < bestSec) { bestSec = sec; best = $"換姿勢（約 {sec:F0}s）"; }
             }
 
-            return best.Length == 0 ? "" : $"次·{best}";
+            return best;
+        }
+
+        private static string FormatOrgasmFx()
+        {
+            string tattoo = OrbitOrgasmTattoo.Enabled
+                ? (OrbitOrgasmTattoo.Count > 0
+                    ? $"刺青×{OrbitOrgasmTattoo.Count}"
+                    : "刺青開")
+                : "刺青關";
+            return $"特效：{tattoo}｜{OrbitOrgasmBustGrowth.HudStatus}｜{OrbitOrgasmNippleSpray.HudStatus}";
+        }
+
+        private static string FormatPoolShort()
+        {
+            var s = OrbitManualDirector.GetHudStats();
+            if (s.CharaPool <= 0 && !s.OnStageTracked)
+                return "";
+            string line = $"女角池 {s.CharaPool}";
+            if (s.Excluded > 0) line += $"｜已排除 {s.Excluded}";
+            if (s.Preferred > 0) line += $"｜優先 {s.Preferred}";
+            return line;
+        }
+
+        private static void AppendVoiceTour(System.Collections.Generic.List<HudLine> list)
+        {
+            if (!OrbitVoiceTour.Enabled)
+            {
+                list.Add(new HudLine(LineKind.Dim, "語音巡禮：關"));
+                return;
+            }
+
+            if (!OrbitVoiceTour.IsActive && OrbitController.TryGetHScene() == null)
+            {
+                list.Add(new HudLine(LineKind.Body, "語音巡禮：進 H 後開始"));
+                return;
+            }
+
+            list.Add(new HudLine(LineKind.Body,
+                $"語音：{OrbitVoiceTour.CurrentLabelZh}  {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}  （本段 {OrbitVoiceTour.HitsInStage}/{OrbitVoiceTour.HitsPerStage}）"));
+            if (!string.IsNullOrEmpty(OrbitVoiceTour.LastTrigger) && OrbitVoiceTour.LastTrigger != "—")
+                list.Add(new HudLine(LineKind.Dim, "上次觸發：" + OrbitVoiceTour.LastTrigger));
+        }
+
+        private enum LineKind { Title, Body, Dim }
+
+        private readonly struct HudLine
+        {
+            internal HudLine(LineKind kind, string text)
+            {
+                Kind = kind;
+                Text = text;
+            }
+            internal LineKind Kind { get; }
+            internal string Text { get; }
         }
     }
 }
