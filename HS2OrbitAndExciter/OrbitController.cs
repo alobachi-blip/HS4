@@ -60,6 +60,9 @@ namespace HS2OrbitAndExciter
         private OrbitBodyAxis.OrbitAxisMode? _plannedAxisMode;
         private float? _plannedStartAzimuth;
         private Vector3 _plannedAxisSnapshot;
+        /// <summary>本圈距離倍率（相對焦點距離設定；1＝不 zoom）。</summary>
+        private float _circleZoomMult = 1f;
+        private float? _plannedZoomMult;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -463,7 +466,23 @@ namespace HS2OrbitAndExciter
             OrbitCycleCoordinator.ApplyRotationEffects(
                 this, hScene, ctrl, _rotationCount, allowNewRelativeAngle, roundTripJustCompleted);
 
-            // 不每圈 zoom（關掉搖晃）
+            // 每圈 zoom（可關；幅度由設定 Near／Far 決定）
+            if (HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true)
+            {
+                if (_plannedZoomMult.HasValue)
+                {
+                    _circleZoomMult = _plannedZoomMult.Value;
+                    _plannedZoomMult = null;
+                }
+                else
+                    _circleZoomMult = RollCircleZoomMult();
+            }
+            else
+            {
+                _circleZoomMult = 1f;
+                _plannedZoomMult = null;
+            }
+
             if (allowNewRelativeAngle)
             {
                 if (_plannedAxisMode.HasValue && _plannedStartAzimuth.HasValue && IsPlannedAxisStillValid(hScene))
@@ -484,7 +503,9 @@ namespace HS2OrbitAndExciter
 
         private void MaybePrecomputeNextCircle(HScene hScene)
         {
-            if (_plannedAxisMode.HasValue && _plannedStartAzimuth.HasValue)
+            bool needAxis = !_plannedAxisMode.HasValue || !_plannedStartAzimuth.HasValue;
+            bool needZoom = HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true && !_plannedZoomMult.HasValue;
+            if (!needAxis && !needZoom)
                 return;
             if (_orbitAccumulatedDegrees < 180f && _orbitPhase == 0)
                 return;
@@ -496,10 +517,33 @@ namespace HS2OrbitAndExciter
             if (!basis.Valid)
                 return;
 
-            var next = OrbitBodyAxis.PickNextMode(_orbitAxisMode);
-            _plannedAxisMode = next;
-            _plannedStartAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
-            _plannedAxisSnapshot = OrbitBodyAxis.SpinAxis(basis, next);
+            if (needAxis)
+            {
+                var next = OrbitBodyAxis.PickNextMode(_orbitAxisMode);
+                _plannedAxisMode = next;
+                _plannedStartAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
+                _plannedAxisSnapshot = OrbitBodyAxis.SpinAxis(basis, next);
+            }
+            if (needZoom)
+                _plannedZoomMult = RollCircleZoomMult();
+        }
+
+        private static float RollCircleZoomMult()
+        {
+            float near = HS2OrbitAndExciter.OrbitZoomNearMult?.Value ?? 0.65f;
+            float far = HS2OrbitAndExciter.OrbitZoomFarMult?.Value ?? 1.75f;
+            if (near > far)
+            {
+                float t = near;
+                near = far;
+                far = t;
+            }
+            near = Mathf.Clamp(near, 0.4f, 1f);
+            far = Mathf.Clamp(far, 1f, 2.5f);
+            // 明顯拉近或拉遠（各半）
+            return UnityEngine.Random.value < 0.5f
+                ? UnityEngine.Random.Range(near, Mathf.Lerp(near, 1f, 0.35f))
+                : UnityEngine.Random.Range(Mathf.Lerp(1f, far, 0.35f), far);
         }
 
         private bool IsPlannedAxisStillValid(HScene hScene)
@@ -553,7 +597,7 @@ namespace HS2OrbitAndExciter
             Quaternion look = Quaternion.LookRotation(dirLocal.normalized, upLocal.normalized);
             ctrl.Rot = look.eulerAngles;
 
-            SetDistanceForFocus(ctrl, chaFemales, focusIdx, 1f);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
         }
 
         private void ApplyBoneFocusOnly(HScene hScene, CameraControl_Ver2 ctrl)
@@ -567,7 +611,7 @@ namespace HS2OrbitAndExciter
                 return;
             _lastValidFocusWorld = basis.FocusWorld;
             ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
-            SetDistanceForFocus(ctrl, chaFemales, focusIdx, 1f);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
         }
 
         private static float NormalizeDeg(float deg)
@@ -665,10 +709,18 @@ namespace HS2OrbitAndExciter
             if (mult < 1f)
                 mult = OrbitDistanceMultMin;
             mult = Mathf.Clamp(mult, OrbitDistanceMultMin, OrbitDistanceMultMax);
-            mult *= Mathf.Clamp(circleZoomMult, 0.85f, 1.45f);
+            float zoomLo = HS2OrbitAndExciter.OrbitZoomNearMult?.Value ?? 0.65f;
+            float zoomHi = HS2OrbitAndExciter.OrbitZoomFarMult?.Value ?? 1.75f;
+            if (zoomLo > zoomHi)
+            {
+                float t = zoomLo;
+                zoomLo = zoomHi;
+                zoomHi = t;
+            }
+            mult *= Mathf.Clamp(circleZoomMult, zoomLo, zoomHi);
             float d = bodyHeight * mult;
-            float minD = OrbitDistanceMultMin * bodyHeight;
-            float maxD = OrbitDistanceMultMax * 1.25f * bodyHeight; // 遠端行程拉大
+            float minD = OrbitDistanceMultMin * bodyHeight * Mathf.Min(1f, zoomLo);
+            float maxD = OrbitDistanceMultMax * bodyHeight * Mathf.Max(1.25f, zoomHi);
             d = Mathf.Clamp(d, minD, maxD);
             ctrl.CameraDir = new Vector3(0f, 0f, -d);
         }
@@ -711,7 +763,7 @@ namespace HS2OrbitAndExciter
             if (newOpt < 0 || newOpt > maxFocus)
                 return;
 
-            SetDistanceForFocus(ctrl, chaFemales, newOpt, 1f);
+            SetDistanceForFocus(ctrl, chaFemales, newOpt, _circleZoomMult);
             _currentViewOption = newOpt;
             // 1A：立刻用骨焦點
             ApplyBoneFocusOnly(hScene, ctrl);
@@ -736,7 +788,7 @@ namespace HS2OrbitAndExciter
             {
                 _lastValidFocusWorld = basis.FocusWorld;
                 ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
-                SetDistanceForFocus(ctrl, chaFemales, option, 1f);
+                SetDistanceForFocus(ctrl, chaFemales, option, _circleZoomMult);
                 return;
             }
 
@@ -744,7 +796,7 @@ namespace HS2OrbitAndExciter
             if (_lastValidFocusWorld.HasValue && ctrl.transBase != null)
             {
                 ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(_lastValidFocusWorld.Value);
-                SetDistanceForFocus(ctrl, chaFemales, 1, 1f);
+                SetDistanceForFocus(ctrl, chaFemales, 1, _circleZoomMult);
             }
         }
 
@@ -842,6 +894,8 @@ namespace HS2OrbitAndExciter
                 _roundTripCount = 0;
                 _plannedAxisMode = null;
                 _plannedStartAzimuth = null;
+                _circleZoomMult = 1f;
+                _plannedZoomMult = null;
                 _lastValidFocusWorld = null;
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);

@@ -33,6 +33,12 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrbitDistanceChest;
         /// <summary>Orbit camera distance = body height × this (pelvis focus).</summary>
         internal static ConfigEntry<float>? OrbitDistancePelvis;
+        /// <summary>每圈是否亂數拉近／拉遠（相對焦點距離）。</summary>
+        internal static ConfigEntry<bool>? OrbitCircleZoomEnabled;
+        /// <summary>每圈拉近倍率下限（相對焦點距離；越小越近）。</summary>
+        internal static ConfigEntry<float>? OrbitZoomNearMult;
+        /// <summary>每圈拉遠倍率上限（相對焦點距離；越大越遠）。</summary>
+        internal static ConfigEntry<float>? OrbitZoomFarMult;
         /// <summary>Override faintness state in H scene (HScene.ctrlFlag.isFaintness). When toggled, pose list and camera view update.</summary>
         internal static ConfigEntry<bool>? OverrideFaintness;
         /// <summary>When false, the compact orbit status HUD is disabled entirely.</summary>
@@ -126,6 +132,12 @@ namespace HS2OrbitAndExciter
                 "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
             OrbitDistancePelvis = Config.Bind("Orbit", "OrbitDistancePelvis", 1.4f,
                 "Body-focus orbit: distance multiplier vs character height (1.35–3 recommended; values below 1 are treated as 1.35).");
+            OrbitCircleZoomEnabled = Config.Bind("Orbit", "OrbitCircleZoomEnabled", true,
+                "When true, each rotation picks a random zoom between Near and Far multipliers (clear push-in / pull-back).");
+            OrbitZoomNearMult = Config.Bind("Orbit", "OrbitZoomNearMult", 0.65f,
+                new ConfigDescription("Per-circle zoom-in multiplier vs focus distance (smaller = closer).", new AcceptableValueRange<float>(0.4f, 1f)));
+            OrbitZoomFarMult = Config.Bind("Orbit", "OrbitZoomFarMult", 1.75f,
+                new ConfigDescription("Per-circle zoom-out multiplier vs focus distance (larger = farther).", new AcceptableValueRange<float>(1f, 2.5f)));
             OverrideFaintness = Config.Bind("State", "OverrideFaintness", false,
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,

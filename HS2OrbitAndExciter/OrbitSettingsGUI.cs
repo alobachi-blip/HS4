@@ -22,6 +22,8 @@ namespace HS2OrbitAndExciter
         private string _orbitDistHeadStr = "";
         private string _orbitDistChestStr = "";
         private string _orbitDistPelvisStr = "";
+        private string _orbitZoomNearStr = "";
+        private string _orbitZoomFarStr = "";
 
         private bool _lastOverrideFaintness;
 
@@ -53,6 +55,8 @@ namespace HS2OrbitAndExciter
                 _orbitDistHeadStr = (HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 1.4f).ToString("F2");
                 _orbitDistChestStr = (HS2OrbitAndExciter.OrbitDistanceChest?.Value ?? 1.4f).ToString("F2");
                 _orbitDistPelvisStr = (HS2OrbitAndExciter.OrbitDistancePelvis?.Value ?? 1.4f).ToString("F2");
+                _orbitZoomNearStr = (HS2OrbitAndExciter.OrbitZoomNearMult?.Value ?? 0.65f).ToString("F2");
+                _orbitZoomFarStr = (HS2OrbitAndExciter.OrbitZoomFarMult?.Value ?? 1.75f).ToString("F2");
                 _lastOverrideFaintness = HS2OrbitAndExciter.OverrideFaintness?.Value ?? false;
                 _needSyncFromConfig = false;
             }
@@ -119,7 +123,7 @@ namespace HS2OrbitAndExciter
             if (HS2OrbitAndExciter.OrbitTimePer360 != null)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Label("單向水平 360° 所需秒數：", label, GUILayout.Width(220));
+                GUILayout.Label("轉動速度：單向 360° 秒數（越小越快；預設 10）：", label, GUILayout.Width(300));
                 GUI.SetNextControlName("OrbitTimePer360");
                 _orbitTimeStr = GUILayout.TextField(_orbitTimeStr, GUILayout.Width(60));
                 if (float.TryParse(_orbitTimeStr, out float v) && v > 0.1f && v <= 120f)
@@ -145,10 +149,23 @@ namespace HS2OrbitAndExciter
                     " 依上方「每幾次旋轉」切換衣物階段（次數為 0 時改為每迴轉一次）");
             }
 
-            GUILayout.Label("焦點距離（單位：全身長倍率，建議 1～3；輸入後立即套用並寫入設定）", label);
+            GUILayout.Label("焦點基準距離（全身長倍率，建議 1.35～3；每圈 zoom 以此為 1.0）", label);
             DrawDistField("頭部焦點距離", "OrbitDistHead", ref _orbitDistHeadStr, HS2OrbitAndExciter.OrbitDistanceHead);
             DrawDistField("胸部焦點距離", "OrbitDistChest", ref _orbitDistChestStr, HS2OrbitAndExciter.OrbitDistanceChest);
             DrawDistField("骨盆焦點距離", "OrbitDistPelvis", ref _orbitDistPelvisStr, HS2OrbitAndExciter.OrbitDistancePelvis);
+
+            if (HS2OrbitAndExciter.OrbitCircleZoomEnabled != null)
+            {
+                HS2OrbitAndExciter.OrbitCircleZoomEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.OrbitCircleZoomEnabled.Value,
+                    " 每圈亂數拉近／拉遠（關掉則固定距離、無 zoom）");
+            }
+            if (HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true)
+            {
+                GUILayout.Label("Zoom 限度（相對上方焦點距離；預設近 0.65／遠 1.75，比舊版明顯）：", label);
+                DrawFloatField("拉近倍率（越小越近）", "OrbitZoomNear", ref _orbitZoomNearStr, HS2OrbitAndExciter.OrbitZoomNearMult, 0.4f, 1f);
+                DrawFloatField("拉遠倍率（越大越遠）", "OrbitZoomFar", ref _orbitZoomFarStr, HS2OrbitAndExciter.OrbitZoomFarMult, 1f, 2.5f);
+            }
 
             GUILayout.Label(
                 "已停用／退役：依迴轉換姿勢（ChangePoseOnCycle）、環視自動選動作、檢查點逾時強制跳關。換段請用選池（L）與流程熱鍵。",
@@ -433,16 +450,29 @@ namespace HS2OrbitAndExciter
             ref string text,
             BepInEx.Configuration.ConfigEntry<float>? entry)
         {
+            DrawFloatField(title, controlName, ref text, entry, 1f, 3f, requestViewReapply: true);
+        }
+
+        private void DrawFloatField(
+            string title,
+            string controlName,
+            ref string text,
+            BepInEx.Configuration.ConfigEntry<float>? entry,
+            float min,
+            float max,
+            bool requestViewReapply = false)
+        {
             if (entry == null) return;
             var label = _labelStyle ?? GUI.skin.label;
             GUILayout.BeginHorizontal();
-            GUILayout.Label(title + "：", label, GUILayout.Width(120));
+            GUILayout.Label(title + "：", label, GUILayout.Width(160));
             GUI.SetNextControlName(controlName);
             text = GUILayout.TextField(text, GUILayout.Width(50));
-            if (float.TryParse(text, out float v) && v >= 1f && v <= 3f)
+            if (float.TryParse(text, out float v) && v >= min && v <= max)
             {
                 entry.Value = v;
-                OrbitController.RequestViewReapply();
+                if (requestViewReapply)
+                    OrbitController.RequestViewReapply();
             }
             GUILayout.EndHorizontal();
         }
