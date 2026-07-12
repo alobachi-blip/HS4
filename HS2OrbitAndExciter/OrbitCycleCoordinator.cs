@@ -37,15 +37,7 @@ namespace HS2OrbitAndExciter
 
         internal static void ApplyPoseIfNeeded(HScene hScene, int roundTripCount)
         {
-            if (HS2OrbitAndExciter.ChangePoseOnCycle?.Value != true)
-                return;
-            int m = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
-            if (m <= 0)
-                return;
-            if (roundTripCount % m != 0)
-                return;
-
-            OrbitPoseDirector.RequestPoseChange(hScene, PoseChangeSource.Cycle);
+            // §9 C-脫鉤：環視圈數不得換姿；換段只認選池
         }
     }
 }

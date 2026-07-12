@@ -315,8 +315,8 @@ namespace HS2OrbitAndExciter
                     }
                 case OrbitAssistReasons.LongAppreciation:
                     return OrbitBehaviorHub.IsMotionEscapeArmed()
-                        ? "欣賞·已解鎖（推進中）"
-                        : "欣賞·等 L／滾輪／N";
+                        ? "窺視／場所姿·可推進"
+                        : "窺視·按 L 或 N 換下一姿勢";
                 case OrbitAssistReasons.AssistInterval: return "自動·節流";
                 case OrbitAssistReasons.CheckpointInterval: return "自動·節流";
                 case OrbitAssistReasons.CheckpointLegacyCooldown: return "自動·節流";

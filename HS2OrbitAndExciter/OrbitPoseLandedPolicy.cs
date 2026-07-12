@@ -9,20 +9,22 @@ namespace HS2OrbitAndExciter
         Unstick,
     }
 
-    /// <summary>Next step after a pose successfully lands.</summary>
+    /// <summary>落地後辨認進哪一格（出口交給 §2／§4／§5，不在此換段）。</summary>
     internal enum PoseLandedDecision
     {
         None,
-        /// <summary>A+B Idle: stay; clear arrival latch; wait L / wheel / N.</summary>
-        Appreciate,
-        /// <summary>Non-A+B Idle (or N): force WLoop / D_WLoop.</summary>
-        AutoStartSex,
-        /// <summary>AfterIdle: latched → immediate escape; else ≈2s via TickAfterIdleEscape.</summary>
-        TimedEscape,
+        /// <summary>進閒置 → 排程開幹。</summary>
+        EnterIdle,
+        /// <summary>進高潮後閒置 → 排程選池。</summary>
+        EnterAfterIdle,
+        /// <summary>進窺視 → 純播出（等 N／L）。</summary>
+        EnterPeeping,
+        /// <summary>進動作橋段 → 不動作。</summary>
+        EnterBridge,
     }
 
     /// <summary>
-    /// Single owner of "pose landed → what next". Replaces scattered auto_after_kick/pose/rebind/unstick.
+    /// 落地只辨認格子；出口由 <see cref="OrbitFsmFlow"/> 擁有（契約 D1）。
     /// </summary>
     internal static class OrbitPoseLandedPolicy
     {
@@ -31,24 +33,17 @@ namespace HS2OrbitAndExciter
             if (hScene == null || !OrbitBehaviorHub.IsOrbitAssistActive())
                 return PoseLandedDecision.None;
 
-            if (OrbitHelpers.IsFirstFemaleInActionLoop(hScene))
-                return PoseLandedDecision.None;
-
-            // Short orgasm AfterIdle — never gate on A+B pose id.
-            if (OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
-                return PoseLandedDecision.TimedEscape;
-
-            if (OrbitHelpers.IsFirstFemaleInIdle(hScene))
+            var cell = OrbitFsmCellClassifier.Classify(hScene);
+            return cell switch
             {
-                if (OrbitHelpers.IsLongAppreciationPose(hScene))
-                    return PoseLandedDecision.Appreciate;
-                return PoseLandedDecision.AutoStartSex;
-            }
-
-            return PoseLandedDecision.None;
+                OrbitFsmCell.Idle => PoseLandedDecision.EnterIdle,
+                OrbitFsmCell.AfterIdle => PoseLandedDecision.EnterAfterIdle,
+                OrbitFsmCell.Peeping => PoseLandedDecision.EnterPeeping,
+                OrbitFsmCell.ActionBridge => PoseLandedDecision.EnterBridge,
+                _ => PoseLandedDecision.None,
+            };
         }
 
-        /// <summary>Apply landed policy once for this land event.</summary>
         internal static void OnPoseLanded(HScene? hScene, PoseLandedSource source)
         {
             if (hScene == null || !OrbitBehaviorHub.IsOrbitAssistActive())
@@ -56,30 +51,45 @@ namespace HS2OrbitAndExciter
 
             var decision = Decide(hScene);
             string src = SourceTag(source);
-            OrbitStateMachineLog.Event("landed", DecisionTag(decision),
+            OrbitStateMachineLog.Event("落地", DecisionTag(decision),
                 "{\"source\":\"" + src + "\"}");
+
+            // 愛撫／女女落地縮腹（§19）
+            TryDeflateOnCaressOrLesbianLand(hScene);
 
             switch (decision)
             {
-                case PoseLandedDecision.Appreciate:
-                    // Arrival latch from L/cycle must not immediately TickIdleEscape out of peeping/masturbation Idle.
-                    OrbitBehaviorHub.ClearMotionEscapeLatch();
+                case PoseLandedDecision.EnterIdle:
+                    OrbitFsmFlow.OnEnteredIdle(hScene, "落地_" + src);
                     break;
 
-                case PoseLandedDecision.AutoStartSex:
-                    OrbitBehaviorHub.TryForceStartSex(hScene, "landed_" + src);
+                case PoseLandedDecision.EnterAfterIdle:
+                    OrbitFsmFlow.OnEnteredAfterIdle(hScene, "落地_" + src);
                     break;
 
-                case PoseLandedDecision.TimedEscape:
-                    // Latched → leave now; otherwise TickAfterIdleEscape / fake wheel / Harmony own the ≈2s.
-                    if (OrbitBehaviorHub.IsMotionEscapeArmed())
-                        OrbitBehaviorHub.TickAfterIdleEscape(hScene);
+                case PoseLandedDecision.EnterPeeping:
+                    OrbitFsmFlow.CancelIdleStartSchedule();
+                    OrbitFsmFlow.CancelAfterIdleSchedule();
+                    HS2OrbitAndExciter.Log?.LogInfo("Orbit: 進入窺視段（純播出；N／L→選池）");
                     break;
 
+                case PoseLandedDecision.EnterBridge:
                 case PoseLandedDecision.None:
                 default:
                     break;
             }
+        }
+
+        private static void TryDeflateOnCaressOrLesbianLand(HScene hScene)
+        {
+            var info = hScene.ctrlFlag?.nowAnimationInfo;
+            if (info == null)
+                return;
+            int cat = info.ActionCtrl.Item1;
+            // 愛撫 Item1==0；女女 Item1==4（契約 §19）
+            if (cat != 0 && cat != 4)
+                return;
+            PregnancyPlusAssist.TryDeflateOneLevel(hScene);
         }
 
         private static string SourceTag(PoseLandedSource source) =>
@@ -95,10 +105,11 @@ namespace HS2OrbitAndExciter
         private static string DecisionTag(PoseLandedDecision decision) =>
             decision switch
             {
-                PoseLandedDecision.Appreciate => "appreciate",
-                PoseLandedDecision.AutoStartSex => "auto_start_sex",
-                PoseLandedDecision.TimedEscape => "timed_escape",
-                _ => "none",
+                PoseLandedDecision.EnterIdle => "進閒置",
+                PoseLandedDecision.EnterAfterIdle => "進高潮後",
+                PoseLandedDecision.EnterPeeping => "進窺視",
+                PoseLandedDecision.EnterBridge => "進橋段",
+                _ => "無",
             };
     }
 }

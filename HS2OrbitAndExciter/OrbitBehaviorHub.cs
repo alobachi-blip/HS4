@@ -89,18 +89,25 @@ namespace HS2OrbitAndExciter
                 _manualSelectionSuppressUntilUnscaled = hoverUntil;
         }
 
-        internal static void NotifyFemaleOrgasm(HSceneFlagCtrl? ctrlFlag)
+        internal static void NotifyFemaleOrgasm(HSceneFlagCtrl? ctrlFlag) =>
+            NotifyOrgasmEvent(ctrlFlag, "女高潮");
+
+        /// <summary>§16～18：進高潮統一事件（女高潮／男射／女女等）。</summary>
+        internal static void NotifyOrgasmEvent(HSceneFlagCtrl? ctrlFlag, string kind)
         {
             if (ctrlFlag == null)
                 return;
 
+            // quiet 僅節奏用，不擋選池（選池走 OrbitFsmFlow）
             BeginOrgasmAssistQuiet();
             ResetNullSelectionTracking();
 
             OrbitOrgasmTattoo.OnOrgasm(ctrlFlag);
             OrbitOrgasmBustGrowth.OnOrgasm(ctrlFlag);
             OrbitOrgasmNippleSpray.OnOrgasm(ctrlFlag);
-            OrbitVoiceTour.OnFemaleOrgasm();
+            if (kind == "女高潮")
+                OrbitVoiceTour.OnFemaleOrgasm();
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: 高潮事件（{kind}）→ 刺青／胸／噴");
         }
 
         internal static void NotifyVoiceTourHit(string triggerLabel)
@@ -134,6 +141,8 @@ namespace HS2OrbitAndExciter
                 _lastCheckpointInvokeTimeUnscaled = -999f;
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
+                OrbitFsmFlow.Reset();
+                OrbitFaintnessAssist.ApplyOnAssistStart();
                 OrbitStatusHud.NotifyOrbitActivated();
             }
             else
@@ -145,6 +154,8 @@ namespace HS2OrbitAndExciter
                 _lastCheckpointInvokeTimeUnscaled = -999f;
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
+                OrbitFsmFlow.Reset();
+                OrbitFaintnessAssist.RestoreOnAssistStop();
             }
         }
 
@@ -343,7 +354,11 @@ namespace HS2OrbitAndExciter
         internal static bool CanAccumulateFeelDuringOrbit(HScene? hScene, bool waitingForPrepStart)
         {
             if (waitingForPrepStart) return false;
-            return OrbitHelpers.IsFirstFemaleInActionLoop(hScene);
+            if (!IsOrbitAssistActive()) return false;
+            // §21：協助開＋動作橋段內加 FEEL；不綁相機是否在轉
+            var cell = OrbitFsmCellClassifier.Classify(hScene);
+            return cell == OrbitFsmCell.ActionBridge
+                   || OrbitHelpers.IsFirstFemaleInActionLoop(hScene);
         }
 
         internal static void ResetNullSelectionTracking()
@@ -474,162 +489,19 @@ namespace HS2OrbitAndExciter
         /// <summary>Single path for auto-action assist. Does not clear initiative when gated off.</summary>
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
-            if (HS2OrbitAndExciter.OrbitAutoActionEnabled?.Value != true)
-                return false;
-            if (ctrlFlag == null)
-                return false;
-            if (!CanAutoAdvance(ctrlFlag, out _))
-            {
-                ResetNullSelectionTracking();
-                return false;
-            }
-            if (ctrlFlag.selectAnimationListInfo != null)
-            {
-                ResetNullSelectionTracking();
-                return false;
-            }
-            if (!IsNullSelectionReadyForAssist())
-                return false;
-            if (!TryConsumeAssistFlagPush(out _))
-                return false;
-
-            var flagType = ctrlFlag.GetType();
-            if (_isAutoActionChangeField == null && _isAutoActionChangeProp == null)
-            {
-                _isAutoActionChangeField = flagType.GetField("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_isAutoActionChangeField == null)
-                    _isAutoActionChangeProp = flagType.GetProperty("isAutoActionChange", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            }
-            try
-            {
-                if (_isAutoActionChangeField != null)
-                    _isAutoActionChangeField.SetValue(ctrlFlag, true);
-                else
-                    _isAutoActionChangeProp?.SetValue(ctrlFlag, true, null);
-            }
-            catch { /* ignore */ }
-            Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            OrbitStateMachineLog.Event("assist", "push_auto_action");
-            return true;
+            // §8 甲1：協助下不推 isAutoActionChange／initiative；換段只認選池
+            return false;
         }
 
         internal static void TickOrbitCheckpointAssist(HScene? hScene, float deltaTime)
         {
-            float timeout = HS2OrbitAndExciter.OrbitCheckpointTimeoutSeconds?.Value ?? 2f;
-            if (timeout <= 0f || hScene == null) return;
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null) return;
-
-            if (OrbitHelpers.IsFirstFemaleInActionLoop(hScene))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            if (!CanAutoAdvance(ctrlFlag, out _))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            if (ctrlFlag.selectAnimationListInfo != null)
-            {
-                _checkpointIdleTime = 0f;
-                ResetCheckpointInvokeCooldown();
-                return;
-            }
-            if (Input.GetMouseButton(0))
-            {
-                _checkpointIdleTime = 0f;
-                return;
-            }
-            if (IsCheckpointInvokeOnLegacyCooldown())
-                return;
-
-            _checkpointIdleTime += deltaTime;
-            if (_checkpointIdleTime < timeout) return;
-            _checkpointIdleTime = 0f;
-            if (!TryConsumeCheckpointInvoke(out _))
-                return;
-
-            if (_getAutoAnimationMethod == null)
-            {
-                _getAutoAnimationMethod = typeof(HScene).GetMethod("GetAutoAnimation", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_getAutoAnimationMethod == null)
-                    return;
-            }
-            try
-            {
-                _getAutoAnimationMethod.Invoke(hScene, new object[] { false });
-                if (ctrlFlag.selectAnimationListInfo == null)
-                    _getAutoAnimationMethod.Invoke(hScene, new object[] { true });
-            }
-            catch { /* ignore */ }
-
-            // P0: same-frame sanitize — never leave nDownPtn==0 under faintness.
-            if (SanitizeSelectedPose(hScene))
-            {
-                OrbitStateMachineLog.Event("checkpoint", "get_auto_sanitized_faint");
-                MarkCheckpointInvokeLegacyCooldown(timeout);
-                return;
-            }
-
-            MarkCheckpointInvokeLegacyCooldown(timeout);
-
-            bool hasSelAfter = ctrlFlag.selectAnimationListInfo != null;
-            if (hasSelAfter)
-                OrbitPoseDirector.SyncFromGameFlags(hScene);
-
-            OrbitStateMachineLog.Event("checkpoint", hasSelAfter ? "get_auto_ok" : "get_auto_empty_speed_bump");
-            if (!hasSelAfter)
-            {
-                try
-                {
-                    const float FallbackSpeedBump = 1.2f;
-                    Traverse.Create(ctrlFlag).Field("speed").SetValue(FallbackSpeedBump);
-                }
-                catch { /* ignore */ }
-            }
+            // §8 乙1：關掉外掛逾時／GetAutoAnimation 換段；換段只認選池
         }
 
         internal static bool TryInjectOrbitWheelBypass(ref float wheel)
         {
-            if (!IsOrbitAssistActive() || wheel != 0f)
-            {
-                _wheelBypassStartUnscaled = -1f;
-                return false;
-            }
-            var hScene = OrbitController.TryGetHScene();
-            if (hScene?.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
-            {
-                _wheelBypassStartUnscaled = -1f;
-                return false;
-            }
-            if (!OrbitBypassAnimatorGate.IsBypassAllowedForCurrentHScene())
-            {
-                _wheelBypassStartUnscaled = -1f;
-                return false;
-            }
-
-            // A+B long poses: fake wheel only after L / real scroll / cycle arms escape.
-            // Exception: post-orgasm AfterIdle (Orgasm_*_A) still uses timed bypass even on those pose ids.
-            if (OrbitHelpers.IsLongAppreciationPose(hScene)
-                && !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
-            {
-                _wheelBypassStartUnscaled = -1f;
-                if (!IsMotionEscapeArmed())
-                    return false;
-                wheel = WheelBypassValue;
-                return true;
-            }
-
-            // Short orgasm AfterIdle / normal Idle / Insert: timed fake-wheel advance.
-            if (_wheelBypassStartUnscaled < 0f)
-                _wheelBypassStartUnscaled = Time.unscaledTime;
-            float elapsed = Time.unscaledTime - _wheelBypassStartUnscaled;
-            if (elapsed < WheelBypassDelaySeconds)
-                return false;
-            _wheelBypassStartUnscaled = -1f;
-            wheel = WheelBypassValue;
-            return true;
+            // §7 A-還輪：停用全部假滾輪；真實滾輪還給原版
+            return false;
         }
 
         /// <summary>
@@ -676,55 +548,12 @@ namespace HS2OrbitAndExciter
                 _motionEscapeSawWait = true;
         }
 
-        /// <summary>
-        /// Force leave AfterIdle: short orgasm waits auto after ≈2s (even on A+B pose ids),
-        /// or immediately when escape latched.
-        /// </summary>
-        internal static bool ShouldForceAfterIdleEscape()
-        {
-            if (!_orbitAssistActive)
-            {
-                _afterIdleAutoEscapeSinceUnscaled = -1f;
-                return false;
-            }
-            var hScene = OrbitController.TryGetHScene();
-            if (hScene == null || !OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
-            {
-                _afterIdleAutoEscapeSinceUnscaled = -1f;
-                return false;
-            }
-            if (IsMotionEscapeArmed())
-                return true;
-            // Orgasm_*_A is always the short wait — never gate on long-appreciation pose id.
-            if (_afterIdleAutoEscapeSinceUnscaled < 0f)
-                _afterIdleAutoEscapeSinceUnscaled = Time.unscaledTime;
-            return Time.unscaledTime - _afterIdleAutoEscapeSinceUnscaled >= WheelBypassDelaySeconds;
-        }
+        /// <summary>§4：高潮後改由 <see cref="OrbitFsmFlow"/> 選池；不再強制回循環。</summary>
+        internal static bool ShouldForceAfterIdleEscape() => false;
 
-        /// <summary>
-        /// Force leave Idle: A+B long poses require escape latch; other Idle uses ≈2s auto (or latch).
-        /// </summary>
-        internal static bool ShouldForceIdleEscape()
-        {
-            if (!_orbitAssistActive)
-            {
-                _idleAutoEscapeSinceUnscaled = -1f;
-                return false;
-            }
-            var hScene = OrbitController.TryGetHScene();
-            if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene) || hScene.NowChangeAnim)
-            {
-                _idleAutoEscapeSinceUnscaled = -1f;
-                return false;
-            }
-            if (OrbitHelpers.IsLongAppreciationPose(hScene))
-                return IsMotionEscapeArmed();
-            if (IsMotionEscapeArmed())
-                return true;
-            if (_idleAutoEscapeSinceUnscaled < 0f)
-                _idleAutoEscapeSinceUnscaled = Time.unscaledTime;
-            return Time.unscaledTime - _idleAutoEscapeSinceUnscaled >= WheelBypassDelaySeconds;
-        }
+        /// <summary>§2：閒置開幹改走原版 IsStart（見 <see cref="OrbitFsmFlow.ShouldForceVanillaIsStart"/>）。</summary>
+        internal static bool ShouldForceIdleEscape() =>
+            OrbitFsmFlow.ShouldForceVanillaIsStart();
 
         /// <summary>
         /// When sel is set but HScene.Update never starts ChangeAnimation (seen on faint D_WLoop),

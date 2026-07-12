@@ -10,7 +10,7 @@ namespace HS2OrbitAndExciter
         internal const KeyCode WearKey = KeyCode.J;
         internal const KeyCode PoseCameraKey = KeyCode.K;
         internal const KeyCode PoseKey = KeyCode.L;
-        /// <summary>Force leave Idle/AfterIdle into WLoop (start sex).</summary>
+        /// <summary>Force leave Idle/AfterIdle — 語意改為「往前推」（依格：開幹／加速／選池）。</summary>
         internal const KeyCode StartSexKey = KeyCode.N;
         /// <summary>T = enable + place next stamp; Shift+T = disable.</summary>
         internal const KeyCode TattooKey = KeyCode.T;
@@ -19,11 +19,11 @@ namespace HS2OrbitAndExciter
         /// <summary>Force PregnancyPlus belly reset (HS2 H-scene inflation + story size).</summary>
         internal const KeyCode BellyResetKey = KeyCode.R;
 
-        /// <summary>Ultra-compact HUD legend: 角=換角, 套=換衣, 著=穿著, 鏡=姿勢鏡頭, 姿=換姿勢, 刺=T貼圖/⇧T關, 胸=胸回復.</summary>
-        internal const string HudLegend = "G角·H套·J著·K鏡·L姿·N幹·T刺+·⇧T關·B胸";
+        /// <summary>熱鍵圖例（說清楚、不自創縮詞）。</summary>
+        internal const string HudLegend = "G換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
 
         /// <summary>PregnancyPlus Live Inflation Shortcuts (KK_PregnancyPlus.cfg); Y/U step scaled 5×; R also forced by this plugin.</summary>
-        internal const string PregnancyHudLegend = "Y膨+×5·U膨-×5·R清腹";
+        internal const string PregnancyHudLegend = "Y肚子+·U肚子-·R清空肚子";
 
         /// <summary>Orgasm FX line prefix for HUD / settings.</summary>
         internal const string OrgasmFxHudPrefix = "高潮";

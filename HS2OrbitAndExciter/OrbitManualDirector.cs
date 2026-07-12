@@ -62,6 +62,7 @@ namespace HS2OrbitAndExciter
             ResetPoseCameraCycle();
             // §1 C1：換角不清本場已用；僅新 H 場清空
             OrbitPosePool.OnHSceneEntered();
+            OrbitFsmFlow.OnHSceneEntered();
             OrbitOrgasmTattoo.OnHSceneEntered();
             OrbitOrgasmBustGrowth.ResetHud();
             OrbitOrgasmNippleSpray.Reset();
@@ -81,10 +82,15 @@ namespace HS2OrbitAndExciter
                 return false;
             if (hScene.ctrlFlag?.selectAnimationListInfo != null)
                 return false;
-            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
-                return false;
+            // §6a：不擋 nowOrgasm／窺視播片
             if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
                 return false;
+            try
+            {
+                if (ConfirmDialog.active)
+                    return false;
+            }
+            catch { /* ConfirmDialog 未載入時略過 */ }
             return true;
         }
 
@@ -94,9 +100,14 @@ namespace HS2OrbitAndExciter
             if (_busy) return OrbitAssistReasons.ManualBusy;
             if (hScene.NowChangeAnim) return OrbitAssistReasons.Changing;
             if (hScene.ctrlFlag?.selectAnimationListInfo != null) return OrbitAssistReasons.PoseQueued;
-            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm) return OrbitAssistReasons.NowOrgasm;
             if (Singleton<HSceneSprite>.IsInstance() && Singleton<HSceneSprite>.Instance.isFade)
                 return OrbitAssistReasons.SpriteFade;
+            try
+            {
+                if (ConfirmDialog.active)
+                    return OrbitAssistReasons.ConfirmDialog;
+            }
+            catch { /* ignore */ }
             if (OrbitPoseDirector.Phase == DirectorState.Rebinding) return OrbitAssistReasons.Rebinding;
             if (OrbitPoseDirector.IsPoseChangeInFlight) return OrbitAssistReasons.PoseQueued;
             return OrbitAssistReasons.None;
@@ -173,18 +184,7 @@ namespace HS2OrbitAndExciter
 
         internal static bool TryChangePose(HScene hScene)
         {
-            // A+B Idle / waits: L latches escape first (AfterIdle also auto≈2s; latch accelerates).
-            OrbitBehaviorHub.RequestMotionEscape("L");
-            OrbitBehaviorHub.TickAfterIdleEscape(hScene);
-            OrbitBehaviorHub.TickIdleEscape(hScene);
-
-            // Sticky Changing: pose already applied but NowChangeAnim/sel left — unlock before gate.
-            if (OrbitBehaviorHub.TryResolveAppliedPoseChange(hScene))
-            {
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: L 解除已套用換姿鎖");
-                OrbitPoseLandedPolicy.OnPoseLanded(hScene, PoseLandedSource.Resolve);
-            }
-
+            // §6c／§1：L＝手動選池（各格）
             string block = DescribeHotkeyBlockReason(hScene);
             if (block == OrbitAssistReasons.PoseQueued
                 && !hScene.NowChangeAnim
@@ -206,25 +206,7 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            if (!OrbitPoseDirector.RequestHotkeyPoseChange(hScene))
-            {
-                string fail = OrbitPoseDirector.LastHotkeyFailReason;
-                if (string.IsNullOrEmpty(fail) || fail == OrbitAssistReasons.None)
-                    fail = OrbitAssistReasons.NoPoseCandidate;
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 被擋 {fail}");
-                return false;
-            }
-
-            var next = hScene.ctrlFlag?.selectAnimationListInfo;
-            string label = next == null || string.IsNullOrEmpty(next.nameAnimation)
-                ? "?"
-                : next.nameAnimation;
-            var last = OrbitPosePool.LastPick;
-            string line = last != null && last.Value.Line == PosePoolLine.Peeping
-                ? "窺視"
-                : "動作線";
-            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 選池 {label}（{line}）");
-            return true;
+            return OrbitFsmFlow.HandleL(hScene);
         }
 
         internal static bool TryCyclePoseCamera(HScene hScene, OrbitController host)

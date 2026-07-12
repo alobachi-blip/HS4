@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace HS2OrbitAndExciter
 {
-    internal enum PoseChangeSource { Cycle, External, Hotkey }
+    internal enum PoseChangeSource { Cycle, External, Hotkey, SelectPool }
 
     /// <summary>
     /// Director phases. Observable mapping (game flags):
@@ -275,12 +275,15 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            // Cycle pose (every N round-trips when ChangePoseOnCycle): same as L — arm escape from long waits.
-            if (source == PoseChangeSource.Cycle || source == PoseChangeSource.Hotkey)
+            // Cycle／選池：換姿中可 latch；選池手動仍走閘
+            if (source == PoseChangeSource.Cycle || source == PoseChangeSource.Hotkey || source == PoseChangeSource.SelectPool)
             {
-                OrbitBehaviorHub.RequestMotionEscape(source == PoseChangeSource.Cycle ? "cycle" : "L");
-                OrbitBehaviorHub.TickAfterIdleEscape(hScene);
-                OrbitBehaviorHub.TickIdleEscape(hScene);
+                if (source != PoseChangeSource.SelectPool)
+                {
+                    OrbitBehaviorHub.RequestMotionEscape(source == PoseChangeSource.Cycle ? "cycle" : "L");
+                    OrbitBehaviorHub.TickAfterIdleEscape(hScene);
+                    OrbitBehaviorHub.TickIdleEscape(hScene);
+                }
             }
 
             if (IsPoseChangeInFlight)
@@ -292,8 +295,8 @@ namespace HS2OrbitAndExciter
                     return false;
                 }
 
-                // Hotkey: clear abandoned plugin-only state (no sel, not changing).
-                if (source == PoseChangeSource.Hotkey
+                // Hotkey／選池：清掉廢棄的插件-only 態
+                if ((source == PoseChangeSource.Hotkey || source == PoseChangeSource.SelectPool)
                     && !hScene.NowChangeAnim
                     && hScene.ctrlFlag?.selectAnimationListInfo == null
                     && (_state == DirectorState.PosePending || _state == DirectorState.Rebinding))
@@ -309,8 +312,8 @@ namespace HS2OrbitAndExciter
                 }
                 else if (IsPoseChangeInFlight)
                 {
-                    // Stuck PoseQueued (no NowChangeAnim): kick instead of failing L forever.
-                    if (source == PoseChangeSource.Hotkey
+                    // Stuck PoseQueued：kick 而非永遠失敗
+                    if ((source == PoseChangeSource.Hotkey || source == PoseChangeSource.SelectPool)
                         && _state == DirectorState.PoseQueued
                         && !hScene.NowChangeAnim
                         && hScene.ctrlFlag?.selectAnimationListInfo != null
@@ -347,6 +350,10 @@ namespace HS2OrbitAndExciter
         internal static bool RequestHotkeyPoseChange(HScene hScene) =>
             RequestPoseChange(hScene, PoseChangeSource.Hotkey);
 
+        /// <summary>§1 選池專用：自動／手動共用；閘門不含 nowOrgasm。</summary>
+        internal static bool RequestSelectPoolPoseChange(HScene hScene) =>
+            RequestPoseChange(hScene, PoseChangeSource.SelectPool);
+
         internal static string DescribeBlockFromFlags(HScene? hScene)
         {
             if (hScene == null) return OrbitAssistReasons.NoHScene;
@@ -356,8 +363,7 @@ namespace HS2OrbitAndExciter
             if (hScene.ctrlFlag?.selectAnimationListInfo != null || _state == DirectorState.PoseQueued)
                 return OrbitAssistReasons.PoseQueued;
             if (_state == DirectorState.Rebinding) return OrbitAssistReasons.Rebinding;
-            if (hScene.ctrlFlag != null && hScene.ctrlFlag.nowOrgasm)
-                return OrbitAssistReasons.NowOrgasm;
+            // §6a：高潮中不擋選池／熱鍵（不再以 nowOrgasm 總擋）
             return OrbitAssistReasons.None;
         }
 
@@ -399,7 +405,7 @@ namespace HS2OrbitAndExciter
 
         private static bool CanAcceptRequestForSource(HScene hScene, PoseChangeSource source, out string reason)
         {
-            if (source == PoseChangeSource.Hotkey)
+            if (source == PoseChangeSource.Hotkey || source == PoseChangeSource.SelectPool)
             {
                 reason = OrbitManualDirector.DescribeHotkeyBlockReason(hScene);
                 return reason == OrbitAssistReasons.None;
@@ -457,6 +463,7 @@ namespace HS2OrbitAndExciter
                     return false;
                 }
                 string trigger = source == PoseChangeSource.Hotkey ? "L"
+                    : source == PoseChangeSource.SelectPool ? "選池"
                     : source == PoseChangeSource.Cycle ? "cycle"
                     : "auto";
                 var poolPick = OrbitPosePool.TryPick(

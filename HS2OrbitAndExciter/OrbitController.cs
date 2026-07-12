@@ -64,8 +64,12 @@ namespace HS2OrbitAndExciter
 
         private static float GetOrbitFeelAddPerSecond()
         {
-            var v = HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? 0.1f;
-            return v <= 0f ? 0f : v;
+            // §3／§21：感度有最小值，約 10 秒推進一循環階段（0.1／秒）
+            const float MinPerStageBudget = 0.1f;
+            var v = HS2OrbitAndExciter.FeelAddPerSecondWhenOrbit?.Value ?? MinPerStageBudget;
+            if (v <= 0f)
+                return MinPerStageBudget; // 協助開時不允許完全不加（避免卡死）
+            return Mathf.Max(v, MinPerStageBudget);
         }
 
         private const float OrbitSpeedAddPerSecond = 0.35f;
@@ -168,6 +172,7 @@ namespace HS2OrbitAndExciter
                 }
                 OrbitPoseDirector.TickStuckRecovery(hProbe);
                 OrbitVoiceTour.Tick(hProbe);
+                OrbitFsmFlow.Tick(hProbe);
                 OrbitStateMachineLog.Tick(hProbe);
             }
             else
@@ -277,13 +282,10 @@ namespace HS2OrbitAndExciter
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.StartSexKey))
             {
-                bool ok = OrbitBehaviorHub.TryForceStartSex(hScene, "N");
-                OrbitStateMachineLog.Hotkey("N", ok, ok ? "startsex" : "reject");
+                bool ok = OrbitFsmFlow.HandleN(hScene);
+                OrbitStateMachineLog.Hotkey("N", ok, ok ? "往前推" : "reject");
                 if (ok)
-                {
-                    HS2OrbitAndExciter.Log?.LogInfo("Orbit: N 開始做愛");
                     _lastHotkeyTime = Time.unscaledTime;
-                }
                 return;
             }
             if (Input.GetKeyDown(OrbitManualHotkeys.BustRestoreKey))

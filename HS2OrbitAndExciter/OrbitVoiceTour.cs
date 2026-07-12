@@ -238,6 +238,8 @@ namespace HS2OrbitAndExciter
                 {
                     _lastTrigger = "侍奉射精";
                     RegisterHit();
+                    // §16～18：男射也觸發刺青／胸／噴
+                    OrbitBehaviorHub.NotifyOrgasmEvent(ctrl, "男射精");
                 }
             }
             else

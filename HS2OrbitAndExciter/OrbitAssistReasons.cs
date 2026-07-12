@@ -36,6 +36,7 @@ namespace HS2OrbitAndExciter
 
         // Hotkey / cycle
         public const string SpriteFade = "spriteFade";
+        public const string ConfirmDialog = "confirmDialog";
         public const string NoHScene = "noHScene";
         public const string NoValidDownPose = "noValidDownPose";
         public const string NoPoseCandidate = "noPoseCandidate";

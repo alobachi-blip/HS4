@@ -53,6 +53,54 @@ namespace HS2OrbitAndExciter
             return any;
         }
 
+        /// <summary>§19：愛撫／女女落地縮腹一級（與內射對稱）。</summary>
+        internal static bool TryDeflateOneLevel(HScene? hScene)
+        {
+            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
+                return false;
+            if (hScene == null)
+                return false;
+
+            EnsureResolved();
+            if (_controllerType == null || _hs2Inflation == null)
+                return false;
+
+            var females = OrbitHelpers.GetChaFemales(hScene);
+            if (females == null || females.Length == 0)
+                return false;
+
+            bool any = false;
+            for (int i = 0; i < females.Length; i++)
+            {
+                var cha = females[i];
+                if (cha == null)
+                    continue;
+                // HS2Inflation(true) = 降一級（Preg+ API）
+                if (TryDeflateOnCha(cha))
+                    any = true;
+            }
+
+            if (any)
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 愛撫／女女落地，肚子降一級");
+            return any;
+        }
+
+        private static bool TryDeflateOnCha(ChaControl cha)
+        {
+            var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
+            if (ctrl == null)
+                return false;
+            try
+            {
+                _hs2Inflation!.Invoke(ctrl, new object[] { true });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         internal static bool TryResetBelly(HScene? hScene)
         {
             if (hScene == null)

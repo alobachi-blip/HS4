@@ -106,7 +106,7 @@ namespace HS2OrbitAndExciter
             return false;
         }
 
-        /// <summary>Vanilla Idle / D_Idle (pre-action wait).</summary>
+        /// <summary>Vanilla Idle / D_Idle only（契約：WIdle／SIdle 屬橋段）。</summary>
         public static bool IsFirstFemaleInIdle(HScene? hScene)
         {
             if (hScene == null) return false;
@@ -117,8 +117,7 @@ namespace HS2OrbitAndExciter
             var animBody = TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
             var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
-            return stateInfo.IsName("Idle") || stateInfo.IsName("D_Idle")
-                   || stateInfo.IsName("WIdle") || stateInfo.IsName("SIdle");
+            return stateInfo.IsName("Idle") || stateInfo.IsName("D_Idle");
         }
 
         /// <summary>True when first female is in post-orgasm AfterIdle (e.g. D_Orgasm_IN_A).</summary>
