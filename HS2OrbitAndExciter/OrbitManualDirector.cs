@@ -60,6 +60,8 @@ namespace HS2OrbitAndExciter
             EnsureFileCacheInitialized();
             MergeNewUserDataFiles();
             ResetPoseCameraCycle();
+            // §1 C1：換角不清本場已用；僅新 H 場清空
+            OrbitPosePool.OnHSceneEntered();
             OrbitOrgasmTattoo.OnHSceneEntered();
             OrbitOrgasmBustGrowth.ResetHud();
             OrbitOrgasmNippleSpray.Reset();
@@ -217,7 +219,11 @@ namespace HS2OrbitAndExciter
             string label = next == null || string.IsNullOrEmpty(next.nameAnimation)
                 ? "?"
                 : next.nameAnimation;
-            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 換姿 {label}");
+            var last = OrbitPosePool.LastPick;
+            string line = last != null && last.Value.Line == PosePoolLine.Peeping
+                ? "窺視"
+                : "動作線";
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: L 選池 {label}（{line}）");
             return true;
         }
 

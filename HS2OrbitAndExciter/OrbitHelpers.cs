@@ -348,6 +348,7 @@ namespace HS2OrbitAndExciter
         /// When faintness is active (and FaintnessType != 2), only poses with <c>nDownPtn != 0</c>
         /// are valid — otherwise <c>HScene.ChangeAnimation</c> aborts immediately and ops look dead.
         /// </summary>
+        /// <remarks>換段請改走 <see cref="OrbitPosePool"/>（§1 選池）。本函式僅保留給非選池用途。</remarks>
         public static HScene.AnimationListInfo? PickNextPose(
             HScene.AnimationListInfo? current,
             List<HScene.AnimationListInfo> all,

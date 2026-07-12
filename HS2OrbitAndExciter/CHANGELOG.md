@@ -2,6 +2,13 @@
 
 ## 2026-07-12
 
+### §1 選池（切片 1）：混池＋本場去重＋L 接入
+
+- 新增 `OrbitPosePool`：混池（動作線＋窺視）、優先未用／耗盡清空（B1）、空池放寬去重（D2）、換角不清已用（C1）。
+- 窺視判定：`ActionCtrl.Item1==3 && Item2==6`（對齊原版 `ChangeModeCtrl`→`Peeping`）；不用 `LongAppreciationPoseIds`。
+- `OrbitPoseDirector.TryQueuePoseChange` 改呼選池；L 日誌標「動作線／窺視」。
+- 重用既有 `OrbitShufflePool`；換姿管線仍走 `PoseDirector`。
+
 ### 重整：狀態基 — PoseLandedPolicy＋latch 契約＋invariant
 
 - **根因**：換姿清旗 ≠ 下一步；`auto_after_*` 散落且無視 A+B；`ClearSelection(ClearedPoseAlreadyApplied)` 先清 latch，Idle 保留死碼。

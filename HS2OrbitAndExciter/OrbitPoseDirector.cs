@@ -341,7 +341,7 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            return TryQueuePoseChange(hScene, explicitNext);
+            return TryQueuePoseChange(hScene, explicitNext, source);
         }
 
         internal static bool RequestHotkeyPoseChange(HScene hScene) =>
@@ -393,7 +393,7 @@ namespace HS2OrbitAndExciter
             if (!CanAcceptRequest(hScene, out _))
                 return;
 
-            if (TryQueuePoseChange(hScene, null))
+            if (TryQueuePoseChange(hScene, null, PoseChangeSource.Cycle))
                 _pendingCycleRequest = false;
         }
 
@@ -434,7 +434,10 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        private static bool TryQueuePoseChange(HScene hScene, HScene.AnimationListInfo? explicitNext)
+        private static bool TryQueuePoseChange(
+            HScene hScene,
+            HScene.AnimationListInfo? explicitNext,
+            PoseChangeSource source)
         {
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null)
@@ -446,13 +449,24 @@ namespace HS2OrbitAndExciter
             HScene.AnimationListInfo? next = explicitNext;
             if (next == null)
             {
+                // §1 選池：混池／本場去重／空池放寬；窺視用 ActionCtrl（非 LongAppreciation）
                 var all = OrbitHelpers.GetAllPoseList();
                 if (all.Count == 0)
                 {
                     _lastHotkeyFailReason = OrbitAssistReasons.NoPoseCandidate;
                     return false;
                 }
-                next = OrbitHelpers.PickNextPose(ctrlFlag.nowAnimationInfo, all, ctrlFlag);
+                string trigger = source == PoseChangeSource.Hotkey ? "L"
+                    : source == PoseChangeSource.Cycle ? "cycle"
+                    : "auto";
+                var poolPick = OrbitPosePool.TryPick(
+                    ctrlFlag.nowAnimationInfo, all, ctrlFlag, trigger);
+                if (poolPick == null)
+                {
+                    _lastHotkeyFailReason = OrbitAssistReasons.NoPoseCandidate;
+                    return false;
+                }
+                next = poolPick.Value.Info;
             }
             if (next == null)
             {
