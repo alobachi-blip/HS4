@@ -74,6 +74,8 @@ namespace HS2OrbitAndExciter
         private Vector3 _lockedTorsoUpLocal;
         private Vector3 _lockedFacingLocal;
         private Vector3 _lockedRightLocal;
+        /// <summary>上一幀相機 up（世界），用於視線接近鉛垂時短暫鎖定。</summary>
+        private Vector3? _previousCameraUpWorld;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -595,7 +597,8 @@ namespace HS2OrbitAndExciter
 
             float azimuth = NormalizeDeg(_startRelativeAzimuth + _orbitAccumulatedDegrees);
             Vector3 dirWorld = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, _orbitAxisMode, azimuth);
-            Vector3 upWorld = OrbitBodyAxis.CameraUp(basis, dirWorld);
+            Vector3 floorSky = OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld);
+            Vector3 upWorld = OrbitBodyAxis.CameraUp(basis, dirWorld, floorSky, ref _previousCameraUpWorld);
 
             Vector3 dirLocal = ctrl.transBase.InverseTransformDirection(dirWorld);
             Vector3 upLocal = ctrl.transBase.InverseTransformDirection(upWorld);
@@ -995,6 +998,8 @@ namespace HS2OrbitAndExciter
                 _plannedZoomMult = null;
                 _lastValidFocusWorld = null;
                 InvalidateLockedBasis();
+                _previousCameraUpWorld = null;
+                OrbitFloorNormal.ResetCache();
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);

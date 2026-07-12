@@ -182,15 +182,80 @@ namespace HS2OrbitAndExciter
             return (Quaternion.AngleAxis(azimuthDegrees, axis) * radial0).normalized;
         }
 
-        /// <summary>相機 up：盡量用軀幹上，投影到視線垂直面，減少滾轉搖晃。</summary>
-        internal static Vector3 CameraUp(Basis basis, Vector3 lookDirWorld)
+        /// <summary>
+        /// 相機 up：以地板／天空法線做 horizon-lock，避免畫面上方朝地面或朝腳底。
+        /// 視線接近鉛垂（萬向節死區）時短暫沿用上一幀 up。
+        /// </summary>
+        /// <param name="floorSkyward">地板法線（朝天空）；可為世界 up。</param>
+        /// <param name="previousUp">上一幀相機 up（可選）；成功後會寫回。</param>
+        internal static Vector3 CameraUp(
+            Basis basis,
+            Vector3 lookDirWorld,
+            Vector3 floorSkyward,
+            ref Vector3? previousUp)
         {
-            Vector3 up = Vector3.ProjectOnPlane(basis.TorsoUp, lookDirWorld);
-            if (up.sqrMagnitude < 1e-4f)
-                up = Vector3.ProjectOnPlane(Vector3.up, lookDirWorld);
-            if (up.sqrMagnitude < 1e-4f)
-                up = Vector3.up;
-            return up.normalized;
+            Vector3 look = lookDirWorld.sqrMagnitude > 1e-8f ? lookDirWorld.normalized : Vector3.forward;
+            Vector3 sky = floorSkyward.sqrMagnitude > 1e-6f ? floorSkyward.normalized : Vector3.up;
+            if (Vector3.Dot(sky, Vector3.up) < 0f)
+                sky = -sky;
+
+            // 視線太接近天空／地面法線 → 投影不穩，鎖上一幀
+            float alignSky = Mathf.Abs(Vector3.Dot(look, sky));
+            const float GimbalAlign = 0.96f; // ~16° 內視為死區
+
+            Vector3 up;
+            if (alignSky >= GimbalAlign && previousUp.HasValue && previousUp.Value.sqrMagnitude > 1e-6f)
+            {
+                up = Vector3.ProjectOnPlane(previousUp.Value, look);
+                if (up.sqrMagnitude < 1e-5f)
+                    up = previousUp.Value;
+            }
+            else
+            {
+                up = Vector3.ProjectOnPlane(sky, look);
+                if (up.sqrMagnitude < 1e-4f)
+                {
+                    if (previousUp.HasValue && previousUp.Value.sqrMagnitude > 1e-6f)
+                    {
+                        up = Vector3.ProjectOnPlane(previousUp.Value, look);
+                        if (up.sqrMagnitude < 1e-5f)
+                            up = previousUp.Value;
+                    }
+                    else
+                    {
+                        up = Vector3.Cross(look, Vector3.right);
+                        if (up.sqrMagnitude < 1e-6f)
+                            up = Vector3.Cross(look, Vector3.forward);
+                    }
+                }
+            }
+
+            up.Normalize();
+
+            // 禁止畫面上方朝地面（與天空法線反向）
+            if (Vector3.Dot(up, sky) < 0f)
+                up = -up;
+
+            // 禁止畫面上方朝女主角腳底（相對頭→腳）
+            Vector3 headDir = basis.TorsoUp.sqrMagnitude > 1e-6f ? basis.TorsoUp.normalized : sky;
+            Vector3 feetDir = -headDir;
+            float towardFeet = Vector3.Dot(up, feetDir);
+            float towardHead = Vector3.Dot(up, headDir);
+            if (towardFeet > towardHead && towardFeet > 0.2f)
+            {
+                Vector3 flipped = -up;
+                // 翻轉後仍不得倒向地面；若翻轉更貼近天空則採用
+                if (Vector3.Dot(flipped, sky) >= -0.05f
+                    && Vector3.Dot(flipped, sky) + 0.02f >= Vector3.Dot(up, sky))
+                    up = flipped;
+            }
+
+            // 再保險一次：翻完仍可能倒地
+            if (Vector3.Dot(up, sky) < 0f)
+                up = -up;
+
+            previousUp = up;
+            return up;
         }
     }
 }
