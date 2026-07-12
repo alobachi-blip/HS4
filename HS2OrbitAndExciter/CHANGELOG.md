@@ -6,7 +6,7 @@
 
 - 新增 `OrbitMapVanishAssist`：開環視協助後，把 `objMap` 下所有 Collider 寫入 `CameraControl_Ver2.lstMapVanish`（疊在原版 Excel 上）。
 - 排除女／男角色；地板／傢俱可藏。機制仍是撞到 → `SetActive(false)`。
-- 同地圖只注入一次；BepInEx log 可見 `vanish 補齊 +N`。
+- **同一地圖＋同一相機只注入一次**；關／開協助不重做；換地圖或相機重建才再補。
 
 ### 熱鍵：YUIOP 整排＋還原原版 R
 

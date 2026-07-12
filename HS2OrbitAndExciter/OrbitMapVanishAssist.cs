@@ -9,22 +9,16 @@ namespace HS2OrbitAndExciter
     /// <summary>
     /// §11 穿牆：原版 vanish 只藏 Excel 清單內物件；H／環視時把地圖下所有 Collider 補進
     /// <see cref="CameraControl_Ver2"/> 的 <c>lstMapVanish</c>（地板可藏；角色排除）。
-    /// 機制仍是撞到碰撞體 → <c>SetActive(false)</c>，不是材質半透明。
+    /// 同一地圖＋同一相機只做一次；關／開協助不重做。換地圖或相機重建才再補。
     /// </summary>
     internal static class OrbitMapVanishAssist
     {
         private static FieldInfo? _lstMapVanishField;
         private static bool _resolved;
         private static int _injectedMapInstanceId = -1;
-        private static int _injectedCount;
+        private static int _injectedCameraInstanceId = -1;
 
-        internal static void Reset()
-        {
-            _injectedMapInstanceId = -1;
-            _injectedCount = 0;
-        }
-
-        /// <summary>協助開啟或每幀備援：地圖就緒後只注入一次（同地圖實例）。</summary>
+        /// <summary>地圖就緒後對該相機只注入一次。</summary>
         internal static void EnsureInjected(HScene? hScene)
         {
             if (hScene == null)
@@ -34,12 +28,13 @@ namespace HS2OrbitAndExciter
             if (map == null)
                 return;
 
-            int mapId = map.GetInstanceID();
-            if (mapId == _injectedMapInstanceId)
-                return;
-
             var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
             if (ctrl == null)
+                return;
+
+            int mapId = map.GetInstanceID();
+            int camId = ctrl.GetInstanceID();
+            if (mapId == _injectedMapInstanceId && camId == _injectedCameraInstanceId)
                 return;
 
             EnsureResolved();
@@ -54,7 +49,6 @@ namespace HS2OrbitAndExciter
             int added = 0;
             var seenColliderNames = new HashSet<string>();
 
-            // 保留原版 Excel 已有名稱，避免重複刷同一碰撞名
             for (int i = 0; i < list.Count; i++)
             {
                 var existing = list[i];
@@ -71,7 +65,6 @@ namespace HS2OrbitAndExciter
                     continue;
                 if (string.IsNullOrEmpty(col.name))
                     continue;
-                // 同名碰撞：原版 VanishProc 依名字對；已有一筆即可（Excel 或我們剛加的）
                 if (!seenColliderNames.Add(col.name))
                     continue;
 
@@ -90,12 +83,12 @@ namespace HS2OrbitAndExciter
             }
 
             _injectedMapInstanceId = mapId;
-            _injectedCount = added;
+            _injectedCameraInstanceId = camId;
 
             try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
 
             HS2OrbitAndExciter.Log?.LogInfo(
-                $"Orbit: 地圖 vanish 補齊 +{added}（清單總計 {list.Count}；地板可藏；已排除角色）");
+                $"Orbit: 地圖 vanish 補齊 +{added}（清單總計 {list.Count}；同地圖／相機只做一次）");
             OrbitStateMachineLog.Event("環視", "vanish補齊", $"added={added};total={list.Count}");
         }
 
