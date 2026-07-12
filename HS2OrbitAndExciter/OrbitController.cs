@@ -9,11 +9,9 @@ using UnityEngine.EventSystems;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Drives orbit camera in H scene: Ctrl+Shift+O. Each <b>rotation</b> is one 360° leg (outbound then inbound); yaw uses
-    /// <c>_startOrbitY + _orbitAccumulatedDegrees</c> so inbound is a true reverse. Each full out+in is one <b>round-trip</b>.
-    /// Cycle side effects (N rotations / M round-trips) are delegated to <see cref="OrbitCycleCoordinator"/>.
-    /// Runs LateUpdate before <see cref="CameraControl_Ver2"/> (default 0) so yaw is written to CamDat.Rot and CameraUpdate() applies transBase correctly.
-    /// H-scene flag assist runs in <see cref="OrbitHSceneLateAssist"/> after game proc.
+    /// Drives orbit camera in H scene: Ctrl+Shift+O. Each <b>rotation</b> is one 360° leg around the body torso axis
+    /// (head−pelvis); inbound reverses the same relative azimuth. Each full out+in is one <b>round-trip</b>.
+    /// Assist ≠ spinning: V toggles camera spin only. Cycle side effects go to <see cref="OrbitCycleCoordinator"/>.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class OrbitController : MonoBehaviour
@@ -22,45 +20,46 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
 
-        private static readonly float[] AnglePresets = { 0f, 45f, 90f, 135f, 180f };
-
-        /// <summary>While orbit is on, return true so vanilla treats the player as able to interact (H UI action lists receive LMB). Yaw is still written in this LateUpdate before <see cref="CameraControl_Ver2.LateUpdate"/>.</summary>
+        /// <summary>While assist is on, return true so vanilla treats the player as able to interact. Yaw still written in LateUpdate.</summary>
         private static readonly BaseCameraControl_Ver2.NoCtrlFunc NoCtrlOrbit = () => true;
 
         private const float HotkeyCooldownSeconds = 0.25f;
-        /// <summary>When choosing orbit focus option, prefer the game's default camera (option==maxFocus) to reduce distance surprises.</summary>
-        private const float PreferGameDefaultCameraChance = 0.8f;
+        /// <summary>§11：環視期間幾乎只用骨焦點（舊 0.8 姿預設相機退役）。</summary>
+        private const float PreferGameDefaultCameraChance = 0.05f;
 
         private float _lastHotkeyTime = -999f;
         private int _manualDirectorHSceneId = -1;
 
-        private float _startOrbitY;
+        /// <summary>本圈起始：相機相對身體軸向的方位角（度）。</summary>
+        private float _startRelativeAzimuth;
         private int _orbitPhase;
         private float _orbitAccumulatedDegrees;
-        /// <summary>Completed single-direction 360° legs (outbound end + inbound end each +1).</summary>
+        /// <summary>Completed single-direction 360° legs.</summary>
         private int _rotationCount;
-        /// <summary>Completed full out+in cycles.</summary>
         private int _roundTripCount;
-        /// <summary>Current view option: 0..maxFocus-1 = body focus index, maxFocus = pose default camera. Total options = maxFocus + 1.</summary>
         private int _currentViewOption;
-        /// <summary>Index into sequence [0,1,2,3,2,1]; next step is (_currentClothesSequenceIndex + 1) % 6.</summary>
         private int _currentClothesSequenceIndex;
-        /// <summary>Track last nowAnimationInfo for pose-change detection; reapply view when it changes.</summary>
         private object? _lastNowAnimationInfoRef;
-        /// <summary>When true, next LateUpdate will call ApplyCurrentViewOption once (e.g. after faintness toggle).</summary>
         private static bool _requestViewReapplyNextFrame;
         private static OrbitController? _activeInstance;
 
         private static FieldInfo? _feelFField;
-        /// <summary>When orbit started in preparation (Idle + speed 0): wait this many seconds then set speed=1 to start; excitement only accumulates after start.</summary>
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
-        /// <summary>Elapsed prep seconds frozen while pose transition is active.</summary>
         private float _prepFrozenElapsed = -1f;
         private const float PrepWaitSeconds = 3f;
 
         private bool _hudSnapshotValid;
         private OrbitHudSnapshot _hudSnapshot;
+
+        /// <summary>§11 1A：上一有效骨焦點（世界座標），失敗時回退。</summary>
+        private Vector3? _lastValidFocusWorld;
+        /// <summary>提前算好的下一圈相對角 Δ（空檔算；軸變則作廢）。</summary>
+        private float? _plannedRelativeDelta;
+        private Vector3 _plannedAxisSnapshot;
+        /// <summary>每圈 zoom 倍率（相對設定距離）。</summary>
+        private float _circleZoomMult = 1f;
+        private float? _plannedZoomMult;
 
         private static float GetOrbitFeelAddPerSecond()
         {
@@ -298,6 +297,15 @@ namespace HS2OrbitAndExciter
             {
                 if (PregnancyPlusAssist.TryResetBelly(hScene))
                     _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
+
+            // §11：V＝只停／恢復環視轉動（協助照常）
+            if (Input.GetKeyDown(OrbitManualHotkeys.StopOrbitCameraKey)
+                && OrbitBehaviorHub.IsOrbitAssistActive())
+            {
+                OrbitBehaviorHub.ToggleOrbitCameraSpinning();
+                _lastHotkeyTime = Time.unscaledTime;
             }
         }
 
@@ -376,13 +384,18 @@ namespace HS2OrbitAndExciter
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
             }
 
+            // 貫徹原版穿牆透明（圖像 Shield）
+            try { ctrl.ConfigVanish = Manager.Config.GraphicData.Shield; } catch { /* ignore */ }
+
             float orbitTime = HS2OrbitAndExciter.OrbitTimePer360?.Value ?? 10f;
             if (orbitTime <= 0f) orbitTime = 10f;
             float speedDegPerSec = 360f / orbitTime;
             float dt = Time.deltaTime;
 
-            // Only G/H reload pauses yaw. Pose transition must keep orbiting (rebind on complete).
-            if (!OrbitManualDirector.IsCameraPaused)
+            bool spinning = OrbitBehaviorHub.IsOrbitCameraSpinning()
+                            && !OrbitManualDirector.IsCameraPaused;
+
+            if (spinning)
             {
                 bool freezeCycle = OrbitPoseDirector.ShouldFreezeCycleCounters;
                 if (_orbitPhase == 0)
@@ -395,7 +408,7 @@ namespace HS2OrbitAndExciter
                         if (!freezeCycle)
                         {
                             _rotationCount++;
-                            OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: false, roundTripJustCompleted: false);
+                            OnRotationBoundary(hScene, ctrl, allowNewRelativeAngle: true, roundTripJustCompleted: false);
                         }
                     }
                 }
@@ -410,22 +423,164 @@ namespace HS2OrbitAndExciter
                         {
                             _rotationCount++;
                             _roundTripCount++;
-                            OrbitCycleCoordinator.ApplyRotationEffects(this, hScene, ctrl, _rotationCount, allowStartYRandom: true, roundTripJustCompleted: true);
-                            OrbitCycleCoordinator.ApplyPoseIfNeeded(hScene, _roundTripCount);
+                            OnRotationBoundary(hScene, ctrl, allowNewRelativeAngle: true, roundTripJustCompleted: true);
                         }
                     }
                 }
+
+                // 空檔預算下一圈相對角＋zoom（軸變則作廢）
+                MaybePrecomputeNextCircle(hScene);
+
+                ApplyBodyAxisCamera(hScene, ctrl);
+            }
+            else
+            {
+                // 停轉：仍每幀重綁骨焦點，保留看部位與距離
+                ApplyBoneFocusOnly(hScene, ctrl);
             }
 
-            float rotY = _startOrbitY + _orbitAccumulatedDegrees;
-            rotY = ((rotY % 360f) + 360f) % 360f;
-            // Do NOT assign CameraAngle: its setter does transform.rotation = Euler(v) without transBase, breaking orbit vs CameraUpdate().
-            // Match game autoCamera: only CamDat.Rot; CameraControl_Ver2.LateUpdate -> CameraUpdate applies transBase * Euler(CamDat.Rot).
-            var rot = ctrl.CameraAngle;
-            rot.y = rotY;
-            ctrl.Rot = rot;
-
             RefreshHudSnapshot(hScene, orbitTime, speedDegPerSec);
+        }
+
+        private void OnRotationBoundary(
+            HScene hScene,
+            CameraControl_Ver2 ctrl,
+            bool allowNewRelativeAngle,
+            bool roundTripJustCompleted)
+        {
+            OrbitCycleCoordinator.ApplyRotationEffects(
+                this, hScene, ctrl, _rotationCount, allowNewRelativeAngle, roundTripJustCompleted);
+
+            // 每圈 zoom in 或 out
+            if (_plannedZoomMult.HasValue)
+            {
+                _circleZoomMult = _plannedZoomMult.Value;
+                _plannedZoomMult = null;
+            }
+            else
+            {
+                _circleZoomMult = RollCircleZoomMult();
+            }
+
+            if (allowNewRelativeAngle)
+            {
+                float delta;
+                if (_plannedRelativeDelta.HasValue && IsPlannedAxisStillValid(hScene))
+                {
+                    delta = _plannedRelativeDelta.Value;
+                    _plannedRelativeDelta = null;
+                }
+                else
+                {
+                    delta = OrbitBodyAxis.RollRelativeDeltaDegrees();
+                    _plannedRelativeDelta = null;
+                }
+                _startRelativeAzimuth = NormalizeDeg(_startRelativeAzimuth + delta);
+            }
+        }
+
+        private void MaybePrecomputeNextCircle(HScene hScene)
+        {
+            // 在一圈過半後預算，不卡遊戲
+            if (_plannedRelativeDelta.HasValue && _plannedZoomMult.HasValue)
+                return;
+            if (_orbitAccumulatedDegrees < 180f && _orbitPhase == 0)
+                return;
+            if (_orbitAccumulatedDegrees > 180f && _orbitPhase == 1)
+                return;
+
+            var cha = OrbitHelpers.GetChaFemales(hScene);
+            var basis = OrbitBodyAxis.TryBuild(cha, BoneFocusIndex(), _lastValidFocusWorld);
+            if (!basis.Valid)
+                return;
+
+            if (!_plannedRelativeDelta.HasValue)
+            {
+                _plannedRelativeDelta = OrbitBodyAxis.RollRelativeDeltaDegrees();
+                _plannedAxisSnapshot = basis.TorsoUp;
+            }
+            if (!_plannedZoomMult.HasValue)
+                _plannedZoomMult = RollCircleZoomMult();
+        }
+
+        private bool IsPlannedAxisStillValid(HScene hScene)
+        {
+            var cha = OrbitHelpers.GetChaFemales(hScene);
+            var basis = OrbitBodyAxis.TryBuild(cha, BoneFocusIndex(), _lastValidFocusWorld);
+            if (!basis.Valid)
+                return false;
+            return Vector3.Dot(basis.TorsoUp, _plannedAxisSnapshot) > 0.85f;
+        }
+
+        private static float RollCircleZoomMult()
+        {
+            // 近≥下限、遠端拉大：約 0.92～1.35 相對設定距離
+            bool zoomOut = UnityEngine.Random.value < 0.5f;
+            return zoomOut
+                ? UnityEngine.Random.Range(1.12f, 1.38f)
+                : UnityEngine.Random.Range(0.92f, 1.05f);
+        }
+
+        private int BoneFocusIndex()
+        {
+            var h = OrbitController.TryGetHScene();
+            var cha = h != null ? OrbitHelpers.GetChaFemales(h) : null;
+            int maxFocus = OrbitHelpers.GetMaxFocusIndex(cha);
+            int opt = _currentViewOption;
+            if (opt < 0 || opt >= maxFocus)
+                opt = 1; // 預設胸
+            return opt;
+        }
+
+        private void ApplyBodyAxisCamera(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            if (chaFemales == null || ctrl.transBase == null)
+                return;
+
+            int focusIdx = BoneFocusIndex();
+            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!basis.Valid)
+                return;
+
+            _lastValidFocusWorld = basis.FocusWorld;
+            Vector3 localFocus = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
+            ctrl.TargetPos = localFocus;
+
+            float azimuth = NormalizeDeg(_startRelativeAzimuth + _orbitAccumulatedDegrees);
+            float pitch = OrbitBodyAxis.PitchForFocus(focusIdx);
+            Vector3 dirWorld = OrbitBodyAxis.DirectionFromBodyAzimuth(basis, azimuth, pitch);
+
+            // 轉成相對 transBase 的歐拉：只寫 Rot，讓 CameraUpdate 套用
+            Vector3 dirLocal = ctrl.transBase.InverseTransformDirection(dirWorld);
+            if (dirLocal.sqrMagnitude < 1e-6f)
+                return;
+            Quaternion look = Quaternion.LookRotation(dirLocal, ctrl.transBase.InverseTransformDirection(basis.TorsoUp));
+            Vector3 euler = look.eulerAngles;
+            ctrl.Rot = euler;
+
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
+        private void ApplyBoneFocusOnly(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            if (chaFemales == null || ctrl.transBase == null)
+                return;
+            int focusIdx = BoneFocusIndex();
+            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!basis.Valid)
+                return;
+            _lastValidFocusWorld = basis.FocusWorld;
+            ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
+        private static float NormalizeDeg(float deg)
+        {
+            deg %= 360f;
+            if (deg < 0f) deg += 360f;
+            return deg;
         }
 
         internal bool TryGetCachedHudSnapshot(out OrbitHudSnapshot s)
@@ -499,8 +654,12 @@ namespace HS2OrbitAndExciter
         private const float OrbitDistanceMultMin = 1.35f;
         private const float OrbitDistanceMultMax = 3f;
 
-        /// <summary>Set camera distance = body height × config multiplier for this focus. Call after setting TargetPos.</summary>
-        private static void SetDistanceForFocus(CameraControl_Ver2 ctrl, ChaControl[]? chaFemales, int focusIndex)
+        /// <summary>Set camera distance = body height × config × circle zoom. Call after setting TargetPos.</summary>
+        private static void SetDistanceForFocus(
+            CameraControl_Ver2 ctrl,
+            ChaControl[]? chaFemales,
+            int focusIndex,
+            float circleZoomMult = 1f)
         {
             if (chaFemales == null || chaFemales.Length == 0) return;
             int femaleIdx = focusIndex < 3 ? 0 : 1;
@@ -509,12 +668,14 @@ namespace HS2OrbitAndExciter
             if (focusIndex == 0 || focusIndex == 3) mult = HS2OrbitAndExciter.OrbitDistanceHead?.Value ?? 1.4f;
             else if (focusIndex == 1 || focusIndex == 4) mult = HS2OrbitAndExciter.OrbitDistanceChest?.Value ?? 1.4f;
             else mult = HS2OrbitAndExciter.OrbitDistancePelvis?.Value ?? 1.4f;
-            // Old cfg defaults (e.g. 0.3) mapped to 1× height and felt "inside" the model; pull back.
             if (mult < 1f)
                 mult = OrbitDistanceMultMin;
             mult = Mathf.Clamp(mult, OrbitDistanceMultMin, OrbitDistanceMultMax);
+            mult *= Mathf.Clamp(circleZoomMult, 0.85f, 1.45f);
             float d = bodyHeight * mult;
-            d = Mathf.Clamp(d, OrbitDistanceMultMin * bodyHeight, OrbitDistanceMultMax * bodyHeight);
+            float minD = OrbitDistanceMultMin * bodyHeight;
+            float maxD = OrbitDistanceMultMax * 1.25f * bodyHeight; // 遠端行程拉大
+            d = Mathf.Clamp(d, minD, maxD);
             ctrl.CameraDir = new Vector3(0f, 0f, -d);
         }
 
@@ -556,35 +717,40 @@ namespace HS2OrbitAndExciter
             if (newOpt < 0 || newOpt > maxFocus)
                 return;
 
-            SetDistanceForFocus(ctrl, chaFemales, newOpt);
+            SetDistanceForFocus(ctrl, chaFemales, newOpt, _circleZoomMult);
             _currentViewOption = newOpt;
+            // 1A：立刻用骨焦點
+            ApplyBoneFocusOnly(hScene, ctrl);
         }
 
-        /// <summary>Apply current view option: body focus (GetFocusPosition + SetDistanceForFocus) or pose default camera (setCameraLoad).</summary>
+        /// <summary>§11 1A：骨焦點優先；失敗回退上一有效焦點。環視中不用姿預設相機。</summary>
         private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl)
         {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             if (chaFemales == null || ctrl == null) return;
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-            int totalOptions = maxFocus + 1;
-            if (totalOptions <= 0) return;
+            if (maxFocus <= 0) return;
+
             int option = _currentViewOption;
-            if (option < 0 || option > maxFocus)
-                option = 0;
-            if (option < maxFocus)
+            // 環視轉動中：強制骨焦點（頭／胸／骨盆），不用姿預設
+            if (option < 0 || option >= maxFocus)
+                option = 1;
+            _currentViewOption = option;
+
+            var basis = OrbitBodyAxis.TryBuild(chaFemales, option, _lastValidFocusWorld);
+            if (basis.Valid && ctrl.transBase != null)
             {
-                var pos = OrbitHelpers.GetFocusPosition(chaFemales, option, ctrl.transBase);
-                if (pos.HasValue)
-                {
-                    ctrl.TargetPos = pos.Value;
-                    SetDistanceForFocus(ctrl, chaFemales, option);
-                }
+                _lastValidFocusWorld = basis.FocusWorld;
+                ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
+                SetDistanceForFocus(ctrl, chaFemales, option, _circleZoomMult);
+                return;
             }
-            else
+
+            // 回退：若有上一有效點仍用；否則胸
+            if (_lastValidFocusWorld.HasValue && ctrl.transBase != null)
             {
-                var ctrlFlag = hScene.ctrlFlag;
-                if (ctrlFlag != null && ctrlFlag.nowAnimationInfo != null)
-                    hScene.setCameraLoad(ctrlFlag.nowAnimationInfo, true);
+                ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(_lastValidFocusWorld.Value);
+                SetDistanceForFocus(ctrl, chaFemales, 1, _circleZoomMult);
             }
         }
 
@@ -601,27 +767,26 @@ namespace HS2OrbitAndExciter
         {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-            int totalOptions = maxFocus + 1;
-            if (totalOptions <= 0)
+            if (maxFocus <= 0)
                 return;
             int current = _currentViewOption;
-            if (current < 0 || current > maxFocus) current = 0;
+            if (current < 0 || current >= maxFocus) current = 0;
             var candidates = new List<int>();
-            for (int i = 0; i <= maxFocus; i++)
+            for (int i = 0; i < maxFocus; i++)
                 if (i != current)
                     candidates.Add(i);
-            if (Random.value < PreferGameDefaultCameraChance)
-                _currentViewOption = maxFocus;
-            else if (candidates.Count > 0)
-                _currentViewOption = candidates[Random.Range(0, candidates.Count)];
+            // §11：幾乎只用骨焦點；極低機率才碰姿預設（且立即被 Apply 改回骨）
+            if (candidates.Count > 0)
+                _currentViewOption = candidates[UnityEngine.Random.Range(0, candidates.Count)];
             else
                 _currentViewOption = current;
             ApplyCurrentViewOption(hScene, ctrl);
         }
 
+        /// <summary>§11：相對角改由每圈邊界套用；此處保留給 Coordinator 呼叫相容。</summary>
         internal void InternalRandomizeStartOrbitY()
         {
-            _startOrbitY = AnglePresets[Random.Range(0, AnglePresets.Length)];
+            // no-op：避免與 OnRotationBoundary 重複加 Δ
         }
 
         /// <summary>Load another pose's default camera preset without changing the active pose.</summary>
@@ -638,8 +803,8 @@ namespace HS2OrbitAndExciter
 
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-            _currentViewOption = maxFocus;
-            _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
+            _currentViewOption = maxFocus > 1 ? 1 : 0;
+            _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
             _orbitAccumulatedDegrees = 0f;
         }
 
@@ -648,10 +813,11 @@ namespace HS2OrbitAndExciter
         {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-            if (_currentViewOption > maxFocus)
-                _currentViewOption = maxFocus;
+            if (_currentViewOption >= maxFocus)
+                _currentViewOption = maxFocus > 1 ? 1 : 0;
             ApplyCurrentViewOption(hScene, ctrl);
-            _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
+            _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
+            _plannedRelativeDelta = null;
             _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
         }
 
@@ -670,19 +836,21 @@ namespace HS2OrbitAndExciter
             if (active)
             {
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
-                _startOrbitY = ((ctrl.CameraAngle.y % 360f) + 360f) % 360f;
+                try { ctrl.ConfigVanish = Manager.Config.GraphicData.Shield; } catch { /* ignore */ }
+                _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
                 _rotationCount = 0;
                 _roundTripCount = 0;
+                _circleZoomMult = 1f;
+                _plannedRelativeDelta = null;
+                _plannedZoomMult = null;
+                _lastValidFocusWorld = null;
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
-                int totalOptions = maxFocus + 1;
-                if (totalOptions > 0 && Random.value < PreferGameDefaultCameraChance)
-                    _currentViewOption = maxFocus;
-                else
-                    _currentViewOption = totalOptions > 0 ? Random.Range(0, totalOptions) : 0;
+                // §11：開環視一律骨焦點（胸）
+                _currentViewOption = maxFocus > 1 ? 1 : 0;
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
                 if (IsInPreparationState(hScene))

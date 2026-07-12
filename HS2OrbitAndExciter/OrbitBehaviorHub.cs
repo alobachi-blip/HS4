@@ -28,6 +28,9 @@ namespace HS2OrbitAndExciter
         private static float _orgasmAssistQuietUntilUnscaled = -1f;
 
         private static bool _orbitAssistActive;
+        /// <summary>§11：相機是否在轉。協助開時預設 true；停止環視鍵只關此旗標。</summary>
+        private static bool _orbitCameraSpinning;
+
         private static float _checkpointIdleTime;
         private static MethodInfo? _getAutoAnimationMethod;
         private static FieldInfo? _isAutoActionChangeField;
@@ -46,7 +49,25 @@ namespace HS2OrbitAndExciter
         internal const float WheelBypassDelaySeconds = 2f;
 
         internal static bool IsOrbitAssistActive() => _orbitAssistActive;
+        /// <summary>協助開且未按停止環視。</summary>
+        internal static bool IsOrbitCameraSpinning() => _orbitAssistActive && _orbitCameraSpinning;
         internal static bool IsPoseKickInFlight => _poseKickInFlight;
+
+        /// <summary>只停／恢復相機轉動；不關協助／FSM／FEEL。</summary>
+        internal static void SetOrbitCameraSpinning(bool spinning)
+        {
+            if (!_orbitAssistActive)
+                return;
+            if (_orbitCameraSpinning == spinning)
+                return;
+            _orbitCameraSpinning = spinning;
+            HS2OrbitAndExciter.Log?.LogInfo(
+                spinning ? "Orbit: 恢復環視轉動" : "Orbit: 停止環視轉動（協助／感度／流程仍開啟；換衣因綁圈暫停）");
+            OrbitStateMachineLog.Event("環視", spinning ? "恢復轉動" : "停止轉動");
+        }
+
+        internal static void ToggleOrbitCameraSpinning() =>
+            SetOrbitCameraSpinning(!_orbitCameraSpinning);
 
         internal static void NotifyManualUiClick()
         {
@@ -134,6 +155,7 @@ namespace HS2OrbitAndExciter
             _poseKickInFlight = false;
             if (active)
             {
+                _orbitCameraSpinning = true; // 開協助時預設開始轉
                 _orbitAutoActionGraceUntilUnscaled = Time.unscaledTime + OrbitAutoActionGraceSeconds;
                 _checkpointInvokeCooldownUntilUnscaled = -1f;
                 _autoActionNullSelectionSinceUnscaled = -1f;
@@ -147,6 +169,7 @@ namespace HS2OrbitAndExciter
             }
             else
             {
+                _orbitCameraSpinning = false;
                 _orbitAutoActionGraceUntilUnscaled = -1f;
                 _autoActionNullSelectionSinceUnscaled = -1f;
                 _checkpointInvokeCooldownUntilUnscaled = -1f;

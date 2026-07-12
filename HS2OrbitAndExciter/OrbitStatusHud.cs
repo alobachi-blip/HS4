@@ -137,6 +137,8 @@ namespace HS2OrbitAndExciter
             string status;
             if (snap.CameraPaused)
                 status = "換角中";
+            else if (!OrbitBehaviorHub.IsOrbitCameraSpinning())
+                status = "停轉";
             else if (OrbitPoseDirector.ShouldFreezeCycleCounters)
                 status = OrbitPoseDirector.Phase == DirectorState.PosePending
                     ? "運轉·換姿待"

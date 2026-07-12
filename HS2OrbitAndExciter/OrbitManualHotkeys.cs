@@ -10,6 +10,9 @@ namespace HS2OrbitAndExciter
         internal const KeyCode WearKey = KeyCode.J;
         internal const KeyCode PoseCameraKey = KeyCode.K;
         internal const KeyCode PoseKey = KeyCode.L;
+        /// <summary>V＝停止／恢復環視相機轉動（不關協助）。</summary>
+        internal const KeyCode StopOrbitCameraKey = KeyCode.V;
+
         /// <summary>Force leave Idle/AfterIdle — 語意改為「往前推」（依格：開幹／加速／選池）。</summary>
         internal const KeyCode StartSexKey = KeyCode.N;
         /// <summary>T = enable + place next stamp; Shift+T = disable.</summary>
@@ -20,7 +23,7 @@ namespace HS2OrbitAndExciter
         internal const KeyCode BellyResetKey = KeyCode.R;
 
         /// <summary>熱鍵圖例（說清楚、不自創縮詞）。</summary>
-        internal const string HudLegend = "G換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
+        internal const string HudLegend = "G換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·V停／恢復環視·T刺青·Shift+T關刺青·B胸回復";
 
         /// <summary>PregnancyPlus Live Inflation Shortcuts (KK_PregnancyPlus.cfg); Y/U step scaled 5×; R also forced by this plugin.</summary>
         internal const string PregnancyHudLegend = "Y肚子+·U肚子-·R清空肚子";

@@ -87,17 +87,20 @@ namespace HS2OrbitAndExciter
             GUILayout.Space(6);
             GUILayout.Label("使用方式", GUI.skin.box);
             GUILayout.Label(
-                "Ctrl+Shift+O：開啟／關閉環視協助（相機環繞＋流程協助）。開啟後左下角可看狀態；Ctrl+Shift+I 切換狀態面板顯示。",
+                "Ctrl+Shift+O：開啟／關閉環視協助（流程協助＋預設開始轉相機）。開啟後左下角可看狀態；Ctrl+Shift+I 切換狀態面板顯示。",
                 label);
             GUILayout.Label(
-                "換姿勢由「選池」負責（熱鍵 L，或高潮後／窺視等自動路徑）。環視圈數本身不再換姿勢；請用選池推進下一段。",
+                "協助與轉動可分開：開協助後按 V 只停／恢復相機環繞；選池、感度、高潮後換段仍繼續。換姿勢由選池（L）或高潮後／窺視等自動路徑負責，圈數本身不再換姿勢。",
                 label);
 
             // ─── 2. 環視相機 ───────────────────────────────────
             GUILayout.Space(8);
             GUILayout.Label("環視相機", GUI.skin.box);
             GUILayout.Label(
-                "名詞：單向繞水平 360°＝一次「旋轉」；去程加回程＝一次「迴轉」（約 2×單向秒數）。",
+                "名詞：單向繞身體軀幹軸 360°＝一次「旋轉」；去程加回程＝一次「迴轉」（約 2×單向秒數）。躺／跪時仍繞「頭−骨盆」軸，不是世界鉛垂。",
+                label);
+            GUILayout.Label(
+                "每圈會換相對角（約 ≥60°、非整數）與遠近；骨焦點優先（頭／胸／骨盆）。穿牆透明沿用遊戲 Shield（ConfigVanish），不停轉時仍綁焦點。",
                 label);
 
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
@@ -163,7 +166,7 @@ namespace HS2OrbitAndExciter
                 "G＝換女角色（池會排除同性格卡；短時間連換會降權、久留會優先）。H＝換套裝。J＝亂數穿著階段。K＝切換姿勢鏡頭。",
                 label);
             GUILayout.Label(
-                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。",
+                "Q／W／E＝切環視焦點（頭／胸／骨盆）；Shift＋Q／W／E＝切第二女角色焦點。V＝只停／恢復環視轉動（不關協助）。",
                 label);
             GUILayout.Label(
                 OrbitManualHotkeys.PregnancyHudLegend
