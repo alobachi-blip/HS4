@@ -166,6 +166,7 @@ namespace HS2OrbitAndExciter
                 OrbitFsmFlow.Reset();
                 OrbitFaintnessAssist.ApplyOnAssistStart();
                 OrbitStatusHud.NotifyOrbitActivated();
+                OrbitMapVanishAssist.Reset();
             }
             else
             {
@@ -179,6 +180,7 @@ namespace HS2OrbitAndExciter
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
                 OrbitFaintnessAssist.RestoreOnAssistStop();
+                OrbitMapVanishAssist.Reset();
             }
         }
 

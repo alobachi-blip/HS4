@@ -74,9 +74,9 @@ L＝手動選池；G＝換角；環視／衣／刺青等＝圖外正交
 
 - `OrbitBodyAxis`：軀幹軸（頭−骨盆）＋面向；相對角 |Δ|≥60° 非整數；焦點俯仰。
 - `OrbitBehaviorHub`：協助 ≠ 轉動；開協助預設開始轉；**O** 只停／恢復轉動（YUIOP 列）。
-- `OrbitController`：身體空間寫 `Rot`／`TargetPos`；每圈 zoom；預算下一圈；骨焦點優先；`ConfigVanish＝Shield`；停轉仍綁焦點。
+- 穿牆：強制 Shield，並在開協助時把地圖 Collider 補進 `lstMapVanish`（地板可藏、排除角色）；**未**自製 Linecast。
+- `OrbitController`：身體空間寫 `Rot`／`TargetPos`；每圈 zoom；預算下一圈；骨焦點優先；停轉仍綁焦點。
 - **YUIOP**：Y／U＝Preg+ 肚子±；I＝清腹；O＝停轉；P＝狀態面板（R 還給原版相機 Reset）。
-- 穿牆：只強制 Shield，**未**自製 Linecast／補沙發 vanish 清單。
 
 ---
 

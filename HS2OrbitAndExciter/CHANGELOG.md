@@ -2,6 +2,12 @@
 
 ## 2026-07-12
 
+### 穿牆：地圖 vanish 全補（地板可藏）
+
+- 新增 `OrbitMapVanishAssist`：開環視協助後，把 `objMap` 下所有 Collider 寫入 `CameraControl_Ver2.lstMapVanish`（疊在原版 Excel 上）。
+- 排除女／男角色；地板／傢俱可藏。機制仍是撞到 → `SetActive(false)`。
+- 同地圖只注入一次；BepInEx log 可見 `vanish 補齊 +N`。
+
 ### 熱鍵：YUIOP 整排＋還原原版 R
 
 - **Y／U**：維持 PregnancyPlus 肚子±（本外掛不佔，只放大步進）。

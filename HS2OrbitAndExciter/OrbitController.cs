@@ -395,8 +395,9 @@ namespace HS2OrbitAndExciter
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
             }
 
-            // 貫徹原版穿牆透明（圖像 Shield）
-            try { ctrl.ConfigVanish = Manager.Config.GraphicData.Shield; } catch { /* ignore */ }
+            // 環視協助中強制穿牆 hide（Shield 關了也開）；地圖 Collider 補進 vanish
+            try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
+            OrbitMapVanishAssist.EnsureInjected(hScene);
 
             float orbitTime = HS2OrbitAndExciter.OrbitTimePer360?.Value ?? 10f;
             if (orbitTime <= 0f) orbitTime = 10f;
@@ -847,7 +848,8 @@ namespace HS2OrbitAndExciter
             if (active)
             {
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
-                try { ctrl.ConfigVanish = Manager.Config.GraphicData.Shield; } catch { /* ignore */ }
+                try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
+                OrbitMapVanishAssist.EnsureInjected(hScene);
                 _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;

@@ -100,7 +100,7 @@ namespace HS2OrbitAndExciter
                 "名詞：單向繞身體軀幹軸 360°＝一次「旋轉」；去程加回程＝一次「迴轉」（約 2×單向秒數）。躺／跪時仍繞「頭−骨盆」軸，不是世界鉛垂。",
                 label);
             GUILayout.Label(
-                "每圈會換相對角（約 ≥60°、非整數）與遠近；骨焦點優先（頭／胸／骨盆）。穿牆透明沿用遊戲 Shield（ConfigVanish），不停轉時仍綁焦點。",
+                "每圈會換相對角（約 ≥60°、非整數）與遠近；骨焦點優先（頭／胸／骨盆）。穿牆：強制 Shield，並在開協助時把地圖 Collider 補進 vanish（地板可藏、排除角色）；撞到則暫時關掉該物件。",
                 label);
 
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
