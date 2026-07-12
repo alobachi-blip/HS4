@@ -2,6 +2,12 @@
 
 ## 2026-07-12
 
+### 環視：關搖晃、三軸輪替、關協助還原手控
+
+- 關掉每圈 zoom／焦點俯仰搖晃；距離固定。
+- 三種繞軸輪替（與上次不同）：軀幹（頭−骨盆）、世界鉛垂、身體側向；每段任意起始方位角。
+- 關掉 Ctrl+Shift+O：`NoCtrlCondition=false`，還原原版滑鼠／鍵盤調視角。
+
 ### 穿牆：地圖 vanish 全補（地板可藏）
 
 - 新增 `OrbitMapVanishAssist`：開環視協助後，把 `objMap` 下所有 Collider 寫入 `CameraControl_Ver2.lstMapVanish`（疊在原版 Excel 上）。

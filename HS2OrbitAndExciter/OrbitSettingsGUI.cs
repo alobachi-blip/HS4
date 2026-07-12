@@ -97,10 +97,10 @@ namespace HS2OrbitAndExciter
             GUILayout.Space(8);
             GUILayout.Label("環視相機", GUI.skin.box);
             GUILayout.Label(
-                "名詞：單向繞身體軀幹軸 360°＝一次「旋轉」；去程加回程＝一次「迴轉」（約 2×單向秒數）。躺／跪時仍繞「頭−骨盆」軸，不是世界鉛垂。",
+                "名詞：單向繞當前軸 360°＝一次「旋轉」；去程加回程＝一次「迴轉」。三種繞軸輪替（軀幹／鉛垂／側向），與上次不同；無 zoom／俯仰搖晃。",
                 label);
             GUILayout.Label(
-                "每圈會換相對角（約 ≥60°、非整數）與遠近；骨焦點優先（頭／胸／骨盆）。穿牆：開協助時補 vanish；每張地圖只掃描一次並存到設定目錄 map_vanish，之後只讀快取。",
+                "開協助時擋手控相機；關掉 Ctrl+Shift+O 後還原滑鼠／鍵盤調視角。穿牆：每張地圖只掃描一次並存 map_vanish 快取。",
                 label);
 
             if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)

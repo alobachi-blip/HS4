@@ -4,10 +4,22 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// §11：以女角軀幹軸（頭−骨盆）＋面向建立身體空間，供環視相對角／俯仰使用。
+    /// 三種繞法（輪替、與上次不同）：
+    /// 1 軀幹軸（頭−骨盆）、2 世界鉛垂、3 身體側向（左−右）。
+    /// 每段再加任意起始方位角；不做俯仰／zoom 搖晃。
     /// </summary>
     internal static class OrbitBodyAxis
     {
+        internal enum OrbitAxisMode : byte
+        {
+            /// <summary>繞頭−骨盆（身體長軸）。</summary>
+            Torso = 0,
+            /// <summary>繞世界鉛垂。</summary>
+            WorldVertical = 1,
+            /// <summary>繞身體左右軸（翻轉看上／下）。</summary>
+            BodyLateral = 2,
+        }
+
         internal const float MinRelativeDeltaDegrees = 60f;
         internal const float MaxRelativeDeltaDegrees = 170f;
 
@@ -29,16 +41,52 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        /// <summary>亂數相對角改變量：|Δ|≥60°、非整數、避免近 180° 幾乎原地。</summary>
+        internal static OrbitAxisMode PickNextMode(OrbitAxisMode previous)
+        {
+            // 三選一，排除上次
+            int skip = (int)previous;
+            int pick = UnityEngine.Random.Range(0, 2); // 0 or 1 among the two remaining
+            int mode = 0;
+            int seen = 0;
+            for (int i = 0; i < 3; i++)
+            {
+                if (i == skip)
+                    continue;
+                if (seen == pick)
+                {
+                    mode = i;
+                    break;
+                }
+                seen++;
+            }
+            return (OrbitAxisMode)mode;
+        }
+
+        /// <summary>任意起始方位角（非整數，0～360）。</summary>
+        internal static float RollAnyAzimuthDegrees()
+        {
+            float a = UnityEngine.Random.Range(0f, 360f);
+            a += UnityEngine.Random.Range(0.07f, 0.93f);
+            return a % 360f;
+        }
+
+        /// <summary>亂數相對角改變量（舊路徑備用）。</summary>
         internal static float RollRelativeDeltaDegrees()
         {
             float mag = UnityEngine.Random.Range(MinRelativeDeltaDegrees, MaxRelativeDeltaDegrees);
-            // 帶小數，避開整數檔
             mag += UnityEngine.Random.Range(0.07f, 0.93f);
             if (UnityEngine.Random.value < 0.5f)
                 mag = -mag;
             return mag;
         }
+
+        internal static string ModeLabel(OrbitAxisMode mode) => mode switch
+        {
+            OrbitAxisMode.Torso => "軀幹軸",
+            OrbitAxisMode.WorldVertical => "鉛垂軸",
+            OrbitAxisMode.BodyLateral => "側向軸",
+            _ => "軸"
+        };
 
         internal static Basis TryBuild(
             ChaControl[]? chaFemales,
@@ -75,7 +123,6 @@ namespace HS2OrbitAndExciter
 
             if (!head.HasValue || !pelvis.HasValue)
             {
-                // 缺軸時用角色 up／forward 退化
                 Transform t = cha.objBodyBone != null ? cha.objBodyBone.transform : cha.transform;
                 Vector3 up = t.up;
                 Vector3 facingFallback = t.forward;
@@ -92,7 +139,6 @@ namespace HS2OrbitAndExciter
 
             Transform body = cha.objBodyBone != null ? cha.objBodyBone.transform : cha.transform;
             Vector3 facingRaw = body.forward;
-            // 面向投影到垂直軀幹軸的平面
             Vector3 facingAxis = Vector3.ProjectOnPlane(facingRaw, torsoUp);
             if (facingAxis.sqrMagnitude < 1e-4f)
                 facingAxis = Vector3.ProjectOnPlane(body.right, torsoUp);
@@ -108,27 +154,43 @@ namespace HS2OrbitAndExciter
             return new Basis(focusWorld, torsoUp, facingAxis, rightAxis, true);
         }
 
-        /// <summary>
-        /// 身體空間方位角 → 建議的相機 Euler（相對世界，之後再轉成 CamDat.Rot 時由呼叫端對齊 transBase）。
-        /// azimuthDegrees：繞軀幹軸的方位；pitchDegrees：相對水平面的小幅俯仰（對準部位）。
-        /// </summary>
-        internal static Vector3 DirectionFromBodyAzimuth(Basis basis, float azimuthDegrees, float pitchDegrees)
+        internal static Vector3 SpinAxis(Basis basis, OrbitAxisMode mode)
         {
-            // 從「背對面向」開始繞 torsoUp 轉
-            Quaternion yaw = Quaternion.AngleAxis(azimuthDegrees, basis.TorsoUp);
-            Vector3 radial = yaw * (-basis.Facing);
-            Quaternion pitch = Quaternion.AngleAxis(pitchDegrees, basis.Right);
-            radial = pitch * radial;
-            return radial.normalized;
+            switch (mode)
+            {
+                case OrbitAxisMode.WorldVertical:
+                    return Vector3.up;
+                case OrbitAxisMode.BodyLateral:
+                    return basis.Right.sqrMagnitude > 1e-6f ? basis.Right.normalized : Vector3.right;
+                default:
+                    return basis.TorsoUp.sqrMagnitude > 1e-6f ? basis.TorsoUp.normalized : Vector3.up;
+            }
         }
 
-        /// <summary>依焦點給小幅俯仰：頭略俯視、骨盆略仰視。</summary>
-        internal static float PitchForFocus(int focusIndex)
+        /// <summary>繞指定軸的方位方向（無俯仰搖晃）。</summary>
+        internal static Vector3 DirectionFromAxisAzimuth(Basis basis, OrbitAxisMode mode, float azimuthDegrees)
         {
-            int part = focusIndex % 3;
-            if (part == 0) return 8f;   // 頭
-            if (part == 1) return 2f;   // 胸
-            return -6f;                 // 骨盆
+            Vector3 axis = SpinAxis(basis, mode);
+            Vector3 radial0 = Vector3.ProjectOnPlane(-basis.Facing, axis);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.ProjectOnPlane(basis.TorsoUp, axis);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.Cross(axis, Vector3.right);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.forward;
+            radial0.Normalize();
+            return (Quaternion.AngleAxis(azimuthDegrees, axis) * radial0).normalized;
+        }
+
+        /// <summary>相機 up：盡量用軀幹上，投影到視線垂直面，減少滾轉搖晃。</summary>
+        internal static Vector3 CameraUp(Basis basis, Vector3 lookDirWorld)
+        {
+            Vector3 up = Vector3.ProjectOnPlane(basis.TorsoUp, lookDirWorld);
+            if (up.sqrMagnitude < 1e-4f)
+                up = Vector3.ProjectOnPlane(Vector3.up, lookDirWorld);
+            if (up.sqrMagnitude < 1e-4f)
+                up = Vector3.up;
+            return up.normalized;
         }
     }
 }
