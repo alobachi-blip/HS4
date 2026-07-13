@@ -155,6 +155,12 @@ namespace HS2OrbitAndExciter
             string selName = ctrl?.selectAnimationListInfo != null
                 ? Esc(ctrl.selectAnimationListInfo.nameAnimation) + "#id" + ctrl.selectAnimationListInfo.id + ";down" + ctrl.selectAnimationListInfo.nDownPtn
                 : "";
+            string actCtrl = "";
+            if (ctrl?.nowAnimationInfo != null)
+            {
+                var ac = ctrl.nowAnimationInfo.ActionCtrl;
+                actCtrl = ac.Item1 + "," + ac.Item2;
+            }
 
             float speed = 0f;
             try
@@ -181,6 +187,8 @@ namespace HS2OrbitAndExciter
             sb.Append(",\"clip\":\"").Append(Esc(clip)).Append('"');
             sb.Append(",\"nowAnim\":\"").Append(nowName).Append('"');
             sb.Append(",\"selAnim\":\"").Append(selName).Append('"');
+            sb.Append(",\"actCtrl\":\"").Append(actCtrl).Append('"');
+            sb.Append(",\"peeping\":").Append(OrbitPosePool.IsPeepingPose(ctrl?.nowAnimationInfo) ? "true" : "false");
             sb.Append(",\"orgasmQuiet\":").Append(OrbitBehaviorHub.RemainingOrgasmQuietSeconds().ToString("0.##", CultureInfo.InvariantCulture));
             sb.Append('}');
             return sb.ToString();

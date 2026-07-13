@@ -21,7 +21,7 @@
 
 | 類型 | 體感 | Log 特徵 | 本質 |
 |------|------|----------|------|
-| **A. 欣賞鎖** | Idle／窺視／自慰姿不動 | `suppress=longAppreciation`、HUD「欣賞·等 L／滾輪／N」、`landed/appreciate` | **設計如此**；需 L／真實滾輪／cycle／**N** |
+| **A. 欣賞鎖** | 窺視姿不動 | `suppress=longAppreciation`、`peeping=true`／`actCtrl=3,6`、HUD「欣賞中…」 | **僅窺視**（ActionCtrl→Peeping）；需 L／真實滾輪／cycle／**N**。**不**再認硬編碼 id／自慰 |
 | **B. 假卡（UI／高潮）** | 滾輪／L 沒反應 | `pointerOverUi`、`mouseHolding`、`nowOrgasm`、`orgasmQuiet` | 閘門擋協助；不是 FSM 死鎖 |
 | **C. 換姿沒被原版吃** | 按了 L／選了姿但畫面不變 | `PoseQueued` 久、`nowChangeAnim=false`、`sel` 有值 | 寫了 `sel`，`HScene` **不**啟 `ChangeAnimation` → kick（晚序 invariant） |
 | **D. 換姿黏旗** | 姿其實已換、L 全滅 | `Changing` 很久、`sel.id==now.id`、hotkey fail `changing` | `TryResolveAppliedPoseChange` → `landed/*` |
@@ -40,18 +40,32 @@
 
 | 條件 | 決策 |
 |------|------|
-| AfterIdle | `TimedEscape`（已 latch → 立刻；否則 ≈2s）；不因 A+B id 擋 |
-| Idle ∧ 非 A+B | `AutoStartSex` |
-| Idle ∧ A+B | `Appreciate`（清 arrival latch；等 L／滾輪／N） |
-| 熱鍵 N | 強制 `AutoStartSex`（無視欣賞鎖） |
+| AfterIdle | `TimedEscape`／高潮後欣賞→選池；不因窺視 id 擋短收尾 |
+| Idle（非窺視） | `AutoStartSex`（約 1s） |
+| 窺視（ActionCtrl 3,6） | 純播出／欣賞鎖（等 L／滾輪／N）；Classify 優先 `Peeping` |
+| 熱鍵 N | 強制開幹／選池（可跳出欣賞鎖） |
 
 `TryForceStartSex` 是執行器，不是落地政策本身。已刪 `auto_after_kick`／`pose`／`rebind`／`unstick`。
 
 ### Latch／ClearSelection
 
 - `ClearedPoseAlreadyApplied`：**不清** latch（Idle／AfterIdle 保留給 policy／Tick*Escape）。  
-- A+B Idle **Appreciate**：落地時 **清** arrival latch（避免 L 換到窺視姿後立刻被 `TickIdleEscape` 開幹）。  
+- 窺視落地：`PoseLandedPolicy`→`EnterPeeping`（取消閒置／高潮後排程；等 N／L）。  
 - `PoseKickDone`／orphan stuck／非 wait 落地：清 latch。
+
+### 欣賞鎖判定（2026-07-13）
+
+```text
+同一筆 AnimationListInfo：
+  nameAnimation  → UI 按鈕字／FSM nowAnim 顯示（日文或譯名；勿比對字串）
+  id             → 列表編號（動畫包可改寫同號內容；勿當「姿種類」）
+  ActionCtrl     → ChangeModeCtrl 分流唯一依據
+
+欣賞鎖 = IsPeepingPose = (Item1==3 && Item2==6) → lstProc Peeping
+自慰   = Item1==3 && Item2∈{4,5} → Masturbation（動作線，不鎖欣賞）
+```
+
+**禁止**：再維護 `LongAppreciationPoseIds` 硬編碼表。
 
 ### 每幀晚序 invariant（`TickPoseFlagRecovery`）
 
@@ -99,7 +113,7 @@ Sanitize → Resolve(sel==now) → OnPoseLanded → Kick(Queued) → orphan NowC
 python HS2OrbitAndExciter/tools/_assert_fsm_regression.py
 ```
 
-對 last `runId` assert：PoseQueued≥2s、Changing+sel==now 跨 SNAP、非 A+B land→start、A+B appreciate、AfterIdle≤3s。缺證據則 SKIP，有違規則 FAIL。
+對 last `runId` assert：PoseQueued≥2s、Changing+sel==now 跨 SNAP、非窺視 land→start、窺視 longAppreciation（`peeping`／`actCtrl=3,6`）、AfterIdle≤3s。缺證據則 SKIP，有違規則 FAIL。
 
 ---
 
@@ -108,12 +122,12 @@ python HS2OrbitAndExciter/tools/_assert_fsm_regression.py
 - Escape latch（刪 1.5s window／renewal）  
 - Pose kick + `TryResolveAppliedPoseChange`  
 - 矛盾態 recovery（非逾時清 sel）  
-- A+B 七姿欣賞鎖；短 AfterIdle 仍 ≈2s  
+- 窺視欣賞鎖＝ActionCtrl→Peeping（**已刪**硬編碼七姿 id）  
 - HUD 倒數／欣賞文案（含 N）  
 - **N** + `TryForceStartSex` 執行器  
-- **`OrbitPoseLandedPolicy`**（Appreciate／AutoStartSex／TimedEscape）  
+- **`OrbitPoseLandedPolicy`**（窺視／閒置／高潮後）  
 - latch／`ClearedPoseAlreadyApplied` 契約  
-- 晚序 invariant + `tools/_assert_fsm_regression.py`
+- 晚序 invariant + `tools/_assert_fsm_regression.py`（認 `peeping`／`actCtrl`）
 
 ---
 
@@ -127,6 +141,8 @@ python HS2OrbitAndExciter/tools/_assert_fsm_regression.py
 | `OrbitManualDirector.cs` | L、sticky resolve→OnPoseLanded |
 | `OrbitController.cs` | 熱鍵 N/L、LateAssist 順序 |
 | `Patches/OrbitAutoAfterIdleRestartPatch.cs` | Idle／AfterIdle 強制脫離 |
-| `OrbitHelpers.cs` | `IsLongAppreciationPose`、Idle／Loop 判定 |
+| `OrbitPosePool.cs` | `IsPeepingPose`（ActionCtrl 3,6） |
+| `OrbitHelpers.cs` | `IsLongAppreciationPose`→轉呼叫窺視判定；Idle／Loop |
 | `OrbitAssistReasons.cs` | suppress／clear／landed reason 字串 |
 | `OrbitStatusHud.cs` | 倒數／鎖文案 |
+| `OrbitStateMachineLog.cs` | SNAP 含 `actCtrl`／`peeping` |

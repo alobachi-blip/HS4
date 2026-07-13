@@ -52,8 +52,9 @@ namespace HS2OrbitAndExciter
 
         /// <summary>
         /// 窺視判定：會進原版 <c>Peeping</c>（lstProc[5]）。
-        /// 對齊 <c>HScene.ChangeModeCtrl</c>：Item1==3 且 Item2==6 → mode=5。
-        /// 不用 LongAppreciationPoseIds。
+        /// 對齊 <c>HScene.ChangeModeCtrl</c>：ActionCtrl.Item1==3 且 Item2==6 → mode=5。
+        /// 同一筆 <c>AnimationListInfo</c> 上 UI／LOG 顯示的是 <c>nameAnimation</c>（日文或譯名），
+        /// 分流只認 ActionCtrl，不認顯示文字、不認硬編碼 id。
         /// </summary>
         internal static bool IsPeepingPose(HScene.AnimationListInfo? info)
         {

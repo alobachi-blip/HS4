@@ -42,7 +42,10 @@ namespace HS2OrbitAndExciter
         public const string NoPoseCandidate = "noPoseCandidate";
         public const string CycleQueued = "cycleQueued";
         public const string NowChangeAnim = "NowChangeAnim";
-        /// <summary>Bath/toilet/shower long poses (A+B): wait for L / wheel / cycle escape.</summary>
+        /// <summary>
+        /// 窺視段欣賞鎖：ActionCtrl→Peeping（非硬編碼 id）。
+        /// 等 L／真實滾輪／cycle／N 脫離。
+        /// </summary>
         public const string LongAppreciation = "longAppreciation";
 
         // Recovery log msg keys

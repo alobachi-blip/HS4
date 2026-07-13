@@ -250,11 +250,7 @@ namespace HS2OrbitAndExciter
                 reason = OrbitAssistReasons.OrgasmQuiet;
                 return false;
             }
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
-            {
-                reason = OrbitAssistReasons.PointerOverUi;
-                return false;
-            }
+            // 游標在 UI 上只暫停環視轉動（ShouldPauseOrbitCameraForUi），不擋自動推進
             if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
             {
                 reason = OrbitAssistReasons.OrbitStartGrace;
@@ -276,8 +272,8 @@ namespace HS2OrbitAndExciter
                 return false;
             }
 
-            // A+B long bath/toilet/shower: do not auto-pick next pose until L/wheel/cycle latch.
-            // Cycle pose RequestPoseChange latches first, then CanAcceptRequest may still pass.
+            // 窺視＝純播出：ActionCtrl→Peeping 時擋自動換姿，直到 L／滾輪／cycle／N latch。
+            // 不用硬編碼姿勢 id（會誤傷插入／口交等改寫後的同號姿）。
             if (hScene != null
                 && OrbitHelpers.IsLongAppreciationPose(hScene)
                 && !IsMotionEscapeArmed())
@@ -311,11 +307,7 @@ namespace HS2OrbitAndExciter
                 reason = OrbitAssistReasons.OrgasmQuiet;
                 return false;
             }
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
-            {
-                reason = OrbitAssistReasons.PointerOverUi;
-                return false;
-            }
+            // 游標在 UI 上只暫停環視轉動（ShouldPauseOrbitCameraForUi），不擋自動推進
             if (Time.unscaledTime < _orbitAutoActionGraceUntilUnscaled)
             {
                 reason = OrbitAssistReasons.OrbitStartGrace;
@@ -376,7 +368,7 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>
-        /// Seconds until timed Idle auto-leave (0 if A+B, latched, not Idle, or ready).
+        /// Seconds until timed Idle auto-leave（0 if 窺視欣賞鎖、latched、not Idle, or ready）。
         /// </summary>
         internal static float RemainingIdleAutoEscapeSeconds()
         {
@@ -385,6 +377,7 @@ namespace HS2OrbitAndExciter
             var hScene = OrbitController.TryGetHScene();
             if (hScene == null || !OrbitHelpers.IsFirstFemaleInIdle(hScene) || hScene.NowChangeAnim)
                 return 0f;
+            // 窺視不會 Classify 成 Idle；此處防禦：若仍落到 Idle 亦不倒數開幹
             if (OrbitHelpers.IsLongAppreciationPose(hScene))
                 return 0f;
             if (_idleAutoEscapeSinceUnscaled < 0f)

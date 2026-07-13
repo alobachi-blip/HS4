@@ -5,8 +5,8 @@ FSM regression asserts against HS2OrbitAndExciter_fsm.ndjson (last runId).
 Checks (plan):
   1. PoseQueued without NowChangeAnim must not last >= 2s
   2. Changing with sel==now must resolve within one SNAP interval (~0.5s)
-  3. Non-A+B Idle land → startsex / loop within 1s (when landed/auto_start_sex present)
-  4. A+B land → appreciate; no auto force_cha_setPlay right after without latch intent
+  3. Non-peeping Idle land → startsex / loop within 1s (when landed/auto_start_sex present)
+  4. Peeping appreciate lock → no auto force_cha_setPlay right after without latch intent
   5. AfterIdle escape path present within 3s of AfterIdle wait (when afteridle events exist)
 
 Usage:
@@ -21,8 +21,15 @@ import json
 import sys
 from pathlib import Path
 
-# A+B long appreciation pose ids (OrbitHelpers.LongAppreciationPoseIds)
-APB_IDS = {8, 9, 15, 102, 105, 106, 107}
+# 窺視欣賞鎖：認 SNAP peeping=true 或 actCtrl=="3,6"（對齊 ChangeModeCtrl→Peeping）
+# 不再用硬編碼姿勢 id（動畫包會改寫同號姿）
+
+
+def is_peeping_snap(d: dict) -> bool:
+    if d.get("peeping") is True or str(d.get("peeping")).lower() == "true":
+        return True
+    return str(d.get("actCtrl") or "") == "3,6"
+
 
 IDLE_CLIPS = {"Idle", "D_Idle", "WIdle", "SIdle"}
 LOOP_SUBSTR = ("WLoop", "SLoop", "OLoop", "D_WLoop", "D_SLoop", "D_OLoop")
@@ -260,13 +267,13 @@ def main() -> int:
             fails.append(f"FAIL[3] landed auto_start_sex @ut{ut:.2f} no startsex/loop within 1s")
 
     if land_auto and not check3_fail:
-        passes.append(f"PASS[3] {len(land_auto)} non-A+B land→start within 1s")
+        passes.append(f"PASS[3] {len(land_auto)} non-peeping land→start within 1s")
     elif not land_auto and not any(s.startswith("SKIP[3]") for s in skips):
         skips.append("SKIP[3] no landed/auto_start_sex evidence in this run")
 
-    # --- 4. A+B: landed/appreciate; no immediate auto force without N ---
+    # --- 4. Peeping: landed/appreciate; no immediate auto force without N ---
     land_appr = [r for r in R if r.get("id") == "landed" and r.get("msg") == "appreciate"]
-    # Bad pattern: auto_after_* (legacy) or landed_* startsex immediately after appreciate on A+B
+    # Bad pattern: auto_after_* (legacy) or landed_* startsex immediately after appreciate on peeping
     bad_apb = []
     for r in land_appr:
         ut = r.get("ut") or 0
@@ -282,7 +289,7 @@ def main() -> int:
                     continue
                 if "landed_" in raw_s or "auto_after_" in raw_s:
                     bad_apb.append((ut, su, raw_s))
-    # Also: SNAP longAppreciation on A+B idle after appreciate is good
+    # Also: SNAP longAppreciation on peeping (actCtrl 3,6) is good
     if land_appr:
         if bad_apb:
             for ut, su, raw in bad_apb[:5]:
@@ -290,17 +297,15 @@ def main() -> int:
                     f"FAIL[4] appreciate @ut{ut:.2f} then force start @ut{su:.2f}: {raw[:120]}"
                 )
         else:
-            passes.append(f"PASS[4] {len(land_appr)} A+B appreciate without auto startsex")
+            passes.append(f"PASS[4] {len(land_appr)} peeping appreciate without auto startsex")
     else:
-        # Evidence via suppress longAppreciation on A+B ids while Idle — soft skip
+        # Evidence via suppress longAppreciation on peeping — soft skip
         saw_apb = False
         for r in snaps:
             d = data_of(r)
             if d.get("suppress") != "longAppreciation":
                 continue
-            nid = parse_now_id(S(d.get("nowAnim")))
-            clip = S(d.get("clip"))
-            if nid in APB_IDS and clip in IDLE_CLIPS:
+            if is_peeping_snap(d):
                 saw_apb = True
                 break
         if saw_apb:
@@ -316,12 +321,12 @@ def main() -> int:
             ]
             if legacy:
                 fails.append(
-                    f"FAIL[4] legacy auto_after_* startsex still present ({len(legacy)}x) with A+B suppress"
+                    f"FAIL[4] legacy auto_after_* startsex still present ({len(legacy)}x) with peeping suppress"
                 )
             else:
-                skips.append("SKIP[4] saw longAppreciation Idle but no landed/appreciate event yet")
+                skips.append("SKIP[4] saw longAppreciation peeping but no landed/appreciate event yet")
         else:
-            skips.append("SKIP[4] no A+B appreciate evidence in this run")
+            skips.append("SKIP[4] no peeping appreciate evidence in this run")
 
     # --- 5. AfterIdle: afteridle force or leave within 3s of AfterIdle-looking clips ---
     after_events = [r for r in R if r.get("id") == "afteridle"]

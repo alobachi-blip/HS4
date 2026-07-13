@@ -2,6 +2,23 @@
 
 ## 2026-07-13
 
+### 修正：欣賞鎖改認 ActionCtrl（不再硬編碼姿勢 id）
+
+- **根因**：`LongAppreciationPoseIds`（8/9/15/102/105…）註解寫場所自慰／窺視，但本機動畫包下同號姿已是插入／口交等 → 誤觸發 `longAppreciation`（如 id15、id102），虛脫後體感卡死。
+- **判定（唯一）**：`AnimationListInfo.ActionCtrl.Item1==3 && Item2==6` → 原版 `ChangeModeCtrl` → `Peeping`（`OrbitPosePool.IsPeepingPose`）。
+  - UI／LOG 顯示字來自同筆的 `nameAnimation`（日文或譯名，**不是**英文常數，也**不**當分流依據）。
+  - 場所自慰 `Item2==4|5` → `Masturbation`，走動作線，**不算**欣賞鎖（契約 §5）。
+- **刪**：硬編碼 id 陣列；`IsLongAppreciationPose` 改轉呼叫窺視判定。
+- **LOG**：SNAP 增 `actCtrl`（如 `"3,6"`）與 `peeping` bool，方便對帳。
+
+### 穿牆快取：真正落盤（跑一次後不再掃）
+
+- **問題**：`JsonUtility` 寫出的 `map_vanish/map_*.json` 只有 `mapId`/`version`、**沒有 `entries`**，每次進圖都重掃；自訂圖常 `+0` 仍一直遮擋。
+- **修正**：改手寫／手讀 JSON（cache **v2**）；掃描結果（含 0 筆）一律落盤，之後只套用快取。
+- **掃描**：`objMap` Collider 太少時擴掃同 scene（排除角色）；同名 Collider 合併 hide 目標。
+- **離線預烘焙**：`tools/bake_map_vanish_caches.py` 從原版 Excel＋zipmod `map_col_*.csv`＋場景 Collider 一次寫入全部 `map_vanish/map_*.json`（已對 `D:\HS2` 跑過，約 81 張圖）。
+- **注意**：不改原版 Excel／abdata；快取在 `BepInEx/config/HS2OrbitAndExciter/map_vanish/`。舊 v1 空檔會被忽略並重掃一次。
+
 ### 行為：虛脫／高潮後 5 秒欣賞→選池→再開幹（維持虛脫）
 
 - 高潮後短收尾由 0.75s 改為 **5s** 欣賞，到時自動選池；**不清** `isFaintness`，繼續走 `D_*`／脫力姿池。
@@ -100,11 +117,10 @@
 
 ### 行為：長動作可欣賞，按需才脫離（A+B）
 
-- **只保護這 7 個姿勢**（短高潮 AfterIdle 不在內）：
-  - 窺視：105 洋式トイレ覗き、106 和式トイレ覗き、107 シャワー覗き
-  - 場所自慰：8 シャワー／9 洋式トイレ／15 和式トイレ／102 風呂 オナニー
-- 上述姿勢：擋自動換姿／checkpoint，直到 **L**／**真實滾輪**／**迴轉換姿** latch。
-- **高潮後短 AfterIdle**（`Orgasm_*_A` 等）：約 **2 秒**假滾輪／強制 `IsReStart` 自動脫離（**即使**當前仍是 A+B 姿勢 ID，也不擋這段短等待）。
+> **2026-07-13 起已廢止硬編碼七姿 id**；改見上方「欣賞鎖改認 ActionCtrl」。下列為歷史敘述。
+
+- **舊**：只保護 7 個姿勢 id（窺視 105–107＋場所自慰 8/9/15/102）→ 本機 id 對不上會誤鎖。
+- **現**：僅 `ActionCtrl (3,6)` 窺視；場所自慰不鎖。
 - FSM：`longAppreciation`；`escape`/`request`（`L`|`wheel`|`cycle`）。
 
 ### 功能：內射肚子變大（選單，預設開）

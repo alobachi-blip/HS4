@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""List tokushu (特殊) animations with ActionCtrl Item2 in {4,5} = masturbation/peeping."""
+"""List tokushu (特殊) animations with ActionCtrl Item1==3 and Item2 in {4,5,6}.
+Item2 4|5 → Masturbation; Item2 6 → Peeping（對齊 HScene.ChangeModeCtrl）。
+"""
 from pathlib import Path
 import UnityPy
 
@@ -44,7 +46,7 @@ for p in sorted(root.glob("*.unity3d")):
                 act2 = int(cells_f[15])
             except Exception:
                 continue
-            if act1 != 3 or act2 not in (4, 5):
+            if act1 != 3 or act2 not in (4, 5, 6):
                 continue
             rows.append({
                 "mb": name,
@@ -60,5 +62,6 @@ for p in sorted(root.glob("*.unity3d")):
 
 print(f"found {len(rows)} tokushu peep/masturb rows")
 for r in rows:
-    kind = "覗き/Peeping" if r["act"][1] == 5 else "自慰/Masturbation"
-    print(f"[{kind}] id={r['id']:>3}  {r['title']}  place={r['place']}  anim={r['female_file']}  asset={r['female_asset']}")
+    # ChangeModeCtrl: Item1==3 Item2==4|5 → Masturbation(mode4); Item2==6 → Peeping(mode5)
+    kind = "覗き/Peeping" if r["act"][1] == 6 else "自慰/Masturbation"
+    print(f"[{kind}] id={r['id']:>3}  act={r['act']}  {r['title']}  place={r['place']}  anim={r['female_file']}")

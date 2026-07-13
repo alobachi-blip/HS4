@@ -4,8 +4,8 @@ using UnityEngine;
 namespace HS2OrbitAndExciter.Patches
 {
     /// <summary>
-    /// AfterIdle escape: ≈2s auto (even on A+B pose ids), or immediately when escape latched.
-    /// Idle: A+B needs latch (L / real wheel / cycle); other Idle ≈2s auto.
+    /// AfterIdle escape: ≈2s auto（窺視姿亦然：短 AfterIdle 不擋），或 escape latch 立刻。
+    /// Idle: 窺視欣賞鎖需 latch（L／真實滾輪／cycle）；其它 Idle ≈2s auto。
     /// Latch clears on leaving wait / pose done / orbit off — no time window.
     /// </summary>
     [HarmonyPatch(typeof(HAutoCtrl), nameof(HAutoCtrl.IsReStart))]
@@ -23,7 +23,7 @@ namespace HS2OrbitAndExciter.Patches
         }
     }
 
-    /// <summary>Auto Idle start — A+B requires escape latch; other Idle ≈2s auto.</summary>
+    /// <summary>Auto Idle start — 窺視欣賞鎖需 escape latch；其它 Idle ≈2s auto。</summary>
     [HarmonyPatch(typeof(HAutoCtrl), nameof(HAutoCtrl.IsStart))]
     public static class OrbitAutoIdleStartPatch
     {

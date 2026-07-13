@@ -76,35 +76,13 @@ namespace HS2OrbitAndExciter
         };
 
         /// <summary>
-        /// Long appreciation poses (user confirmed A+B):
-        /// peeping 105/106/107 + location onani 8/9/15/102.
-        /// Short orgasm AfterIdle is NOT included.
+        /// 長欣賞（純播出）：會進原版 <c>Peeping</c> 的姿。
+        /// 判定用 <see cref="OrbitPosePool.IsPeepingPose"/>（ActionCtrl），
+        /// <b>不用</b>硬編碼姿勢 id／顯示名（譯名會變、動畫包會改寫 id）。
+        /// 場所自慰走動作線，不算欣賞鎖（契約 §5）。
         /// </summary>
-        private static readonly int[] LongAppreciationPoseIds =
-        {
-            8,    // シャワーオナニー
-            9,    // 洋式トイレオナニー
-            15,   // 和式トイレオナニー
-            102,  // 風呂オナニー
-            105,  // 洋式トイレ覗き
-            106,  // 和式トイレ覗き
-            107,  // シャワー覗き
-        };
-
-        /// <summary>True when current H pose is a long bath/toilet/shower set to watch until L/wheel/cycle.</summary>
-        public static bool IsLongAppreciationPose(HScene? hScene)
-        {
-            var info = hScene?.ctrlFlag?.nowAnimationInfo;
-            if (info == null)
-                return false;
-            int id = info.id;
-            for (int i = 0; i < LongAppreciationPoseIds.Length; i++)
-            {
-                if (LongAppreciationPoseIds[i] == id)
-                    return true;
-            }
-            return false;
-        }
+        public static bool IsLongAppreciationPose(HScene? hScene) =>
+            OrbitPosePool.IsPeepingPose(hScene?.ctrlFlag?.nowAnimationInfo);
 
         /// <summary>Vanilla Idle / D_Idle only（契約：WIdle／SIdle 屬橋段）。</summary>
         public static bool IsFirstFemaleInIdle(HScene? hScene)
