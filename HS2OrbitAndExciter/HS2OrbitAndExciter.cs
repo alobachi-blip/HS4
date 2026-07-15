@@ -93,6 +93,18 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? VoiceTourResetOnNewH;
         /// <summary>Count houshi outside/drink male finish as a voice-tour hit.</summary>
         internal static ConfigEntry<bool>? VoiceTourCountHoushiMaleFinish;
+        /// <summary>Write detailed NDJSON state-machine traces for smoke/regression runs.</summary>
+        internal static ConfigEntry<bool>? EnableStateMachineTrace;
+        /// <summary>Smoke-only shortcut: jump directly into HScene after startup.</summary>
+        internal static ConfigEntry<bool>? EnableDirectHSmokeDriver;
+        internal static ConfigEntry<float>? DirectHSmokeDelaySeconds;
+        internal static ConfigEntry<int>? DirectHSmokeMapId;
+        internal static ConfigEntry<int>? DirectHSmokeEventNo;
+        internal static ConfigEntry<string>? DirectHSmokeFemaleCardPath;
+        internal static ConfigEntry<string>? DirectHSmokeSecondFemaleCardPath;
+        internal static ConfigEntry<string>? DirectHSmokeMaleCardPath;
+        internal static ConfigEntry<bool>? EnableSmokeKeyframeScreenshots;
+        internal static ConfigEntry<string>? SmokeKeyframeDirectory;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -198,6 +210,26 @@ namespace HS2OrbitAndExciter
                 "If true, each H enter starts at stage 0 for that character.");
             VoiceTourCountHoushiMaleFinish = Config.Bind("VoiceTour", "VoiceTourCountHoushiMaleFinish", true,
                 "Count houshi outside/drink male finish as one hit. Insertion inside (numInside) always counts.");
+            EnableStateMachineTrace = Config.Bind("Diagnostics", "EnableStateMachineTrace", false,
+                "Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.");
+            EnableDirectHSmokeDriver = Config.Bind("Smoke", "EnableDirectHSmokeDriver", false,
+                "Smoke test only: jump directly into HScene after startup. Default false.");
+            DirectHSmokeDelaySeconds = Config.Bind("Smoke", "DirectHSmokeDelaySeconds", 8f,
+                "Seconds to wait after plugin load before the direct-H smoke jump starts trying.");
+            DirectHSmokeMapId = Config.Bind("Smoke", "DirectHSmokeMapId", 3,
+                "Map id for the direct-H smoke jump. 3 is a room-style default.");
+            DirectHSmokeEventNo = Config.Bind("Smoke", "DirectHSmokeEventNo", -1,
+                "EventNo for the direct-H smoke jump. -1 uses ordinary/free H flow.");
+            DirectHSmokeFemaleCardPath = Config.Bind("Smoke", "DirectHSmokeFemaleCardPath", "",
+                "Optional female card path for direct-H smoke. Empty lets HS2 create its default female.");
+            DirectHSmokeSecondFemaleCardPath = Config.Bind("Smoke", "DirectHSmokeSecondFemaleCardPath", "",
+                "Optional second female card path for direct-H smoke.");
+            DirectHSmokeMaleCardPath = Config.Bind("Smoke", "DirectHSmokeMaleCardPath", "",
+                "Optional male card path for direct-H smoke. Empty uses the saved player card when available.");
+            EnableSmokeKeyframeScreenshots = Config.Bind("Smoke", "EnableSmokeKeyframeScreenshots", false,
+                "Smoke test only: capture a keyframe screenshot when DirectH reaches an active H animation.");
+            SmokeKeyframeDirectory = Config.Bind("Smoke", "SmokeKeyframeDirectory", "",
+                "Directory for smoke keyframe screenshots. Empty uses BepInEx/LogOutput/OrbitSmokeKeyframes.");
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
@@ -254,6 +286,7 @@ namespace HS2OrbitAndExciter
             go.AddComponent<OrbitHSceneLateAssist>();
             go.AddComponent<OrbitSettingsGUI>();
             go.AddComponent<OrbitStatusHud>();
+            go.AddComponent<OrbitSmokeDriver>();
             Log.LogInfo($"{PluginInfo.PLUGIN_NAME} v{PluginInfo.PLUGIN_VERSION} loaded. Settings: Ctrl+Shift+P; status HUD: P / Ctrl+Shift+I; stop orbit: O; clear belly: I.");
         }
     }

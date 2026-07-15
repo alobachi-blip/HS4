@@ -25,6 +25,8 @@ namespace HS2OrbitAndExciter
         private static bool _lastBusy;
         private static bool _bootWritten;
 
+        internal static bool Enabled => HS2OrbitAndExciter.EnableStateMachineTrace?.Value == true;
+
         internal static string? LogPath
         {
             get
@@ -51,6 +53,7 @@ namespace HS2OrbitAndExciter
 
         internal static void Boot()
         {
+            if (!Enabled) return;
             if (_bootWritten) return;
             _bootWritten = true;
             Write("boot", "OrbitStateMachineLog", "logger_ready",
@@ -59,11 +62,15 @@ namespace HS2OrbitAndExciter
             HS2OrbitAndExciter.Log?.LogInfo($"[FSM] state log → {LogPath}");
         }
 
-        internal static void Event(string kind, string message, string dataJson = "{}") =>
+        internal static void Event(string kind, string message, string dataJson = "{}")
+        {
+            if (!Enabled) return;
             Write(kind, "event", message, dataJson);
+        }
 
         internal static void Tick(HScene? hScene)
         {
+            if (!Enabled) return;
             Boot();
             if (hScene == null) return;
 
@@ -120,6 +127,7 @@ namespace HS2OrbitAndExciter
 
         internal static void Hotkey(string key, bool ok, string detail)
         {
+            if (!Enabled) return;
             Write("hotkey", key, ok ? "ok" : "fail",
                 "{\"ok\":" + (ok ? "true" : "false") + ",\"detail\":\"" + Esc(detail) + "\"}");
         }
@@ -130,11 +138,13 @@ namespace HS2OrbitAndExciter
             var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
             var anim = OrbitHelpers.TryGetFemaleAnimBody(cha);
             string clip = "?";
+            float clipNorm = -1f;
             if (anim != null)
             {
                 try
                 {
                     var st = anim.GetCurrentAnimatorStateInfo(0);
+                    clipNorm = st.normalizedTime;
                     // Hash-only; name via short IsName probe of common states is heavy — store hash + loop flags.
                     clip = "h=" + st.fullPathHash + ";norm=" + st.normalizedTime.ToString("0.###", CultureInfo.InvariantCulture);
                     foreach (string n in ProbeStateNames)
@@ -148,6 +158,9 @@ namespace HS2OrbitAndExciter
                 }
                 catch { /* ignore */ }
             }
+
+            int mode = TryReadHSceneInt(hScene, "mode", -1);
+            int modeCtrl = TryReadHSceneInt(hScene, "modeCtrl", -1);
 
             string nowName = ctrl?.nowAnimationInfo != null
                 ? Esc(ctrl.nowAnimationInfo.nameAnimation) + "#id" + ctrl.nowAnimationInfo.id + ";down" + ctrl.nowAnimationInfo.nDownPtn
@@ -170,10 +183,24 @@ namespace HS2OrbitAndExciter
             }
             catch { /* ignore */ }
 
-            var sb = new StringBuilder(512);
+            float feelF = ctrl?.feel_f ?? -1f;
+            float feelM = ctrl?.feel_m ?? -1f;
+            string click = ctrl != null ? ctrl.click.ToString() : "";
+            int clickValue = ctrl != null ? (int)ctrl.click : -999;
+            bool finishVisibleKnown = TryGetHSceneSprite(hScene, out var sprite);
+            bool[] finishVisible = new bool[5];
+            if (finishVisibleKnown && sprite != null)
+            {
+                for (int i = 0; i < finishVisible.Length; i++)
+                    finishVisible[i] = TryIsFinishVisible(sprite, i + 1);
+            }
+
+            var sb = new StringBuilder(768);
             sb.Append('{');
             sb.Append("\"suppress\":\"").Append(Esc(suppress)).Append('"');
             sb.Append(",\"director\":\"").Append(Esc(director)).Append('"');
+            sb.Append(",\"mode\":").Append(mode);
+            sb.Append(",\"modeCtrl\":").Append(modeCtrl);
             sb.Append(",\"orbit\":").Append(OrbitBehaviorHub.IsOrbitAssistActive() ? "true" : "false");
             sb.Append(",\"faint\":").Append(ctrl != null && ctrl.isFaintness ? "true" : "false");
             sb.Append(",\"faintType\":").Append(ctrl?.FaintnessType ?? -999);
@@ -183,15 +210,66 @@ namespace HS2OrbitAndExciter
             sb.Append(",\"inputForcus\":").Append(ctrl != null && ctrl.inputForcus ? "true" : "false");
             sb.Append(",\"isAutoAction\":").Append(ctrl != null && ctrl.isAutoActionChange ? "true" : "false");
             sb.Append(",\"speed\":").Append(speed.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"feel_f\":").Append(feelF.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"feel_m\":").Append(feelM.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"click\":\"").Append(Esc(click)).Append('"');
+            sb.Append(",\"clickValue\":").Append(clickValue);
             sb.Append(",\"inActionLoop\":").Append(OrbitHelpers.IsFirstFemaleInActionLoop(hScene) ? "true" : "false");
             sb.Append(",\"clip\":\"").Append(Esc(clip)).Append('"');
+            sb.Append(",\"clipNorm\":").Append(clipNorm.ToString("R", CultureInfo.InvariantCulture));
             sb.Append(",\"nowAnim\":\"").Append(nowName).Append('"');
             sb.Append(",\"selAnim\":\"").Append(selName).Append('"');
             sb.Append(",\"actCtrl\":\"").Append(actCtrl).Append('"');
+            sb.Append(",\"finishVisibleKnown\":").Append(finishVisibleKnown ? "true" : "false");
+            sb.Append(",\"finishVisible\":[");
+            for (int i = 0; i < finishVisible.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(finishVisible[i] ? "true" : "false");
+            }
+            sb.Append(']');
             sb.Append(",\"peeping\":").Append(OrbitPosePool.IsPeepingPose(ctrl?.nowAnimationInfo) ? "true" : "false");
             sb.Append(",\"orgasmQuiet\":").Append(OrbitBehaviorHub.RemainingOrgasmQuietSeconds().ToString("0.##", CultureInfo.InvariantCulture));
             sb.Append('}');
             return sb.ToString();
+        }
+
+        private static int TryReadHSceneInt(HScene hScene, string fieldName, int fallback)
+        {
+            try
+            {
+                return HarmonyLib.Traverse.Create(hScene).Field(fieldName).GetValue<int>();
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static bool TryGetHSceneSprite(HScene hScene, out HSceneSprite? sprite)
+        {
+            sprite = null;
+            try
+            {
+                sprite = HarmonyLib.Traverse.Create(hScene).Field("sprite").GetValue<HSceneSprite>();
+                return sprite != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryIsFinishVisible(HSceneSprite sprite, int slot)
+        {
+            try
+            {
+                return sprite.IsFinishVisible(slot);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static readonly string[] ProbeStateNames =
@@ -206,6 +284,7 @@ namespace HS2OrbitAndExciter
 
         private static void Write(string hypothesisId, string location, string message, string dataJson)
         {
+            if (!Enabled) return;
             EnsurePath();
             try
             {

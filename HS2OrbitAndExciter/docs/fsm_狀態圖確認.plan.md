@@ -329,8 +329,11 @@ WLoop 重播時語音若也單一，體感更悶。約定：
   - 語音可變化；不等語音再換段
   - 感度有最小值；每循環階段約 ≤10 秒推進；總預算随階段數（約 20～40 秒例）
   - N＝加速（D1）；畫面主趣味＝環視等正交
+  - **Finish 執行（族 B／C）**：`IsFinishVisible` + `ctrlFlag.click` 交原版 Proc 消費；
+    挑選用 `OrbitFinishPathLedger`（歷史比例最低），**不**用 BHS Prefer。
+    詳見 `docs/h_loop_flow_by_family.md` §6.3～§6.3.2。
 
-自動出口：→ 高潮後閒置（FSM）
+自動出口：→ 高潮後閒置（FSM）；經 Proc 正常高潮鏈，非外掛 setPlay 直跳。
 
 手動：L＝選池；N＝加速
 
@@ -339,8 +342,11 @@ WLoop 重播時語音若也單一，體感更悶。約定：
   - 等語音再換段
   - 同姿連高潮
   - 把分階段秒數變成新狀態節點
+  - 以外掛 `setPlay` 直跳 `Orgasm_*` 當常規高潮出口（應收斂 `TickOLoopToOrgasmRecovery`）
+  - 與 BHS Autofinish 並存（內建 FinishDirector 後移除依賴）
 
-現況落差：FeelAdd 速率未依階段數編預算；直跳 WLoop 跳過 Insert 屬閒置債。
+現況落差：FeelAdd 速率未依階段數編預算；直跳 WLoop 跳過 Insert 屬閒置債；
+  Finish 仍走 setPlay 強推，未實作 IsFinishVisible + click + Ledger。
 ```
 
 動作橋段定稿。下一項：**4. 高潮後閒置**。
