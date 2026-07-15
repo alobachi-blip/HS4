@@ -93,6 +93,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? VoiceTourResetOnNewH;
         /// <summary>Count houshi outside/drink male finish as a voice-tour hit.</summary>
         internal static ConfigEntry<bool>? VoiceTourCountHoushiMaleFinish;
+        /// <summary>Write detailed NDJSON traces for diagnosis. Default off to avoid runtime overhead.</summary>
+        internal static ConfigEntry<bool>? EnableStateMachineTrace;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -198,6 +200,9 @@ namespace HS2OrbitAndExciter
                 "If true, each H enter starts at stage 0 for that character.");
             VoiceTourCountHoushiMaleFinish = Config.Bind("VoiceTour", "VoiceTourCountHoushiMaleFinish", true,
                 "Count houshi outside/drink male finish as one hit. Insertion inside (numInside) always counts.");
+            EnableStateMachineTrace = Config.Bind("Diagnostics", "EnableStateMachineTrace", false,
+                "Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.");
+            OrbitStateMachineLog.Boot();
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;

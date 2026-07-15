@@ -4,9 +4,8 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// 三種繞法（輪替、與上次不同）：
-    /// 1 軀幹軸（頭−骨盆）、2 世界鉛垂、3 身體側向（左−右）。
-    /// 每段再加任意起始方位角；不做俯仰／zoom 搖晃。
+    /// 人物三主軸輪替（與上次不同）：軀幹／前後／側向。
+    /// 每圈再對主軸做亂數錐形傾斜；方位角沿傾斜軸連續累積，換軸時對齊上一視線。
     /// </summary>
     internal static class OrbitBodyAxis
     {
@@ -14,11 +13,14 @@ namespace HS2OrbitAndExciter
         {
             /// <summary>繞頭−骨盆（身體長軸）。</summary>
             Torso = 0,
-            /// <summary>繞世界鉛垂。</summary>
-            WorldVertical = 1,
+            /// <summary>繞面−背（人物前後軸）。</summary>
+            BodyFacing = 1,
             /// <summary>繞身體左右軸（翻轉看上／下）。</summary>
             BodyLateral = 2,
         }
+
+        internal const float MinTiltDegrees = 8f;
+        internal const float MaxTiltDegrees = 28f;
 
         internal const float MinRelativeDeltaDegrees = 60f;
         internal const float MaxRelativeDeltaDegrees = 170f;
@@ -43,9 +45,8 @@ namespace HS2OrbitAndExciter
 
         internal static OrbitAxisMode PickNextMode(OrbitAxisMode previous)
         {
-            // 三選一，排除上次
             int skip = (int)previous;
-            int pick = UnityEngine.Random.Range(0, 2); // 0 or 1 among the two remaining
+            int pick = UnityEngine.Random.Range(0, 2);
             int mode = 0;
             int seen = 0;
             for (int i = 0; i < 3; i++)
@@ -62,7 +63,47 @@ namespace HS2OrbitAndExciter
             return (OrbitAxisMode)mode;
         }
 
-        /// <summary>任意起始方位角（非整數，0～360）。</summary>
+        /// <summary>在主軸周圍抽錐形傾斜，回傳實際旋轉軸（世界）與傾斜角。</summary>
+        internal static Vector3 RollTiltedSpinAxis(Vector3 nominalAxis, out float tiltDegrees)
+        {
+            Vector3 n = nominalAxis.sqrMagnitude > 1e-8f ? nominalAxis.normalized : Vector3.up;
+            tiltDegrees = UnityEngine.Random.Range(MinTiltDegrees, MaxTiltDegrees);
+            tiltDegrees += UnityEngine.Random.Range(0.07f, 0.93f);
+            if (tiltDegrees > MaxTiltDegrees)
+                tiltDegrees = MaxTiltDegrees;
+
+            Vector3 peri = Vector3.Cross(n, Vector3.up);
+            if (peri.sqrMagnitude < 1e-6f)
+                peri = Vector3.Cross(n, Vector3.right);
+            if (peri.sqrMagnitude < 1e-6f)
+                peri = Vector3.forward;
+            peri.Normalize();
+            float twist = UnityEngine.Random.Range(0f, 360f);
+            peri = (Quaternion.AngleAxis(twist, n) * peri).normalized;
+            return (Quaternion.AngleAxis(tiltDegrees, peri) * n).normalized;
+        }
+
+        /// <summary>把世界軸存成相對 basis 的本地分量（隨鎖定身體剛體跟隨）。</summary>
+        internal static Vector3 AxisToBasisLocal(Basis basis, Vector3 axisWorld)
+        {
+            Vector3 w = axisWorld.sqrMagnitude > 1e-8f ? axisWorld.normalized : basis.TorsoUp;
+            return new Vector3(
+                Vector3.Dot(w, basis.Right),
+                Vector3.Dot(w, basis.TorsoUp),
+                Vector3.Dot(w, basis.Facing));
+        }
+
+        internal static Vector3 AxisFromBasisLocal(Basis basis, Vector3 axisLocal)
+        {
+            Vector3 w = basis.Right * axisLocal.x
+                        + basis.TorsoUp * axisLocal.y
+                        + basis.Facing * axisLocal.z;
+            if (w.sqrMagnitude < 1e-8f)
+                return NominalSpinAxis(basis, OrbitAxisMode.Torso);
+            return w.normalized;
+        }
+
+        /// <summary>舊路徑備用：任意起始方位角。</summary>
         internal static float RollAnyAzimuthDegrees()
         {
             float a = UnityEngine.Random.Range(0f, 360f);
@@ -70,7 +111,6 @@ namespace HS2OrbitAndExciter
             return a % 360f;
         }
 
-        /// <summary>亂數相對角改變量（舊路徑備用）。</summary>
         internal static float RollRelativeDeltaDegrees()
         {
             float mag = UnityEngine.Random.Range(MinRelativeDeltaDegrees, MaxRelativeDeltaDegrees);
@@ -83,7 +123,7 @@ namespace HS2OrbitAndExciter
         internal static string ModeLabel(OrbitAxisMode mode) => mode switch
         {
             OrbitAxisMode.Torso => "軀幹軸",
-            OrbitAxisMode.WorldVertical => "鉛垂軸",
+            OrbitAxisMode.BodyFacing => "前後軸",
             OrbitAxisMode.BodyLateral => "側向軸",
             _ => "軸"
         };
@@ -154,12 +194,12 @@ namespace HS2OrbitAndExciter
             return new Basis(focusWorld, torsoUp, facingAxis, rightAxis, true);
         }
 
-        internal static Vector3 SpinAxis(Basis basis, OrbitAxisMode mode)
+        internal static Vector3 NominalSpinAxis(Basis basis, OrbitAxisMode mode)
         {
             switch (mode)
             {
-                case OrbitAxisMode.WorldVertical:
-                    return Vector3.up;
+                case OrbitAxisMode.BodyFacing:
+                    return basis.Facing.sqrMagnitude > 1e-6f ? basis.Facing.normalized : Vector3.forward;
                 case OrbitAxisMode.BodyLateral:
                     return basis.Right.sqrMagnitude > 1e-6f ? basis.Right.normalized : Vector3.right;
                 default:
@@ -167,27 +207,56 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        /// <summary>繞指定軸的方位方向（無俯仰搖晃）。</summary>
-        internal static Vector3 DirectionFromAxisAzimuth(Basis basis, OrbitAxisMode mode, float azimuthDegrees)
+        /// <summary>兼容舊呼叫：未傾斜時的主軸。</summary>
+        internal static Vector3 SpinAxis(Basis basis, OrbitAxisMode mode) =>
+            NominalSpinAxis(basis, mode);
+
+        internal static Vector3 RadialZero(Basis basis, Vector3 axis)
         {
-            Vector3 axis = SpinAxis(basis, mode);
-            Vector3 radial0 = Vector3.ProjectOnPlane(-basis.Facing, axis);
+            Vector3 a = axis.sqrMagnitude > 1e-8f ? axis.normalized : Vector3.up;
+            Vector3 radial0 = Vector3.ProjectOnPlane(-basis.Facing, a);
             if (radial0.sqrMagnitude < 1e-4f)
-                radial0 = Vector3.ProjectOnPlane(basis.TorsoUp, axis);
+                radial0 = Vector3.ProjectOnPlane(basis.TorsoUp, a);
             if (radial0.sqrMagnitude < 1e-4f)
-                radial0 = Vector3.Cross(axis, Vector3.right);
+                radial0 = Vector3.Cross(a, Vector3.right);
             if (radial0.sqrMagnitude < 1e-4f)
                 radial0 = Vector3.forward;
-            radial0.Normalize();
+            return radial0.normalized;
+        }
+
+        /// <summary>繞實際傾斜軸的方位方向。</summary>
+        internal static Vector3 DirectionFromAxisAzimuth(Basis basis, Vector3 spinAxis, float azimuthDegrees)
+        {
+            Vector3 axis = spinAxis.sqrMagnitude > 1e-8f ? spinAxis.normalized : NominalSpinAxis(basis, OrbitAxisMode.Torso);
+            Vector3 radial0 = RadialZero(basis, axis);
             return (Quaternion.AngleAxis(azimuthDegrees, axis) * radial0).normalized;
+        }
+
+        internal static Vector3 DirectionFromAxisAzimuth(Basis basis, OrbitAxisMode mode, float azimuthDegrees) =>
+            DirectionFromAxisAzimuth(basis, NominalSpinAxis(basis, mode), azimuthDegrees);
+
+        /// <summary>
+        /// 找出繞 <paramref name="spinAxis"/> 時，最接近 <paramref name="desiredDir"/> 的方位角（0～360）。
+        /// 換軸時用來對齊上一視線，避免亂跳。
+        /// </summary>
+        internal static float AzimuthMatchingDirection(Basis basis, Vector3 spinAxis, Vector3 desiredDir)
+        {
+            Vector3 axis = spinAxis.sqrMagnitude > 1e-8f ? spinAxis.normalized : NominalSpinAxis(basis, OrbitAxisMode.Torso);
+            Vector3 radial0 = RadialZero(basis, axis);
+            Vector3 desired = Vector3.ProjectOnPlane(desiredDir, axis);
+            if (desired.sqrMagnitude < 1e-6f)
+                return 0f;
+            desired.Normalize();
+            float ang = Vector3.SignedAngle(radial0, desired, axis);
+            if (ang < 0f)
+                ang += 360f;
+            return ang % 360f;
         }
 
         /// <summary>
         /// 相機 up：以地板／天空法線做 horizon-lock，避免畫面上方朝地面或朝腳底。
         /// 視線接近鉛垂（萬向節死區）時短暫沿用上一幀 up。
         /// </summary>
-        /// <param name="floorSkyward">地板法線（朝天空）；可為世界 up。</param>
-        /// <param name="previousUp">上一幀相機 up（可選）；成功後會寫回。</param>
         internal static Vector3 CameraUp(
             Basis basis,
             Vector3 lookDirWorld,
@@ -199,9 +268,8 @@ namespace HS2OrbitAndExciter
             if (Vector3.Dot(sky, Vector3.up) < 0f)
                 sky = -sky;
 
-            // 視線太接近天空／地面法線 → 投影不穩，鎖上一幀
             float alignSky = Mathf.Abs(Vector3.Dot(look, sky));
-            const float GimbalAlign = 0.96f; // ~16° 內視為死區
+            const float GimbalAlign = 0.96f;
 
             Vector3 up;
             if (alignSky >= GimbalAlign && previousUp.HasValue && previousUp.Value.sqrMagnitude > 1e-6f)
@@ -232,11 +300,9 @@ namespace HS2OrbitAndExciter
 
             up.Normalize();
 
-            // 禁止畫面上方朝地面（與天空法線反向）
             if (Vector3.Dot(up, sky) < 0f)
                 up = -up;
 
-            // 禁止畫面上方朝女主角腳底（相對頭→腳）
             Vector3 headDir = basis.TorsoUp.sqrMagnitude > 1e-6f ? basis.TorsoUp.normalized : sky;
             Vector3 feetDir = -headDir;
             float towardFeet = Vector3.Dot(up, feetDir);
@@ -244,13 +310,11 @@ namespace HS2OrbitAndExciter
             if (towardFeet > towardHead && towardFeet > 0.2f)
             {
                 Vector3 flipped = -up;
-                // 翻轉後仍不得倒向地面；若翻轉更貼近天空則採用
                 if (Vector3.Dot(flipped, sky) >= -0.05f
                     && Vector3.Dot(flipped, sky) + 0.02f >= Vector3.Dot(up, sky))
                     up = flipped;
             }
 
-            // 再保險一次：翻完仍可能倒地
             if (Vector3.Dot(up, sky) < 0f)
                 up = -up;
 

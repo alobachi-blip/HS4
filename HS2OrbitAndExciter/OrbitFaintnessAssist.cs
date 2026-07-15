@@ -14,7 +14,6 @@ namespace HS2OrbitAndExciter
 
         private static bool _weakStopSaved;
         private static bool _weakStopWasOn;
-        private static bool _countApplied;
 
         internal static void ApplyOnAssistStart()
         {
@@ -43,7 +42,6 @@ namespace HS2OrbitAndExciter
                     return;
                 // readonly 實例欄位仍可用反射寫入
                 fi.SetValue(ctrl, TargetGotoFaintnessCount);
-                _countApplied = true;
                 HS2OrbitAndExciter.Log?.LogInfo(
                     $"Orbit: 脫力次數門檻改為 {TargetGotoFaintnessCount}（契約 §22）");
             }

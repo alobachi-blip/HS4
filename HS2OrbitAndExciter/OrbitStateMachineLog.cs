@@ -25,6 +25,8 @@ namespace HS2OrbitAndExciter
         private static bool _lastBusy;
         private static bool _bootWritten;
 
+        internal static bool Enabled => HS2OrbitAndExciter.EnableStateMachineTrace?.Value == true;
+
         internal static string? LogPath
         {
             get
@@ -51,6 +53,7 @@ namespace HS2OrbitAndExciter
 
         internal static void Boot()
         {
+            if (!Enabled) return;
             if (_bootWritten) return;
             _bootWritten = true;
             Write("boot", "OrbitStateMachineLog", "logger_ready",
@@ -59,11 +62,15 @@ namespace HS2OrbitAndExciter
             HS2OrbitAndExciter.Log?.LogInfo($"[FSM] state log → {LogPath}");
         }
 
-        internal static void Event(string kind, string message, string dataJson = "{}") =>
+        internal static void Event(string kind, string message, string dataJson = "{}")
+        {
+            if (!Enabled) return;
             Write(kind, "event", message, dataJson);
+        }
 
         internal static void Tick(HScene? hScene)
         {
+            if (!Enabled) return;
             Boot();
             if (hScene == null) return;
 
@@ -120,6 +127,7 @@ namespace HS2OrbitAndExciter
 
         internal static void Hotkey(string key, bool ok, string detail)
         {
+            if (!Enabled) return;
             Write("hotkey", key, ok ? "ok" : "fail",
                 "{\"ok\":" + (ok ? "true" : "false") + ",\"detail\":\"" + Esc(detail) + "\"}");
         }
@@ -170,6 +178,18 @@ namespace HS2OrbitAndExciter
             }
             catch { /* ignore */ }
 
+            float feelF = -1f;
+            float feelM = -1f;
+            try
+            {
+                if (ctrl != null)
+                {
+                    feelF = (float)(HarmonyLib.Traverse.Create(ctrl).Field("feel_f").GetValue() ?? -1f);
+                    feelM = (float)(HarmonyLib.Traverse.Create(ctrl).Field("feel_m").GetValue() ?? -1f);
+                }
+            }
+            catch { /* ignore */ }
+
             var sb = new StringBuilder(512);
             sb.Append('{');
             sb.Append("\"suppress\":\"").Append(Esc(suppress)).Append('"');
@@ -183,6 +203,8 @@ namespace HS2OrbitAndExciter
             sb.Append(",\"inputForcus\":").Append(ctrl != null && ctrl.inputForcus ? "true" : "false");
             sb.Append(",\"isAutoAction\":").Append(ctrl != null && ctrl.isAutoActionChange ? "true" : "false");
             sb.Append(",\"speed\":").Append(speed.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"feel_f\":").Append(feelF.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"feel_m\":").Append(feelM.ToString("R", CultureInfo.InvariantCulture));
             sb.Append(",\"inActionLoop\":").Append(OrbitHelpers.IsFirstFemaleInActionLoop(hScene) ? "true" : "false");
             sb.Append(",\"clip\":\"").Append(Esc(clip)).Append('"');
             sb.Append(",\"nowAnim\":\"").Append(nowName).Append('"');
@@ -206,6 +228,7 @@ namespace HS2OrbitAndExciter
 
         private static void Write(string hypothesisId, string location, string message, string dataJson)
         {
+            if (!Enabled) return;
             EnsurePath();
             try
             {
