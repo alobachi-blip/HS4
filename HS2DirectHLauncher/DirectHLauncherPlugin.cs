@@ -13,6 +13,7 @@ using UnityEngine;
 namespace HS2DirectHLauncher
 {
     [BepInPlugin(PluginInfo.Guid, PluginInfo.Name, PluginInfo.Version)]
+    [BepInDependency("com.hs2.orbitandexciter", BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class DirectHLauncherPlugin : BaseUnityPlugin
     {
         private ConfigEntry<bool> _alwaysEnabled = null!;
@@ -52,7 +53,32 @@ namespace HS2DirectHLauncher
                 return;
             }
 
+            DisableLegacyDirectHDriver();
             Logger.LogInfo("Direct-H launcher armed; waiting only for required game singletons.");
+        }
+
+        private void DisableLegacyDirectHDriver()
+        {
+            try
+            {
+                Type? orbitType = Type.GetType(
+                    "HS2OrbitAndExciter.HS2OrbitAndExciter, HS2OrbitAndExciter",
+                    throwOnError: false);
+                var field = orbitType?.GetField(
+                    "EnableDirectHSmokeDriver",
+                    System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Public);
+                if (field?.GetValue(null) is ConfigEntry<bool> legacyDriver && legacyDriver.Value)
+                {
+                    legacyDriver.Value = false;
+                    Logger.LogInfo("Disabled legacy Orbit Direct-H smoke driver for this launch.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not disable legacy Orbit Direct-H smoke driver: " + ex.Message);
+            }
         }
 
         private void Update()
