@@ -23,7 +23,6 @@ namespace HS2DirectHLauncher
         private ConfigEntry<bool> _alwaysEnabled = null!;
         private ConfigEntry<int> _mapId = null!;
         private ConfigEntry<bool> _randomizeMap = null!;
-        private ConfigEntry<bool> _includeModMaps = null!;
         private ConfigEntry<bool> _randomizeInitialClothes = null!;
         private ConfigEntry<float> _pollInterval = null!;
         private ConfigEntry<string> _femaleDirectory = null!;
@@ -52,8 +51,6 @@ namespace HS2DirectHLauncher
                 "Fallback map when random map selection is disabled or unavailable. 3 is the standard room.");
             _randomizeMap = Config.Bind("Launcher", "RandomizeMap", true,
                 "Choose a random H-compatible map on every direct launch.");
-            _includeModMaps = Config.Bind("Launcher", "IncludeModMaps", false,
-                "Include high-numbered custom maps in opening randomization. Disabled by default for fast startup.");
             _randomizeInitialClothes = Config.Bind("Launcher", "RandomizeInitialClothes", true,
                 "Randomize each loaded character's clothes state once the opening H animation is ready.");
             _pollInterval = Config.Bind("Launcher", "ReadyPollSeconds", 0.02f,
@@ -417,9 +414,7 @@ namespace HS2DirectHLauncher
                 return fallback;
 
             int[] candidates = BaseMap.infoTable.Values
-                .Where(map => map != null && map.No >= 0 &&
-                              (map.Draw == 0 || map.Draw == 2) &&
-                              (_includeModMaps.Value || map.No < 10000))
+                .Where(map => map != null && map.No >= 0 && (map.Draw == 0 || map.Draw == 2))
                 .Select(map => map.No)
                 .Distinct()
                 .ToArray();
