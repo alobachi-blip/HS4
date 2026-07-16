@@ -29,7 +29,7 @@ namespace HS2DirectHLauncher
         private string _runMarkerPath = string.Empty;
         private bool _armed;
         private bool _requested;
-        private bool _bootstrapTakenOver;
+        private bool _titleRequested;
         private float _nextPoll;
 
         private void Awake()
@@ -100,7 +100,7 @@ namespace HS2DirectHLauncher
 
             try
             {
-                if (!TakeOverAtFirstStableScene())
+                if (!AdvanceToCompatibleLaunchPoint())
                     return;
                 EnterHScene();
                 _requested = true;
@@ -121,31 +121,37 @@ namespace HS2DirectHLauncher
                    !Scene.IsFadeNow;
         }
 
-        private bool TakeOverAtFirstStableScene()
+        private bool AdvanceToCompatibleLaunchPoint()
         {
             string activeScene = UnitySceneManager.GetActiveScene().name;
             if (string.Equals(activeScene, "Title", StringComparison.Ordinal))
                 return true;
             if (!string.Equals(activeScene, "Logo", StringComparison.Ordinal))
                 return false;
-            if (_bootstrapTakenOver)
-                return true;
+            if (_titleRequested)
+                return false;
 
             var logo = FindObjectOfType<LogoScene>();
             var saveData = Singleton<Game>.Instance.saveData;
             if (logo == null || saveData == null)
                 return false;
 
-            // Keep the three save-data guards from LogoScene.Start, then stop its
-            // brand call / two-second wait / forced Title transition.
+            // Keep the three save-data guards from LogoScene.Start, skip its brand
+            // call and two-second wait, but still emit Title once for old plugins
+            // that initialize their H-scene UI from the Title lifecycle.
             saveData.RoomListCharaExists();
             saveData.PlayerCoordinateExists();
             saveData.PlayerExists();
             logo.StopAllCoroutines();
             logo.enabled = false;
-            _bootstrapTakenOver = true;
-            Logger.LogInfo("Logo bootstrap completed without brand call; taking over before Title.");
-            return true;
+            _titleRequested = true;
+            Logger.LogInfo("Logo bootstrap complete; loading compatibility Title without brand call or fade.");
+            Scene.LoadReserve(new Scene.Data
+            {
+                levelName = "Title",
+                fadeType = FadeCanvas.Fade.None
+            }, isLoadingImageDraw: false);
+            return false;
         }
 
         private void EnterHScene()
