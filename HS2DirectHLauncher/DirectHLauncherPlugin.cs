@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -74,6 +75,7 @@ namespace HS2DirectHLauncher
 
             DisableLegacyDirectHDriver();
             PatchMoreAccessoriesStartupGuard();
+            PatchHAnimationTablePacing();
             Logger.LogInfo("Direct-H launcher armed; waiting only for required game singletons.");
         }
 
@@ -144,6 +146,57 @@ namespace HS2DirectHLauncher
             catch
             {
                 return false;
+            }
+        }
+
+        private void PatchHAnimationTablePacing()
+        {
+            try
+            {
+                var method = AccessTools.Method(typeof(HSceneManager.HSceneTables), "LoadAnimationFileName");
+                if (method == null)
+                    return;
+
+                var harmony = new Harmony(PluginInfo.Guid + ".startup");
+                harmony.Patch(
+                    method,
+                    postfix: new HarmonyMethod(typeof(DirectHLauncherPlugin), nameof(HAnimationTablePacingPostfix)));
+                Logger.LogInfo("Installed bounded H animation-table pacing accelerator.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not accelerate H animation-table pacing: " + ex.Message);
+            }
+        }
+
+        private static void HAnimationTablePacingPostfix(ref IEnumerator __result)
+        {
+            if (__result != null)
+                __result = CollapseEmptyAnimationTableFrames(__result);
+        }
+
+        private static IEnumerator CollapseEmptyAnimationTableFrames(IEnumerator source)
+        {
+            const float frameBudgetSeconds = 0.008f;
+            float deadline = Time.realtimeSinceStartup + frameBudgetSeconds;
+            while (source.MoveNext())
+            {
+                object current = source.Current;
+                if (current != null)
+                {
+                    yield return current;
+                    deadline = Time.realtimeSinceStartup + frameBudgetSeconds;
+                    continue;
+                }
+
+                // The original iterator yields null after every missing category,
+                // loaded spreadsheet, and bundle. Coalesce those pacing-only gaps,
+                // but yield once the per-frame work budget is spent.
+                if (Time.realtimeSinceStartup >= deadline)
+                {
+                    yield return null;
+                    deadline = Time.realtimeSinceStartup + frameBudgetSeconds;
+                }
             }
         }
 

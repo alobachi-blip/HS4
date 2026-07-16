@@ -11,6 +11,8 @@ The two picks per sex are distinct when at least two cards exist. With one card 
 
 The launch flag is one-shot and is removed as soon as the H-scene request succeeds. Normal launches through `HoneySelect2.exe` are unaffected.
 
+During a direct launch, pacing-only empty frames in the H animation-table scan are coalesced within an 8 ms per-frame budget. Asset loads and real asynchronous waits are preserved.
+
 Useful commands:
 
 ```powershell
