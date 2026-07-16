@@ -33,11 +33,20 @@ namespace HS2OrbitAndExciter
                 if (allowStartYRandom)
                     orbit.InternalRandomizeStartOrbitY();
             }
+
+            if (roundTripJustCompleted)
+                ApplyPoseIfNeeded(hScene, rotationCount / 2);
         }
 
         internal static void ApplyPoseIfNeeded(HScene hScene, int roundTripCount)
         {
-            // §9 C-脫鉤：環視圈數不得換姿；換段只認選池
+            if (HS2OrbitAndExciter.ChangePoseOnCycle?.Value != true)
+                return;
+            int interval = HS2OrbitAndExciter.OrbitCountBeforePoseChange?.Value ?? 2;
+            if (interval <= 0 || roundTripCount <= 0 || roundTripCount % interval != 0)
+                return;
+
+            OrbitPoseDirector.RequestPoseChange(hScene, PoseChangeSource.Cycle);
         }
     }
 }
