@@ -28,6 +28,8 @@ BepInEx_HS2_PhotoToCard/bin/
 BepInEx_HS2_PhotoToCard/obj/
 HS2OrbitAndExciter/bin/
 HS2OrbitAndExciter/obj/
+HS2DirectHLauncher/bin/
+HS2DirectHLauncher/obj/
 # ilspycmd 自 BepInEx\plugins 反組譯之產物（僅供對照，勿提交）
 HS2OrbitAndExciter/decompiled_from_BepInEx_plugins/
 

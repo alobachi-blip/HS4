@@ -9,25 +9,53 @@ namespace HS2DirectHLauncher
     {
         private readonly Random _random = new Random(unchecked(Environment.TickCount * 397 ^ Guid.NewGuid().GetHashCode()));
 
-        internal string[] PickTwo(string directory, bool recursive, params string[] fallbacks)
+        internal string[] PickTwo(
+            string directory,
+            bool recursive,
+            Func<string, bool>? preferred,
+            Func<string, bool>? accepted,
+            params string[] fallbacks)
         {
             var candidates = FindCards(directory, recursive);
-            if (candidates.Count == 0)
+            candidates.AddRange(fallbacks.Where(FileReferenceExists));
+            candidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            var preferredCards = preferred == null
+                ? new List<string>()
+                : candidates.Where(preferred).ToList();
+            var otherCards = preferred == null
+                ? candidates
+                : candidates.Where(path => !preferred(path)).ToList();
+            Shuffle(preferredCards);
+            Shuffle(otherCards);
+
+            var selected = new List<string>(2);
+            foreach (string path in preferredCards.Concat(otherCards))
             {
-                candidates.AddRange(fallbacks.Where(FileReferenceExists));
-                candidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                if (accepted != null && !accepted(path))
+                    continue;
+                selected.Add(path);
+                if (selected.Count == 2)
+                    break;
             }
 
-            if (candidates.Count == 0)
+            if (selected.Count == 0)
                 return new[] { string.Empty, string.Empty };
-            if (candidates.Count == 1)
-                return new[] { candidates[0], candidates[0] };
+            if (selected.Count == 1)
+                return new[] { selected[0], selected[0] };
 
-            int first = _random.Next(candidates.Count);
-            int second = _random.Next(candidates.Count - 1);
-            if (second >= first)
-                second++;
-            return new[] { candidates[first], candidates[second] };
+            return selected.ToArray();
+        }
+
+        private void Shuffle(List<string> values)
+        {
+            for (int i = values.Count - 1; i > 0; i--)
+            {
+                int j = _random.Next(i + 1);
+                string temp = values[i];
+                values[i] = values[j];
+                values[j] = temp;
+            }
         }
 
         private static List<string> FindCards(string directory, bool recursive)

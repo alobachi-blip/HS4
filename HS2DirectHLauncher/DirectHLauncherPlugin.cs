@@ -22,6 +22,8 @@ namespace HS2DirectHLauncher
         private ConfigEntry<string> _maleDirectory = null!;
         private ConfigEntry<bool> _recursive = null!;
         private readonly CardPicker _cardPicker = new CardPicker();
+        private readonly Dictionary<string, ChaFileControl> _validatedFemaleFiles =
+            new Dictionary<string, ChaFileControl>(StringComparer.OrdinalIgnoreCase);
         private string _runMarkerPath = string.Empty;
         private bool _armed;
         private bool _requested;
@@ -95,10 +97,16 @@ namespace HS2DirectHLauncher
             string femaleDir = ResolveDirectory(_femaleDirectory.Value);
             string maleDir = ResolveDirectory(_maleDirectory.Value);
 
-            string[] females = _cardPicker.PickTwo(femaleDir, _recursive.Value);
+            string[] females = _cardPicker.PickTwo(
+                femaleDir,
+                _recursive.Value,
+                path => Path.GetFileNameWithoutExtension(path).IndexOf("ChaF", StringComparison.OrdinalIgnoreCase) >= 0,
+                path => ValidateCardSex(path, 1));
             string[] males = _cardPicker.PickTwo(
                 maleDir,
                 _recursive.Value,
+                path => Path.GetFileNameWithoutExtension(path).IndexOf("ChaM", StringComparison.OrdinalIgnoreCase) >= 0,
+                path => ValidateCardSex(path, 0),
                 game.saveData?.playerChara?.FileName ?? string.Empty,
                 game.saveData?.secondPlayerChara?.FileName ?? string.Empty);
 
@@ -140,7 +148,24 @@ namespace HS2DirectHLauncher
             }, isLoadingImageDraw: false);
         }
 
-        private static List<Heroine> BuildHeroineList(IEnumerable<string> paths)
+        private bool ValidateCardSex(string path, byte expectedSex)
+        {
+            try
+            {
+                var file = new ChaFileControl();
+                if (!file.LoadCharaFile(path, expectedSex, noLoadPng: true) || file.parameter.sex != expectedSex)
+                    return false;
+                if (expectedSex == 1)
+                    _validatedFemaleFiles[path] = file;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private List<Heroine> BuildHeroineList(IEnumerable<string> paths)
         {
             var result = new List<Heroine>();
             foreach (string path in paths)
@@ -149,9 +174,13 @@ namespace HS2DirectHLauncher
                     continue;
                 try
                 {
-                    var file = new ChaFileControl();
-                    if (file.LoadCharaFile(path, 1, noLoadPng: true))
-                        result.Add(new Heroine(file, isRandomize: false));
+                    if (!_validatedFemaleFiles.TryGetValue(path, out ChaFileControl file))
+                    {
+                        file = new ChaFileControl();
+                        if (!file.LoadCharaFile(path, 1, noLoadPng: true) || file.parameter.sex != 1)
+                            continue;
+                    }
+                    result.Add(new Heroine(file, isRandomize: false));
                 }
                 catch
                 {
