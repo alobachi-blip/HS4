@@ -114,6 +114,13 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<string>? SmokeKeyframeDirectory;
         internal static ConfigEntry<bool>? EnableSmokeFamilyCoverage;
         internal static ConfigEntry<string>? SmokeFamilyCoverageSequence;
+        /// <summary>When true, orbit records a local Storyboard Package v1 under the configured HS4 output root.</summary>
+        internal static ConfigEntry<bool>? StoryboardPackageEnabled;
+        internal static ConfigEntry<string>? StoryboardPackageOutputRoot;
+        internal static ConfigEntry<float>? StoryboardShotDurationSeconds;
+        internal static ConfigEntry<bool>? StoryboardCaptureEndFrame;
+        internal static ConfigEntry<int>? StoryboardFps;
+        internal static ConfigEntry<string>? StoryboardModelTarget;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -252,6 +259,18 @@ namespace HS2OrbitAndExciter
             SmokeFamilyCoverageSequence = Config.Bind("Smoke", "SmokeFamilyCoverageSequence",
                 "A_Aibu,B_Houshi,C_Sonyu,D_Masturbation,E_Spnking,A_Les",
                 "Comma-separated family sequence used when EnableSmokeFamilyCoverage is true.");
+            StoryboardPackageEnabled = Config.Bind("StoryboardPackage", "Enabled", false,
+                "When true, orbit records Storyboard Package v1 assets for local Wan2GP / ComfyUI / FramePack use.");
+            StoryboardPackageOutputRoot = Config.Bind("StoryboardPackage", "OutputRoot", "D:\\HS4\\Output\\StoryboardPackages",
+                "Output root for Storyboard Package v1. Must stay outside the HS2 game/BepInEx folders.");
+            StoryboardShotDurationSeconds = Config.Bind("StoryboardPackage", "ShotDurationSeconds", 4f,
+                new ConfigDescription("Seconds per generated shot. Runtime clamps to 3..6 seconds.", new AcceptableValueRange<float>(3f, 6f)));
+            StoryboardCaptureEndFrame = Config.Bind("StoryboardPackage", "CaptureEndFrame", true,
+                "When true, also capture an end frame for each shot.");
+            StoryboardFps = Config.Bind("StoryboardPackage", "Fps", 24,
+                new ConfigDescription("Target FPS written to metadata/job files.", new AcceptableValueRange<int>(12, 60)));
+            StoryboardModelTarget = Config.Bind("StoryboardPackage", "ModelTarget", "Wan2GP/ComfyUI/FramePack",
+                "Metadata label for the intended local video generation target.");
             OrbitStateMachineLog.Boot();
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;

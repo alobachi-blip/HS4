@@ -3,6 +3,7 @@
        各專案 PropertyGroup 需設 HS2DeployThisPlugin=true（見 HS2OrbitAndExciter / PhotoToCard csproj）。 -->
   <PropertyGroup>
     <HS2PluginUtcDate>$([System.DateTime]::UtcNow.ToString("yyyyMMdd"))</HS2PluginUtcDate>
+    <HS2PluginBackupStamp>$([System.DateTime]::Now.ToString("yyyyMMdd_HHmmss"))</HS2PluginBackupStamp>
   </PropertyGroup>
 
   <Target Name="HS2_ComputePluginVersionedDllName" BeforeTargets="BeforeBuild" Condition="'$(HS2DeployThisPlugin)' == 'true'">
@@ -47,12 +48,16 @@
           Condition="'$(HS2DeployThisPlugin)' == 'true' and '$(CopyToHS2Plugins)' == 'true' and Exists('$(HS2BepInEx)\plugins')">
     <PropertyGroup>
       <_HS2VersionedDll>$(OutputPath)$(HS2PluginVersionedDllFileName)</_HS2VersionedDll>
+      <_HS2DeployBackupDir>$(MSBuildThisFileDirectory)Output\HS2PluginBackups\$(AssemblyName)_$(HS2PluginBackupStamp)</_HS2DeployBackupDir>
     </PropertyGroup>
     <!-- 避免 plugins 內同 GUID 多份 DLL 被 BepInEx 重複載入 -->
     <ItemGroup>
-      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName).dll" />
+      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName).dll" Condition="Exists('$(HS2BepInEx)\plugins\$(AssemblyName).dll')" />
       <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName)_*.dll" />
     </ItemGroup>
+    <MakeDir Directories="$(_HS2DeployBackupDir)" Condition="'@(_HS2OldPluginDlls)' != ''" />
+    <Copy SourceFiles="@(_HS2OldPluginDlls)" DestinationFolder="$(_HS2DeployBackupDir)" SkipUnchangedFiles="false" Condition="'@(_HS2OldPluginDlls)' != ''" />
+    <Message Importance="high" Text="Backed up existing HS2 plugin DLL(s) to $(_HS2DeployBackupDir)" Condition="'@(_HS2OldPluginDlls)' != ''" />
     <Delete Files="@(_HS2OldPluginDlls)" ContinueOnError="true" />
     <Copy SourceFiles="$(_HS2VersionedDll)" DestinationFolder="$(HS2BepInEx)\plugins" SkipUnchangedFiles="false" />
     <Message Importance="high" Text="Deployed to $(HS2BepInEx)\plugins: $(HS2PluginVersionedDllFileName)" />

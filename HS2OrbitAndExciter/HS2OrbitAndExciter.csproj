@@ -34,6 +34,9 @@
     <Reference Include="UnityEngine.AnimationModule" Condition="Exists('$(HS2Managed)\UnityEngine.AnimationModule.dll')">
       <HintPath>$(HS2Managed)\UnityEngine.AnimationModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule" Condition="Exists('$(HS2Managed)\UnityEngine.ImageConversionModule.dll')">
+      <HintPath>$(HS2Managed)\UnityEngine.ImageConversionModule.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine.ParticleSystemModule" Condition="Exists('$(HS2Managed)\UnityEngine.ParticleSystemModule.dll')">
       <HintPath>$(HS2Managed)\UnityEngine.ParticleSystemModule.dll</HintPath>
     </Reference>
@@ -74,6 +77,9 @@
     </Reference>
     <Reference Include="UnityEngine.AnimationModule" Condition="Exists('refs\UnityEngine.AnimationModule.dll')">
       <HintPath>refs\UnityEngine.AnimationModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule" Condition="Exists('refs\UnityEngine.ImageConversionModule.dll')">
+      <HintPath>refs\UnityEngine.ImageConversionModule.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine.ParticleSystemModule" Condition="Exists('refs\UnityEngine.ParticleSystemModule.dll')">
       <HintPath>refs\UnityEngine.ParticleSystemModule.dll</HintPath>
