@@ -132,6 +132,39 @@ namespace HS2OrbitAndExciter
                 DrawFloatControl("拉遠倍率", "越大越遠；與拉近倒掛會自動對調", HS2OrbitAndExciter.OrbitZoomFarMult, 0f, 3f, 0.01f, "F2");
             }
 
+            Section("Storyboard Package v1");
+            GUILayout.Label("Optional local video-generation package output. Writes to HS4 output only; HS2 game folders are refused.", label);
+            if (HS2OrbitAndExciter.StoryboardPackageEnabled != null)
+            {
+                HS2OrbitAndExciter.StoryboardPackageEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.StoryboardPackageEnabled.Value,
+                    " Enable package recording during orbit");
+            }
+            DrawFloatControl(
+                "Shot duration",
+                "3 to 6 seconds per shot",
+                HS2OrbitAndExciter.StoryboardShotDurationSeconds,
+                3f, 6f, 0.1f, "F1", "s");
+            DrawIntControl(
+                "Target FPS",
+                "Written to storyboard.ndjson and job files",
+                HS2OrbitAndExciter.StoryboardFps,
+                12, 60);
+            if (HS2OrbitAndExciter.StoryboardCaptureEndFrame != null)
+            {
+                HS2OrbitAndExciter.StoryboardCaptureEndFrame.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.StoryboardCaptureEndFrame.Value,
+                    " Capture end frame for each shot");
+            }
+            if (HS2OrbitAndExciter.StoryboardPackageOutputRoot != null)
+            {
+                GUILayout.Label("Output root:", label);
+                string nextRoot = GUILayout.TextField(HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value ?? "", GUILayout.Width(460));
+                if (nextRoot != HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value)
+                    HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value = nextRoot;
+            }
+            GUILayout.Label(StoryboardPackageRecorder.StatusText, label);
+
             // ─── 流程 ───────────────────────────────────────────
             Section("流程");
             if (HS2OrbitAndExciter.CumflationEnabled != null)

@@ -95,6 +95,13 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? VoiceTourCountHoushiMaleFinish;
         /// <summary>Write detailed NDJSON traces for diagnosis. Default off to avoid runtime overhead.</summary>
         internal static ConfigEntry<bool>? EnableStateMachineTrace;
+        /// <summary>When true, orbit records a local Storyboard Package v1 under the configured HS4 output root.</summary>
+        internal static ConfigEntry<bool>? StoryboardPackageEnabled;
+        internal static ConfigEntry<string>? StoryboardPackageOutputRoot;
+        internal static ConfigEntry<float>? StoryboardShotDurationSeconds;
+        internal static ConfigEntry<bool>? StoryboardCaptureEndFrame;
+        internal static ConfigEntry<int>? StoryboardFps;
+        internal static ConfigEntry<string>? StoryboardModelTarget;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -202,6 +209,18 @@ namespace HS2OrbitAndExciter
                 "Count houshi outside/drink male finish as one hit. Insertion inside (numInside) always counts.");
             EnableStateMachineTrace = Config.Bind("Diagnostics", "EnableStateMachineTrace", false,
                 "Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.");
+            StoryboardPackageEnabled = Config.Bind("StoryboardPackage", "Enabled", false,
+                "When true, orbit records Storyboard Package v1 assets for local Wan2GP / ComfyUI / FramePack use.");
+            StoryboardPackageOutputRoot = Config.Bind("StoryboardPackage", "OutputRoot", "D:\\HS4\\Output\\StoryboardPackages",
+                "Output root for Storyboard Package v1. Must stay outside the HS2 game/BepInEx folders.");
+            StoryboardShotDurationSeconds = Config.Bind("StoryboardPackage", "ShotDurationSeconds", 4f,
+                new ConfigDescription("Seconds per generated shot. Runtime clamps to 3..6 seconds.", new AcceptableValueRange<float>(3f, 6f)));
+            StoryboardCaptureEndFrame = Config.Bind("StoryboardPackage", "CaptureEndFrame", true,
+                "When true, also capture an end frame for each shot.");
+            StoryboardFps = Config.Bind("StoryboardPackage", "Fps", 24,
+                new ConfigDescription("Target FPS written to metadata/job files.", new AcceptableValueRange<int>(12, 60)));
+            StoryboardModelTarget = Config.Bind("StoryboardPackage", "ModelTarget", "Wan2GP/ComfyUI/FramePack",
+                "Metadata label for the intended local video generation target.");
             OrbitStateMachineLog.Boot();
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;

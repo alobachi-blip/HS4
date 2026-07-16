@@ -361,6 +361,7 @@ namespace HS2OrbitAndExciter
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive())
             {
+                StoryboardPackageRecorder.NotifyOrbitToggled(false, this, null);
                 _hudSnapshotValid = false;
                 _requestViewReapplyNextFrame = false;
                 return;
@@ -369,6 +370,7 @@ namespace HS2OrbitAndExciter
             var hScene = GetHScene();
             if (hScene == null)
             {
+                StoryboardPackageRecorder.NotifyOrbitToggled(false, this, null);
                 _hudSnapshotValid = false;
                 return;
             }
@@ -376,6 +378,7 @@ namespace HS2OrbitAndExciter
             var ctrl = hScene.ctrlFlag?.cameraCtrl as CameraControl_Ver2;
             if (ctrl == null)
             {
+                StoryboardPackageRecorder.NotifyOrbitToggled(false, this, hScene);
                 _hudSnapshotValid = false;
                 return;
             }
@@ -497,6 +500,19 @@ namespace HS2OrbitAndExciter
             }
 
             RefreshHudSnapshot(hScene, orbitTime, speedDegPerSec);
+            StoryboardPackageRecorder.Tick(
+                this,
+                hScene,
+                ctrl,
+                spinning,
+                _orbitPhase,
+                _orbitAccumulatedDegrees,
+                _rotationCount,
+                _roundTripCount,
+                _currentViewOption,
+                _orbitAxisMode,
+                _spinTiltDegrees,
+                _circleZoomMult);
         }
 
         private void OnRotationBoundary(
@@ -1470,6 +1486,8 @@ namespace HS2OrbitAndExciter
                 ctrl.NoCtrlCondition = NoCtrlUser;
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: 協助關閉（已還原滑鼠／鍵盤相機）");
             }
+
+            StoryboardPackageRecorder.NotifyOrbitToggled(active, this, hScene);
         }
 
         private static HScene? GetHScene() => TryGetHScene();
