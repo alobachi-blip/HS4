@@ -9,6 +9,7 @@ using Illusion;
 using Illusion.Game;
 using Manager;
 using UnityEngine;
+using UnitySceneManager = UnityEngine.SceneManagement.SceneManager;
 
 namespace HS2DirectHLauncher
 {
@@ -28,6 +29,7 @@ namespace HS2DirectHLauncher
         private string _runMarkerPath = string.Empty;
         private bool _armed;
         private bool _requested;
+        private bool _bootstrapTakenOver;
         private float _nextPoll;
 
         private void Awake()
@@ -93,11 +95,13 @@ namespace HS2DirectHLauncher
             }
 
             _nextPoll = Time.unscaledTime + _pollInterval.Value;
-            if (!CanEnterHScene())
+            if (!RequiredSystemsReady())
                 return;
 
             try
             {
+                if (!TakeOverAtFirstStableScene())
+                    return;
                 EnterHScene();
                 _requested = true;
                 ConsumeRunMarker();
@@ -109,12 +113,39 @@ namespace HS2DirectHLauncher
             }
         }
 
-        private static bool CanEnterHScene()
+        private static bool RequiredSystemsReady()
         {
             return Singleton<Game>.IsInstance() &&
                    Singleton<HSceneManager>.IsInstance() &&
                    Singleton<Character>.IsInstance() &&
                    !Scene.IsFadeNow;
+        }
+
+        private bool TakeOverAtFirstStableScene()
+        {
+            string activeScene = UnitySceneManager.GetActiveScene().name;
+            if (string.Equals(activeScene, "Title", StringComparison.Ordinal))
+                return true;
+            if (!string.Equals(activeScene, "Logo", StringComparison.Ordinal))
+                return false;
+            if (_bootstrapTakenOver)
+                return true;
+
+            var logo = FindObjectOfType<LogoScene>();
+            var saveData = Singleton<Game>.Instance.saveData;
+            if (logo == null || saveData == null)
+                return false;
+
+            // Keep the three save-data guards from LogoScene.Start, then stop its
+            // brand call / two-second wait / forced Title transition.
+            saveData.RoomListCharaExists();
+            saveData.PlayerCoordinateExists();
+            saveData.PlayerExists();
+            logo.StopAllCoroutines();
+            logo.enabled = false;
+            _bootstrapTakenOver = true;
+            Logger.LogInfo("Logo bootstrap completed without brand call; taking over before Title.");
+            return true;
         }
 
         private void EnterHScene()
