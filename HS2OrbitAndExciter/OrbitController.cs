@@ -294,6 +294,14 @@ namespace HS2OrbitAndExciter
 
             if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 return;
+            if (Input.GetKeyDown(OrbitManualHotkeys.SceneKey))
+            {
+                bool ok = OrbitManualDirector.TrySwapScene(hScene, this);
+                OrbitStateMachineLog.Hotkey("F", ok, ok ? "scene" : OrbitManualDirector.DescribeHotkeyBlockReason(hScene));
+                if (ok)
+                    _lastHotkeyTime = Time.unscaledTime;
+                return;
+            }
             if (Input.GetKeyDown(OrbitManualHotkeys.CoordinateKey))
             {
                 bool ok = OrbitManualDirector.TrySwapCoordinate(hScene, this);

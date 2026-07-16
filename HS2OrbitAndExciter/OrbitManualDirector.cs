@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using AIChara;
+using Illusion.Game;
 using Manager;
 using UnityEngine;
 
@@ -14,9 +16,11 @@ namespace HS2OrbitAndExciter
         private const float DislikedCharaWeight = 0.15f;
         private const float PreferredCharaWeight = 2.5f;
         private const float CharaReloadTimeoutSeconds = 15f;
+        private const float MapReloadTimeoutSeconds = 30f;
 
         private static readonly HashSet<string> UsedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> UsedCoordinates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<int> UsedMaps = new HashSet<int>();
         /// <summary>Manual Shift+G: reduced weight for rest of session.</summary>
         private static readonly HashSet<string> DislikedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Stayed on stage ≥60s before swap: boosted weight in G pool for rest of session.</summary>
@@ -42,6 +46,7 @@ namespace HS2OrbitAndExciter
         {
             _busy = false;
             ResetPoseCameraCycle();
+            UsedMaps.Clear();
         }
 
         private static void ResetPoseCameraCycle()
@@ -163,6 +168,37 @@ namespace HS2OrbitAndExciter
             }
 
             host.StartCoroutine(SwapCoordinateRoutine(hScene, host, cha, next));
+            return true;
+        }
+
+        internal static bool TrySwapScene(HScene hScene, OrbitController host)
+        {
+            if (!CanAcceptHotkey(hScene)
+                || hScene.ctrlFlag?.nowAnimationInfo == null
+                || hScene.ctrlFlag.nowOrgasm
+                || OrbitPoseDirector.IsPoseChangeInFlight
+                || !Singleton<HSceneManager>.IsInstance()
+                || BaseMap.infoTable == null)
+                return false;
+
+            int current = Singleton<HSceneManager>.Instance.mapID;
+            var candidates = BaseMap.infoTable.Values
+                .Where(map => map != null && map.No >= 0 && map.No != current && (map.Draw == 0 || map.Draw == 2))
+                .Select(map => map.No)
+                .Distinct()
+                .ToList();
+            if (candidates.Count == 0)
+                return false;
+
+            var unused = candidates.Where(id => !UsedMaps.Contains(id)).ToList();
+            if (unused.Count == 0)
+            {
+                UsedMaps.Clear();
+                unused = candidates;
+            }
+
+            int next = unused[UnityEngine.Random.Range(0, unused.Count)];
+            host.StartCoroutine(SwapSceneRoutine(hScene, host, current, next));
             return true;
         }
 
@@ -424,6 +460,87 @@ namespace HS2OrbitAndExciter
                 OrbitController.RequestViewReapply();
             }
 
+            OrbitController.NotifyManualHotkeyCompleted(hScene);
+            _busy = false;
+        }
+
+        private static IEnumerator SwapSceneRoutine(
+            HScene hScene,
+            OrbitController host,
+            int previousMapId,
+            int nextMapId)
+        {
+            _busy = true;
+            HS2OrbitAndExciter.Log?.LogInfo($"Orbit: F 換場景 {previousMapId} -> {nextMapId}");
+            OrbitStateMachineLog.Event("map", "change_start",
+                "{\"from\":" + previousMapId + ",\"to\":" + nextMapId + "}");
+
+            try
+            {
+                BaseMap.Change(nextMapId, FadeCanvas.Fade.None, false);
+            }
+            catch (System.Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: F BaseMap.Change 失敗: " + ex.Message);
+                _busy = false;
+                yield break;
+            }
+
+            float deadline = Time.unscaledTime + MapReloadTimeoutSeconds;
+            while ((BaseMap.isMapLoading || BaseMap.no != nextMapId) && Time.unscaledTime < deadline)
+                yield return null;
+
+            GameObject mapRoot = BaseMap.mapRoot;
+            if (BaseMap.isMapLoading || BaseMap.no != nextMapId || mapRoot == null)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: F 換場景逾時 map={nextMapId}");
+                _busy = false;
+                yield break;
+            }
+
+            var manager = Singleton<HSceneManager>.Instance;
+            var ctrlFlag = hScene.ctrlFlag;
+            var hPointCtrl = HarmonyLib.Traverse.Create(hScene).Field("hPointCtrl").GetValue<HPointCtrl>();
+            var hPointList = mapRoot.GetComponentInChildren<HPointList>();
+            if (ctrlFlag == null || hPointCtrl == null || hPointList == null)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: F 新場景缺少 HPoint map={nextMapId}");
+                _busy = false;
+                yield break;
+            }
+
+            manager.mapID = nextMapId;
+            if (Singleton<Game>.IsInstance())
+                Singleton<Game>.Instance.mapNo = nextMapId;
+            HarmonyLib.Traverse.Create(hScene).Field("objMap").SetValue(mapRoot);
+            HarmonyLib.Traverse.Create(hScene).Field("Bath").SetValue(nextMapId == 4 || nextMapId == 52 || nextMapId == 53);
+            HarmonyLib.Traverse.Create(hScene).Field("Room").SetValue(nextMapId == 3);
+
+            hPointList.Init();
+            HSceneManager.HResourceTables.HPointInitData(hPointList, mapRoot);
+            hPointCtrl.HPointList = hPointList;
+            hPointCtrl.InitHPoint();
+            SingletonInitializer<BaseMap>.instance.MobObjectsVisible(Singleton<Game>.IsInstance() && Singleton<Game>.Instance.eventNo == 52);
+            ctrlFlag.cameraCtrl?.loadVanishExcelData("list/map/", nextMapId, mapRoot);
+
+            var currentAnimation = ctrlFlag.nowAnimationInfo;
+            ctrlFlag.selectAnimationListInfo = null;
+            ctrlFlag.nPlace = -1;
+            ctrlFlag.HPointID = -1;
+            ctrlFlag.nowHPoint = null;
+            if (currentAnimation != null)
+                yield return host.StartCoroutine(hScene.ChangeAnimation(
+                    currentAnimation,
+                    _isForceResetCamera: true,
+                    _isForceLoopAction: true,
+                    _UseFade: false));
+
+            OrbitFloorNormal.ResetCache();
+            OrbitMapVanishAssist.EnsureInjected(hScene);
+            OrbitController.RequestViewReapply();
+            UsedMaps.Add(nextMapId);
+            OrbitStateMachineLog.Event("map", "change_end",
+                "{\"from\":" + previousMapId + ",\"to\":" + nextMapId + "}");
             OrbitController.NotifyManualHotkeyCompleted(hScene);
             _busy = false;
         }

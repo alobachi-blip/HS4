@@ -5,6 +5,7 @@ namespace HS2OrbitAndExciter
     /// <summary>Single-key manual actions in H scene.</summary>
     internal static class OrbitManualHotkeys
     {
+        internal const KeyCode SceneKey = KeyCode.F;
         internal const KeyCode CharaKey = KeyCode.G;
         internal const KeyCode CoordinateKey = KeyCode.H;
         internal const KeyCode WearKey = KeyCode.J;
@@ -32,6 +33,7 @@ namespace HS2OrbitAndExciter
             + "  Shift+Q／W／E　第二女角焦點\n"
             + "\n"
             + "【流程】\n"
+            + "  F　換場景\n"
             + "  G　換女角（中性）　 Shift+G　降權目前女角並換下一個\n"
             + "  H　換套裝　 J　亂數穿著\n"
             + "  K　換鏡頭　 L　換姿勢　 N　往前推（開幹／加速／選池）\n"
@@ -44,10 +46,10 @@ namespace HS2OrbitAndExciter
 
         /// <summary>HUD 精簡熱鍵提醒。</summary>
         internal const string HudLegendCompact =
-            "G女角 Shift+G降權 H套裝 J穿著 K鏡頭 L姿勢 N推進 | O停轉 P面板";
+            "F場景 G女角 Shift+G降權 H套裝 J穿著 K鏡頭 L姿勢 N推進 | O停轉 P面板";
 
         internal const string HudLegend =
-            "G中性換女角·Shift+G降權換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
+            "F換場景·G中性換女角·Shift+G降權換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
 
         internal const string PregnancyHudLegend =
             "Y肚子+·U肚子-·I清空·O停轉·P面板";

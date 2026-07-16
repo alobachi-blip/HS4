@@ -418,6 +418,17 @@ class TraceRegressionTests(unittest.TestCase):
             self.assertEqual(1, len(rows))
             self.assertEqual("boot", rows[0]["id"])
 
+    def test_f_scene_hotkey_uses_in_place_map_rebind(self):
+        plugin_root = TOOLS.parent
+        hotkeys = (plugin_root / "OrbitManualHotkeys.cs").read_text(encoding="utf-8-sig")
+        controller = (plugin_root / "OrbitController.cs").read_text(encoding="utf-8-sig")
+        director = (plugin_root / "OrbitManualDirector.cs").read_text(encoding="utf-8-sig")
+        self.assertIn("SceneKey = KeyCode.F", hotkeys)
+        self.assertIn("TrySwapScene(hScene, this)", controller)
+        self.assertIn("BaseMap.Change(nextMapId", director)
+        self.assertIn("HPointInitData(hPointList, mapRoot)", director)
+        self.assertIn("hScene.ChangeAnimation(", director)
+
 
 if __name__ == "__main__":
     unittest.main()
