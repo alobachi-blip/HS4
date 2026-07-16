@@ -20,12 +20,15 @@ namespace HS2DirectHLauncher
             candidates.AddRange(fallbacks.Where(FileReferenceExists));
             candidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            var preferredCards = preferred == null
-                ? new List<string>()
-                : candidates.Where(preferred).ToList();
-            var otherCards = preferred == null
-                ? candidates
-                : candidates.Where(path => !preferred(path)).ToList();
+            var preferredCards = new List<string>();
+            var otherCards = new List<string>();
+            foreach (string path in candidates)
+            {
+                if (preferred != null && preferred(path))
+                    preferredCards.Add(path);
+                else
+                    otherCards.Add(path);
+            }
             Shuffle(preferredCards);
             Shuffle(otherCards);
 
@@ -69,7 +72,6 @@ namespace HS2DirectHLauncher
                         directory,
                         "*.png",
                         recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)
-                    .Where(path => new FileInfo(path).Length > 0)
                     .ToList();
             }
             catch
