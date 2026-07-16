@@ -75,7 +75,7 @@ namespace HS2DirectHLauncher
 
             DisableLegacyDirectHDriver();
             PatchMoreAccessoriesStartupGuard();
-            PatchHAnimationTablePacing();
+            PatchHResourceTablePacing();
             Logger.LogInfo("Direct-H launcher armed; waiting only for required game singletons.");
         }
 
@@ -149,33 +149,55 @@ namespace HS2DirectHLauncher
             }
         }
 
-        private void PatchHAnimationTablePacing()
+        private void PatchHResourceTablePacing()
         {
             try
             {
-                var method = AccessTools.Method(typeof(HSceneManager.HSceneTables), "LoadAnimationFileName");
-                if (method == null)
-                    return;
-
                 var harmony = new Harmony(PluginInfo.Guid + ".startup");
-                harmony.Patch(
-                    method,
-                    postfix: new HarmonyMethod(typeof(DirectHLauncherPlugin), nameof(HAnimationTablePacingPostfix)));
-                Logger.LogInfo("Installed bounded H animation-table pacing accelerator.");
+                var postfix = new HarmonyMethod(
+                    typeof(DirectHLauncherPlugin),
+                    nameof(HResourceTablePacingPostfix));
+                string[] methodNames =
+                {
+                    "LoadAnimationFileName",
+                    "LoadHItemObjInfo",
+                    "LoadHItemBaseAnim",
+                    "LoadHPointInfo",
+                    "LoadHParticleList",
+                    "LoadHParticleSetInfo",
+                    "LoadHParticleSetInfoAI",
+                    "LoadHsceneBaseRAC",
+                    "LoadHYureAI",
+                    "LoadHYureHoney2",
+                    "LoadHYureMaleAI",
+                    "LoadHYureMaleHoney2",
+                    "LoadFeelHit",
+                    "LoadDankonList"
+                };
+                int patched = 0;
+                foreach (string methodName in methodNames)
+                {
+                    var method = AccessTools.Method(typeof(HSceneManager.HSceneTables), methodName);
+                    if (method == null)
+                        continue;
+                    harmony.Patch(method, postfix: postfix);
+                    patched++;
+                }
+                Logger.LogInfo($"Installed bounded H resource-table pacing accelerator: methods={patched}.");
             }
             catch (Exception ex)
             {
-                Logger.LogWarning("Could not accelerate H animation-table pacing: " + ex.Message);
+                Logger.LogWarning("Could not accelerate H resource-table pacing: " + ex.Message);
             }
         }
 
-        private static void HAnimationTablePacingPostfix(ref IEnumerator __result)
+        private static void HResourceTablePacingPostfix(ref IEnumerator __result)
         {
             if (__result != null)
-                __result = CollapseEmptyAnimationTableFrames(__result);
+                __result = CollapsePacingFrames(__result);
         }
 
-        private static IEnumerator CollapseEmptyAnimationTableFrames(IEnumerator source)
+        private static IEnumerator CollapsePacingFrames(IEnumerator source)
         {
             const float frameBudgetSeconds = 0.008f;
             float deadline = Time.realtimeSinceStartup + frameBudgetSeconds;
@@ -189,9 +211,9 @@ namespace HS2DirectHLauncher
                     continue;
                 }
 
-                // The original iterator yields null after every missing category,
-                // loaded spreadsheet, and bundle. Coalesce those pacing-only gaps,
-                // but yield once the per-frame work budget is spent.
+                // These resource-table iterators yield null after missing categories,
+                // parsed rows, spreadsheets, and bundles. Coalesce those pacing-only
+                // gaps, but yield once the per-frame work budget is spent.
                 if (Time.realtimeSinceStartup >= deadline)
                 {
                     yield return null;
