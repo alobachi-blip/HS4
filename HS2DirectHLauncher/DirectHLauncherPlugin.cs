@@ -5,6 +5,7 @@ using Actor;
 using AIChara;
 using BepInEx;
 using BepInEx.Configuration;
+using HarmonyLib;
 using Illusion;
 using Illusion.Game;
 using Manager;
@@ -15,6 +16,7 @@ namespace HS2DirectHLauncher
 {
     [BepInPlugin(PluginInfo.Guid, PluginInfo.Name, PluginInfo.Version)]
     [BepInDependency("com.hs2.orbitandexciter", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("com.joan6694.illusionplugins.moreaccessories", BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class DirectHLauncherPlugin : BaseUnityPlugin
     {
         private ConfigEntry<bool> _alwaysEnabled = null!;
@@ -56,6 +58,7 @@ namespace HS2DirectHLauncher
             }
 
             DisableLegacyDirectHDriver();
+            PatchMoreAccessoriesStartupGuard();
             Logger.LogInfo("Direct-H launcher armed; waiting only for required game singletons.");
         }
 
@@ -80,6 +83,52 @@ namespace HS2DirectHLauncher
             catch (Exception ex)
             {
                 Logger.LogWarning("Could not disable legacy Orbit Direct-H smoke driver: " + ex.Message);
+            }
+        }
+
+        private void PatchMoreAccessoriesStartupGuard()
+        {
+            try
+            {
+                Type? type = Type.GetType("MoreAccessoriesAI.MoreAccessories, MoreAccessories", throwOnError: false);
+                var method = type?.GetMethod(
+                    "UpdateHUI",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (method == null)
+                    return;
+
+                var harmony = new Harmony(PluginInfo.Guid + ".compat");
+                harmony.Patch(
+                    method,
+                    prefix: new HarmonyMethod(typeof(DirectHLauncherPlugin), nameof(MoreAccessoriesUpdateHuiPrefix)));
+                Logger.LogInfo("Installed MoreAccessories H-UI startup guard.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not install MoreAccessories startup guard: " + ex.Message);
+            }
+        }
+
+        private static bool MoreAccessoriesUpdateHuiPrefix()
+        {
+            try
+            {
+                if (!Singleton<HSceneManager>.IsInstance() || !Singleton<HSceneSprite>.IsInstance())
+                    return false;
+
+                var manager = Singleton<HSceneManager>.Instance;
+                var hScene = manager.Hscene;
+                if (hScene == null)
+                    return false;
+
+                int selected = manager.numFemaleClothCustom;
+                ChaControl[] characters = selected < 2 ? hScene.GetFemales() : hScene.GetMales();
+                int index = selected < 2 ? selected : selected - 2;
+                return characters != null && index >= 0 && index < characters.Length && characters[index] != null;
+            }
+            catch
+            {
+                return false;
             }
         }
 

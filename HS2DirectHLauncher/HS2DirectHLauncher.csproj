@@ -28,6 +28,9 @@
     <Reference Include="IL">
       <HintPath>$(HS2Managed)\IL.dll</HintPath>
     </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(HS2BepInEx)\core\0Harmony.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <Target Name="CheckGameRefs" BeforeTargets="CoreCompile">
