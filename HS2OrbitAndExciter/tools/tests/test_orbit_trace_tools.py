@@ -135,6 +135,56 @@ class TraceRegressionTests(unittest.TestCase):
                     hits.append(f"{path.relative_to(plugin_root)}:{marker}")
         self.assertFalse(hits)
 
+    def test_apply_current_view_option_relocks_live_focus_basis(self):
+        source = (TOOLS.parent / "OrbitController.cs").read_text(encoding="utf-8-sig", errors="ignore")
+        self.assertIn(
+            'private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl, string lockReason = "apply_view")',
+            source,
+        )
+        self.assertIn("string effectiveLockReason = _pendingLockReason ?? lockReason;", source)
+        self.assertIn("InvalidateLockedBasis(effectiveLockReason);", source)
+        self.assertIn("TryLockBasis(chaFemales, option, basis", source)
+        self.assertIn('ApplyCurrentViewOption(hScene, ctrl, "borrowed_camera");', source)
+        self.assertIn('ApplyCurrentViewOption(hScene, ctrl, "pose_rebind");', source)
+        self.assertIn("private void ApplyLiveBoneFocusOnly", source)
+        self.assertIn("OrbitPoseDirector.IsPoseChangeInFlight", source)
+        self.assertIn('ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");', source)
+        self.assertIn('InvalidateLockedBasis("pose_rebind");', source)
+
+    def test_changing_focus_jump_must_stay_near_a_live_bone(self):
+        rows = [
+            row(
+                "focus_jump",
+                "warn",
+                data={
+                    "director": "Changing",
+                    "focusW1": [0, 0, 0],
+                    "head1": [0, 0, 3],
+                    "chest1": [0, 0, 4],
+                    "pelvis1": [0, 0, 5],
+                },
+            )
+        ]
+        issues = reg.analyze_rows(rows)
+        self.assertTrue(any(issue.code == "focus_jump_off_live_bone" for issue in issues))
+
+    def test_changing_focus_jump_allows_live_chest_focus(self):
+        rows = [
+            row(
+                "focus_jump",
+                "warn",
+                data={
+                    "director": "Changing",
+                    "focusW1": [0, 0, 0],
+                    "head1": [0, 0, 2.5],
+                    "chest1": [0, 0, 0.1],
+                    "pelvis1": [0, 0, 3],
+                },
+            )
+        ]
+        issues = reg.analyze_rows(rows)
+        self.assertFalse(any(issue.code == "focus_jump_off_live_bone" for issue in issues))
+
     def test_finish_click_must_close(self):
         rows = [
             row("finish", "set_click", ut=1.0, data={"path": "drink"}),

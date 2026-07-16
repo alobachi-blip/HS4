@@ -481,16 +481,25 @@ namespace HS2OrbitAndExciter
                 }
 
                 // 空檔預算下一圈軸＋起始角（軸變則作廢）
-                MaybePrecomputeNextCircle(hScene);
-
-                ApplyBodyAxisCamera(hScene, ctrl);
+                if (OrbitPoseDirector.IsPoseChangeInFlight)
+                {
+                    ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
+                }
+                else
+                {
+                    MaybePrecomputeNextCircle(hScene);
+                    ApplyBodyAxisCamera(hScene, ctrl);
+                }
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
             else
             {
                 // 停轉：仍用鎖定骨焦點，保留看部位與距離（不改 Rot，避免搶手控）
-                ApplyBoneFocusOnly(hScene, ctrl);
+                if (OrbitPoseDirector.IsPoseChangeInFlight)
+                    ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
+                else
+                    ApplyBoneFocusOnly(hScene, ctrl);
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
@@ -650,6 +659,23 @@ namespace HS2OrbitAndExciter
             int focusIdx = BoneFocusIndex();
             if (!TryGetOrbitBasis(chaFemales, focusIdx, out var basis))
                 return;
+            _lastValidFocusWorld = basis.FocusWorld;
+            ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
+        /// <summary>During pose transitions, follow the live bone focus until the new pose is stable enough to lock.</summary>
+        private void ApplyLiveBoneFocusOnly(HScene hScene, CameraControl_Ver2 ctrl, string lockReason)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            if (chaFemales == null || ctrl.transBase == null)
+                return;
+            int focusIdx = BoneFocusIndex();
+            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!basis.Valid)
+                return;
+
+            InvalidateLockedBasis(lockReason);
             _lastValidFocusWorld = basis.FocusWorld;
             ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
             SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
@@ -1202,7 +1228,7 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>§11 1A：骨焦點優先；失敗回退上一有效焦點。環視中不用姿預設相機。</summary>
-        private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl)
+        private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl, string lockReason = "apply_view")
         {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             if (chaFemales == null || ctrl == null) return;
@@ -1218,9 +1244,13 @@ namespace HS2OrbitAndExciter
             var basis = OrbitBodyAxis.TryBuild(chaFemales, option, _lastValidFocusWorld);
             if (basis.Valid && ctrl.transBase != null)
             {
+                string effectiveLockReason = _pendingLockReason ?? lockReason;
+                InvalidateLockedBasis(effectiveLockReason);
                 _lastValidFocusWorld = basis.FocusWorld;
                 ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
                 SetDistanceForFocus(ctrl, chaFemales, option, _circleZoomMult);
+                if (TryLockBasis(chaFemales, option, basis, _pendingLockReason ?? effectiveLockReason))
+                    _pendingLockReason = null;
                 return;
             }
 
@@ -1283,8 +1313,11 @@ namespace HS2OrbitAndExciter
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
             _currentViewOption = maxFocus > 1 ? 1 : 0;
+            ApplyCurrentViewOption(hScene, ctrl, "borrowed_camera");
             _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
             _orbitAccumulatedDegrees = 0f;
+            _framingHavePrev = false;
+            _previousCameraUpWorld = null;
         }
 
         /// <summary>Rebind camera after pose transition completes (called by <see cref="OrbitPoseDirector"/>).</summary>
@@ -1294,10 +1327,13 @@ namespace HS2OrbitAndExciter
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
             if (_currentViewOption >= maxFocus)
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
-            ApplyCurrentViewOption(hScene, ctrl);
+            InvalidateLockedBasis("pose_rebind");
+            ApplyCurrentViewOption(hScene, ctrl, "pose_rebind");
             _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
             _plannedAxisMode = null;
             _plannedStartAzimuth = null;
+            _framingHavePrev = false;
+            _previousCameraUpWorld = null;
             _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
         }
 

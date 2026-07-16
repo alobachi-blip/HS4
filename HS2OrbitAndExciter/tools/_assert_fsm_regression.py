@@ -62,6 +62,23 @@ def _as_int(value: Any, fallback: int = -1) -> int:
         return fallback
 
 
+def _as_float(value: Any, fallback: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _vector3(value: Any) -> tuple[float, float, float] | None:
+    if not isinstance(value, list) or len(value) != 3:
+        return None
+    return (_as_float(value[0]), _as_float(value[1]), _as_float(value[2]))
+
+
+def _distance3(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
+
+
 def _is_active_h_snapshot(row: dict[str, Any]) -> bool:
     data = _data(row)
     mode = _as_int(data.get("mode"))
@@ -176,6 +193,26 @@ def _is_spank_finish_orgasm_evidence(row: dict[str, Any]) -> bool:
     return _clip(row) in {"Orgasm", "D_Orgasm", "D_Orgasm_A"}
 
 
+def _changing_focus_jump_off_live_bone(row: dict[str, Any]) -> tuple[bool, float]:
+    if _as_text(row.get("id")) != "focus_jump":
+        return (False, 0.0)
+    data = _data(row)
+    if data.get("director") != "Changing":
+        return (False, 0.0)
+    focus = _vector3(data.get("focusW1"))
+    if focus is None:
+        return (False, 0.0)
+    distances: list[float] = []
+    for key in ("head1", "chest1", "pelvis1"):
+        bone = _vector3(data.get(key))
+        if bone is not None:
+            distances.append(_distance3(focus, bone))
+    if not distances:
+        return (False, 0.0)
+    nearest = min(distances)
+    return (nearest > 2.0, nearest)
+
+
 def analyze_rows(
     rows: Iterable[dict[str, Any]],
     closure_seconds: float = 8.0,
@@ -223,6 +260,16 @@ def analyze_rows(
         loc = _as_text(row.get("loc"))
         lower_msg = msg.lower()
         now = _ut(row, float(index))
+
+        off_live_bone, nearest_live_bone = _changing_focus_jump_off_live_bone(row)
+        if off_live_bone:
+            issues.append(
+                TraceIssue(
+                    "focus_jump_off_live_bone",
+                    f"Changing focus jump was {nearest_live_bone:.1f}m from the nearest live head/chest/pelvis bone.",
+                    index,
+                )
+            )
 
         if ident == "SNAP":
             saw_snapshot = True
