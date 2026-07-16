@@ -21,4 +21,4 @@ Useful commands:
 .\launch_direct_h.ps1 -BuildOnly -ForceBuild
 ```
 
-Persistent mode and card/map settings are available in `BepInEx\config\com.hs2.directhlauncher.cfg` after the plugin has loaded once. `RandomizeMap` and `RandomizeInitialClothes` default to `true`; `MapId` is retained as the fallback.
+Persistent mode and card/map settings are available in `BepInEx\config\com.hs2.directhlauncher.cfg` after the plugin has loaded once. `RandomizeMap` and `RandomizeInitialClothes` default to `true`; `MapId` is retained as the fallback. High-numbered custom maps are excluded for startup speed unless `IncludeModMaps` is enabled.
