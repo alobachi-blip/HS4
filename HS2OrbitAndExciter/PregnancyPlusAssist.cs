@@ -20,7 +20,15 @@ namespace HS2OrbitAndExciter
         private static FieldInfo? _currentInflationLevel;
         private static FieldInfo? _infConfig;
         private static FieldInfo? _inflationSize;
+        private static Type? _pluginType;
+        private static PropertyInfo? _maxLevelEntryProperty;
+        private static FieldInfo? _maxLevelEntryField;
+        private static HScene? _trackedHScene;
+        private static int _lastInsideCount = -1;
         private static bool _resolved;
+
+        private const int OriginalHs2InflationMaxLevel = 6;
+        private const int InflationMaxLevelMultiplier = 3;
 
         /// <summary>Grow H-scene belly one level on inside finish (cumflation).</summary>
         internal static bool TryInflateOnInside(HScene? hScene)
@@ -33,6 +41,10 @@ namespace HS2OrbitAndExciter
             EnsureResolved();
             if (_controllerType == null || _hs2Inflation == null)
                 return false;
+
+            // PregnancyPlus clips HS2Inflation(false) before it animates the mesh.
+            // Raise the original six-level cap to 18 before invoking it.
+            TryRaiseMaxInflationLevel();
 
             var females = OrbitHelpers.GetChaFemales(hScene);
             if (females == null || females.Length == 0)
@@ -51,6 +63,135 @@ namespace HS2OrbitAndExciter
             if (any)
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: 內射肚子變大（PregnancyPlus HS2Inflation）");
             return any;
+        }
+
+        /// <summary>
+        /// Track HS2's cumulative inside-finish counter independently of VoiceTour.
+        /// This keeps the menu toggle functional even when voice-tour progression is off.
+        /// </summary>
+        internal static void TickInsideFinish(HScene? hScene)
+        {
+            if (hScene == null)
+            {
+                ResetInsideTracking();
+                return;
+            }
+
+            var ctrl = hScene.ctrlFlag;
+            if (ctrl == null)
+                return;
+
+            int inside = ctrl.numInside;
+            if (!ReferenceEquals(_trackedHScene, hScene))
+            {
+                _trackedHScene = hScene;
+                _lastInsideCount = inside;
+                return;
+            }
+
+            if (inside <= _lastInsideCount)
+            {
+                _lastInsideCount = inside;
+                return;
+            }
+
+            int delta = inside - _lastInsideCount;
+            _lastInsideCount = inside;
+            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
+                return;
+
+            for (int i = 0; i < delta; i++)
+                TryInflateOnInside(hScene);
+        }
+
+        internal static void ResetInsideTracking()
+        {
+            _trackedHScene = null;
+            _lastInsideCount = -1;
+        }
+
+        /// <summary>Ensure the PregnancyPlus HS2 inflation cap is at least three times its original default.</summary>
+        internal static bool TryRaiseMaxInflationLevel()
+        {
+            EnsureResolved();
+            if (_pluginType == null)
+                return false;
+
+            object? entry = null;
+            try
+            {
+                entry = _maxLevelEntryProperty?.GetValue(null, null)
+                    ?? _maxLevelEntryField?.GetValue(null);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (entry == null)
+                return false;
+
+            var valueProperty = entry.GetType().GetProperty(
+                "Value",
+                BindingFlags.Instance | BindingFlags.Public);
+            if (valueProperty == null || !valueProperty.CanRead || !valueProperty.CanWrite)
+                return false;
+
+            try
+            {
+                int current = Convert.ToInt32(valueProperty.GetValue(entry, null));
+                int requested = Math.Max(current, OriginalHs2InflationMaxLevel * InflationMaxLevelMultiplier);
+                if (current < requested)
+                {
+                    valueProperty.SetValue(entry, requested, null);
+                    HS2OrbitAndExciter.Log?.LogInfo(
+                        $"Orbit: PregnancyPlus 肚子上限由 {current} 級提高至 {requested} 級（原始上限 3 倍）");
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: PregnancyPlus 肚子上限套用失敗: {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static string InflationCapStatus
+        {
+            get
+            {
+                TryRaiseMaxInflationLevel();
+                int level = GetInflationMaxLevel();
+                return level > 0
+                    ? $"PregnancyPlus 肚子上限：{level} 級（原始 6 級的 3 倍）"
+                    : "PregnancyPlus 未載入：肚子上限未套用";
+            }
+        }
+
+        private static int GetInflationMaxLevel()
+        {
+            EnsureResolved();
+            if (_pluginType == null)
+                return 0;
+
+            try
+            {
+                object? entry = _maxLevelEntryProperty?.GetValue(null, null)
+                    ?? _maxLevelEntryField?.GetValue(null);
+                if (entry == null)
+                    return 0;
+
+                var valueProperty = entry.GetType().GetProperty(
+                    "Value",
+                    BindingFlags.Instance | BindingFlags.Public);
+                return valueProperty == null
+                    ? 0
+                    : Math.Max(0, Convert.ToInt32(valueProperty.GetValue(entry, null)));
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         /// <summary>§19：愛撫／女女落地縮腹一級（與內射對稱）。</summary>
@@ -199,6 +340,12 @@ namespace HS2OrbitAndExciter
             _resolved = true;
 
             _controllerType = AccessTools.TypeByName("KK_PregnancyPlus.PregnancyPlusCharaController");
+            _pluginType = AccessTools.TypeByName("KK_PregnancyPlus.PregnancyPlusPlugin");
+            if (_pluginType != null)
+            {
+                _maxLevelEntryProperty = AccessTools.Property(_pluginType, "HS2InflationMaxLevel");
+                _maxLevelEntryField = AccessTools.Field(_pluginType, "HS2InflationMaxLevel");
+            }
             if (_controllerType == null)
             {
                 HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus 未載入，肚子膨脹／清腹略過");

@@ -65,6 +65,9 @@ namespace HS2OrbitAndExciter
             OrbitPosePool.OnHSceneEntered();
             OrbitFsmFlow.OnHSceneEntered();
             OrbitOrgasmTattoo.OnHSceneEntered();
+            // Protect against a scene transition that skips the controller's
+            // normal no-HScene frame (and therefore skips the usual cleanup).
+            OrbitOrgasmBustGrowth.TryRestoreForLifecycle("new_h_scene");
             OrbitOrgasmBustGrowth.ResetHud();
             OrbitOrgasmNippleSpray.Reset();
             HScene? scene = hScene ?? OrbitController.TryGetHScene();

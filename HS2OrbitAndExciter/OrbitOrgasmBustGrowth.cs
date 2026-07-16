@@ -13,6 +13,9 @@ namespace HS2OrbitAndExciter
 
         private static float _baseline = -1f;
         private static bool _hasBaseline;
+        // Keep the live character reference so cleanup still works when HScene
+        // has already been torn down (for example during application quit).
+        private static ChaControl? _target;
         private static float _lastBefore = -1f;
         private static float _lastAfter = -1f;
         private static bool _justRestored;
@@ -55,6 +58,7 @@ namespace HS2OrbitAndExciter
 
             _baseline = cha.GetShapeBodyValue(BustSizeIndex);
             _hasBaseline = true;
+            _target = cha;
             _justRestored = false;
             _lastBefore = -1f;
             _lastAfter = -1f;
@@ -129,10 +133,77 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
+        /// <summary>
+        /// Restore the in-memory character data during lifecycle teardown. This
+        /// is deliberately independent of HScene lookup because Unity may have
+        /// destroyed HScene before the controller receives its next Update.
+        /// </summary>
+        internal static bool TryRestoreForLifecycle(string reason)
+        {
+            if (!_hasBaseline
+                || _target == null
+                || _target.fileBody?.shapeValueBody == null
+                || BustSizeIndex >= _target.fileBody.shapeValueBody.Length)
+            {
+                ResetHud();
+                return false;
+            }
+
+            float current = _target.GetShapeBodyValue(BustSizeIndex);
+            if (!Mathf.Approximately(current, _baseline))
+            {
+                _target.SetShapeBodyValue(BustSizeIndex, _baseline);
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: bust lifecycle restore ({reason}) {current * 100f:F0}% -> {_baseline * 100f:F0}%");
+            }
+
+            ResetHud();
+            return true;
+        }
+
+        /// <summary>
+        /// Temporarily put the baseline into the card object before native card
+        /// serialization. The current runtime value is returned for restoration
+        /// after the save completes.
+        /// </summary>
+        internal static bool TryPrepareForSave(ChaFileControl? file, out float runtimeValue)
+        {
+            runtimeValue = 0f;
+            if (!_hasBaseline
+                || _target == null
+                || file == null
+                || !ReferenceEquals(_target.chaFile, file)
+                || _target.fileBody?.shapeValueBody == null
+                || BustSizeIndex >= _target.fileBody.shapeValueBody.Length)
+                return false;
+
+            float current = _target.GetShapeBodyValue(BustSizeIndex);
+            if (Mathf.Approximately(current, _baseline))
+                return false;
+
+            runtimeValue = current;
+            _target.SetShapeBodyValue(BustSizeIndex, _baseline);
+            HS2OrbitAndExciter.Log?.LogInfo(
+                $"Orbit: bust save guard {current * 100f:F0}% -> {_baseline * 100f:F0}%");
+            return true;
+        }
+
+        internal static void RestoreAfterSave(float runtimeValue)
+        {
+            if (!_hasBaseline
+                || _target == null
+                || _target.fileBody?.shapeValueBody == null
+                || BustSizeIndex >= _target.fileBody.shapeValueBody.Length)
+                return;
+
+            _target.SetShapeBodyValue(BustSizeIndex, runtimeValue);
+        }
+
         internal static void ResetHud()
         {
             _baseline = -1f;
             _hasBaseline = false;
+            _target = null;
             _lastBefore = -1f;
             _lastAfter = -1f;
             _justRestored = false;

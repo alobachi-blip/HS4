@@ -101,6 +101,7 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? VoiceTourCountHoushiMaleFinish;
         /// <summary>Write detailed NDJSON state-machine traces for smoke/regression runs.</summary>
         internal static ConfigEntry<bool>? EnableStateMachineTrace;
+        internal static ConfigEntry<bool>? EnableOcclusion20CircleTest;
         /// <summary>Smoke-only shortcut: jump directly into HScene after startup.</summary>
         internal static ConfigEntry<bool>? EnableDirectHSmokeDriver;
         internal static ConfigEntry<float>? DirectHSmokeDelaySeconds;
@@ -236,8 +237,11 @@ namespace HS2OrbitAndExciter
                 "If true, each H enter starts at stage 0 for that character.");
             VoiceTourCountHoushiMaleFinish = Config.Bind("VoiceTour", "VoiceTourCountHoushiMaleFinish", true,
                 "Count houshi outside/drink male finish as one hit. Insertion inside (numInside) always counts.");
+            PregnancyPlusAssist.TryRaiseMaxInflationLevel();
             EnableStateMachineTrace = Config.Bind("Diagnostics", "EnableStateMachineTrace", false,
                 "Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.");
+            EnableOcclusion20CircleTest = Config.Bind("Diagnostics", "EnableOcclusion20CircleTest", false,
+                "Run exactly 20 orbit rotations, log visual occlusion evidence, then stop the camera. Requires state trace logging.");
             EnableDirectHSmokeDriver = Config.Bind("Smoke", "EnableDirectHSmokeDriver", false,
                 "Smoke test only: jump directly into HScene after startup. Default false.");
             DirectHSmokeDelaySeconds = Config.Bind("Smoke", "DirectHSmokeDelaySeconds", 8f,
@@ -291,6 +295,8 @@ namespace HS2OrbitAndExciter
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
             PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
+            PatchSafe(harmony, typeof(Patches.BustGrowthLifecyclePatch));
+            PatchSafe(harmony, typeof(Patches.BustGrowthSavePatch));
             PatchSafe(harmony, typeof(Patches.VoiceTourPhasePatch));
             PatchSafe(harmony, typeof(Patches.VoiceTourBreathFallbackPatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
@@ -337,6 +343,10 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProc));
             PatchSafe(harmony, typeof(Patches.OrbitPoseUnlockPatches));
             PatchSafe(harmony, typeof(Patches.OrbitAutoActionAfterProcPatches));
+            PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerEnterPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerStayPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerExitPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitCameraRendererVanishPatch));
             // Masturbation/Les/Sonyu/Aibu 不載入（此遊戲 build 無對應方法，避免警告）
             var go = new GameObject("HS2OrbitAndExciterController");
             DontDestroyOnLoad(go);

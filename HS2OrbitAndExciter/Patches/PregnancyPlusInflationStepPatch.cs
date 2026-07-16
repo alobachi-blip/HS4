@@ -20,6 +20,13 @@ namespace HS2OrbitAndExciter.Patches
 
         internal static bool Prepare() => TargetMethod() != null;
 
+        [HarmonyPrefix]
+        private static void Prefix()
+        {
+            // Also covers manual Y/U inflation before the first inside finish.
+            PregnancyPlusAssist.TryRaiseMaxInflationLevel();
+        }
+
         [HarmonyTranspiler]
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
         {

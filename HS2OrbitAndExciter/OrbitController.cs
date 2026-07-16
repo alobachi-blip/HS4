@@ -133,6 +133,14 @@ namespace HS2OrbitAndExciter
                 _activeInstance = null;
         }
 
+        private void OnApplicationQuit()
+        {
+            // Do not leave the temporary bust growth in ChaFile when the game
+            // closes directly from inside H, before the next Update can observe
+            // that HScene is gone.
+            OrbitOrgasmBustGrowth.TryRestoreForLifecycle("application_quit");
+        }
+
         /// <summary>After G/H/J manual hotkey completes: restart motion and auto-advance assist.</summary>
         internal static void NotifyManualHotkeyCompleted(HScene hScene)
         {
@@ -219,6 +227,7 @@ namespace HS2OrbitAndExciter
                     OrbitManualDirector.OnHSceneEntered(hProbe);
                 }
                 OrbitPoseDirector.TickStuckRecovery(hProbe);
+                PregnancyPlusAssist.TickInsideFinish(hProbe);
                 OrbitVoiceTour.Tick(hProbe);
                 OrbitFsmFlow.Tick(hProbe);
                 OrbitFinishDirector.Tick(hProbe);
@@ -226,8 +235,12 @@ namespace HS2OrbitAndExciter
             }
             else
             {
+                PregnancyPlusAssist.ResetInsideTracking();
                 if (_manualDirectorHSceneId != -1)
+                {
+                    OrbitOrgasmBustGrowth.TryRestoreForLifecycle("h_scene_exit");
                     OrbitVoiceTour.OnHSceneExited();
+                }
                 _manualDirectorHSceneId = -1;
                 OrbitPoseDirector.Reset();
             }
@@ -486,6 +499,7 @@ namespace HS2OrbitAndExciter
                         if (!freezeCycle)
                         {
                             _rotationCount++;
+                            OrbitOcclusion20Test.OnRotationBoundary(_rotationCount);
                             OnRotationBoundary(hScene, ctrl, allowNewRelativeAngle: true, roundTripJustCompleted: false);
                         }
                     }
@@ -501,6 +515,7 @@ namespace HS2OrbitAndExciter
                         {
                             _rotationCount++;
                             _roundTripCount++;
+                            OrbitOcclusion20Test.OnRotationBoundary(_rotationCount);
                             OnRotationBoundary(hScene, ctrl, allowNewRelativeAngle: true, roundTripJustCompleted: true);
                         }
                     }
@@ -517,6 +532,7 @@ namespace HS2OrbitAndExciter
                         MaybePrecomputeNextCircle(hScene);
                     ApplyBodyAxisCamera(hScene, ctrl);
                 }
+                OrbitOcclusion20Test.Sample(hScene, ctrl, BoneFocusIndex());
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
@@ -527,6 +543,7 @@ namespace HS2OrbitAndExciter
                     ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
                 else
                     ApplyBoneFocusOnly(hScene, ctrl);
+                OrbitOcclusion20Test.Sample(hScene, ctrl, BoneFocusIndex());
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
@@ -1435,6 +1452,12 @@ namespace HS2OrbitAndExciter
 
         private void OnOrbitToggled(bool active)
         {
+            if (!active)
+            {
+                OrbitMapVanishAssist.ResetInjectedState();
+                OrbitOcclusion20Test.Reset();
+            }
+
             var hScene = GetHScene();
             if (hScene == null)
             {
@@ -1473,6 +1496,7 @@ namespace HS2OrbitAndExciter
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
+                OrbitOcclusion20Test.Arm(hScene, (CameraControl_Ver2)ctrl, BoneFocusIndex());
                 // 初始軸＋傾斜；方位角對齊目前相機朝向
                 if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
                 {
