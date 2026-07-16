@@ -292,6 +292,7 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
             PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
             PatchSafe(harmony, typeof(Patches.VoiceTourPhasePatch));
+            PatchSafe(harmony, typeof(Patches.VoiceTourBreathFallbackPatch));
             PatchSafe(harmony, typeof(Patches.FeelHitPatches));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F2M1_OLoopSonyuProc));

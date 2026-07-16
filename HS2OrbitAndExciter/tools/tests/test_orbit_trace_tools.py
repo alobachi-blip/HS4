@@ -429,6 +429,19 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("HPointInitData(hPointList, mapRoot)", director)
         self.assertIn("hScene.ChangeAnimation(", director)
 
+    def test_voice_tour_missing_breath_reuses_last_without_changing_stage(self):
+        plugin_root = TOOLS.parent
+        plugin = (plugin_root / "HS2OrbitAndExciter.cs").read_text(encoding="utf-8-sig")
+        patch = (plugin_root / "Patches" / "VoiceTourBreathFallbackPatch.cs").read_text(encoding="utf-8-sig")
+        self.assertIn("PatchSafe(harmony, typeof(Patches.VoiceTourBreathFallbackPatch))", plugin)
+        self.assertIn("GetPatternOrLast", patch)
+        self.assertIn("GetVoiceOrLast", patch)
+        self.assertIn("LastPatterns", patch)
+        self.assertIn("LastVoices", patch)
+        self.assertIn("VoiceTour 階段不變", patch)
+        self.assertIn("[HarmonyFinalizer]", patch)
+        self.assertIn("KeyNotFoundException", patch)
+
 
 if __name__ == "__main__":
     unittest.main()
