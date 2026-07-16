@@ -25,7 +25,12 @@ namespace HS2OrbitAndExciter
             bool clothesThisBoundary = clothesEnabled && canAssist && (hitN || (n == 0 && roundTripJustCompleted));
 
             if (clothesThisBoundary)
+            {
                 orbit.InternalAdvanceClothesStage(hScene);
+                OrbitStateMachineLog.Event("clothes", "advance",
+                    "{\"rotation\":" + rotationCount
+                    + ",\"roundTrip\":" + (rotationCount / 2) + "}");
+            }
 
             if (n > 0 && hitN)
             {
