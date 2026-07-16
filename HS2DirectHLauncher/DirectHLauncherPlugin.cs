@@ -38,9 +38,9 @@ namespace HS2DirectHLauncher
                 "Map loaded for the direct H scene. 3 is the standard room.");
             _pollInterval = Config.Bind("Launcher", "ReadyPollSeconds", 0.02f,
                 new ConfigDescription("How often startup readiness is checked.", new AcceptableValueRange<float>(0.01f, 0.5f)));
-            _femaleDirectory = Config.Bind("Cards", "FemaleDirectory", "UserData\\chara\\female",
+            _femaleDirectory = Config.Bind("Cards", "FemaleDirectory", "UserData/chara/female",
                 "Absolute path or path relative to the game root.");
-            _maleDirectory = Config.Bind("Cards", "MaleDirectory", "UserData\\chara\\male",
+            _maleDirectory = Config.Bind("Cards", "MaleDirectory", "UserData/chara/male",
                 "Absolute path or path relative to the game root.");
             _recursive = Config.Bind("Cards", "SearchSubdirectories", true,
                 "Include cards in subdirectories.");
@@ -104,6 +104,7 @@ namespace HS2DirectHLauncher
             }
             catch (Exception ex)
             {
+                _nextPoll = Time.unscaledTime + 1f;
                 Logger.LogError("Direct-H request failed; will retry: " + ex);
             }
         }
@@ -218,9 +219,25 @@ namespace HS2DirectHLauncher
 
         private static string ResolveDirectory(string configured)
         {
+            configured = NormalizeConfiguredPath(configured);
             if (Path.IsPathRooted(configured))
                 return configured;
             return Path.GetFullPath(Path.Combine(Paths.GameRootPath, configured));
+        }
+
+        private static string NormalizeConfiguredPath(string configured)
+        {
+            if (string.IsNullOrWhiteSpace(configured))
+                return string.Empty;
+
+            // BepInEx 5 can deserialize backslash-prefixed folder names such as
+            // "\\female" as a form-feed escape. Forward slashes are accepted by Windows.
+            return configured
+                .Replace("\b", "/b")
+                .Replace("\t", "/t")
+                .Replace("\n", "/n")
+                .Replace("\f", "/f")
+                .Replace("\r", "/r");
         }
 
         private void ConsumeRunMarker()
