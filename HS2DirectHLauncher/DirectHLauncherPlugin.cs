@@ -37,7 +37,7 @@ namespace HS2DirectHLauncher
         private string _runMarkerPath = string.Empty;
         private bool _armed;
         private bool _requested;
-        private bool _titleRequested;
+        private bool _bootstrapTakenOver;
         private bool _orbitAssistEnabled;
         private bool _initialClothesRandomized;
         private float _nextPoll;
@@ -323,30 +323,25 @@ namespace HS2DirectHLauncher
                 return true;
             if (!string.Equals(activeScene, "Logo", StringComparison.Ordinal))
                 return false;
-            if (_titleRequested)
-                return false;
+            if (_bootstrapTakenOver)
+                return true;
 
             var logo = FindObjectOfType<LogoScene>();
             var saveData = Singleton<Game>.Instance.saveData;
             if (logo == null || saveData == null)
                 return false;
 
-            // Keep the three save-data guards from LogoScene.Start, skip its brand
-            // call and two-second wait, but still emit Title once for old plugins
-            // that initialize their H-scene UI from the Title lifecycle.
+            // Keep LogoScene's required save-data guards, then skip its brand call,
+            // fixed wait, and the compatibility Title scene. Known H-UI consumers
+            // are guarded separately and HScene initializes its own resources.
             saveData.RoomListCharaExists();
             saveData.PlayerCoordinateExists();
             saveData.PlayerExists();
             logo.StopAllCoroutines();
             logo.enabled = false;
-            _titleRequested = true;
-            Logger.LogInfo("Logo bootstrap complete; loading compatibility Title without brand call or fade.");
-            Scene.LoadReserve(new Scene.Data
-            {
-                levelName = "Title",
-                fadeType = FadeCanvas.Fade.None
-            }, isLoadingImageDraw: false);
-            return false;
+            _bootstrapTakenOver = true;
+            Logger.LogInfo("Logo bootstrap complete; bypassing brand wait and compatibility Title.");
+            return true;
         }
 
         private void EnterHScene()

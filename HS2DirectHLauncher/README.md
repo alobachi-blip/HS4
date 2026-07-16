@@ -2,7 +2,7 @@
 
 Run `D:\HS4\launch_direct_h.cmd`. It builds/deploys the plugin only when needed, arms one launch, and starts `HoneySelect2.exe` directly.
 
-The plugin requests `HScene` at the first safe frame, skips the normal title/selection/map flow, disables the transition fade/loading image, randomly chooses an H-compatible map, randomizes the opening clothes state, and randomly fills two female plus two male slots from:
+The plugin requests `HScene` at the first safe Logo frame, skips the brand wait and normal title/selection/map flow, disables the transition fade/loading image, randomly chooses an H-compatible map, randomizes the opening clothes state, and randomly fills two female plus two male slots from:
 
 - `D:\HS2\UserData\chara\female`
 - `D:\HS2\UserData\chara\male`
