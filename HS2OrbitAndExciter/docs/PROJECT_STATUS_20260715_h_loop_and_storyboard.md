@@ -3,18 +3,24 @@
 > 寫給下一個 session。請先讀本檔，再讀 `h_loop_flow_by_family.md`。
 > 語言：繁體中文。
 > 日期：2026-07-15。
-> Repo：`D:\HS4`，外掛：`HS2OrbitAndExciter`。
+> Repo：`D:\HS4_h_loop_clean_v2`，外掛：`HS2OrbitAndExciter`。
 
 ---
 
 ## 1. 一句話狀態
 
-目前 **FSM v1 已完成，但 H-loop session v2 尚未完成**。
+目前 **FSM v1 已完成，H-loop session v2 的 Slice 0～5 已完成首輪落地並通過 DirectH smoke**。
 
-已完成的是「選池／落地／閒置開幹／高潮後回選池／窺視 N/L／環視身體軸」這一層。
-還沒完成的是 `h_loop_flow_by_family.md` 所描述的「單次選池落地後，依原版 Proc 族群完整代操 W/S、Finish、Pull/Drop、Spnking」這一層。
+已完成的是「選池／落地／閒置開幹／高潮後回選池／窺視 N/L／環視身體軸」這一層，以及 `h_loop_flow_by_family.md` 所描述的「單次選池落地後，依原版 Proc 族群代操 W/S、Finish、Pull/Drop、Spnking」首輪實作。
 
-這是反覆卡住的核心原因：我們已經有外層 FSM，但內層 H scene 的原版流程假設仍不夠準，現在仍有 `setPlay` 直跳高潮的補洞路徑，會繞過原版 Proc 的副作用與合法出口。
+Slice 5 的結論是：舊 OLoop／Spnking 直跳高潮 recovery 已不在 C# 現碼；analyzer 仍把 legacy recovery trace 視為 error，並新增靜態測試防止這些 message 回到 C#。目前仍存在的 `setPlay` 只限 start/Idle/AfterIdle escape，屬於脫離等待或手動 N 熱鍵起步，不是常規高潮出口。
+
+2026-07-16 驗證：
+
+- local tests：`tools/run_orbit_local_tests.ps1` 通過，17 個 Python regression 通過，Debug build 0 warnings / 0 errors。
+- Release build：`dotnet build .\HS2OrbitAndExciter\HS2OrbitAndExciter.csproj -c Release` 通過，0 warnings / 0 errors，並部署到 `D:\HS2\BepInEx\plugins`。
+- DirectH smoke：`tools/run_orbit_smoke.ps1 -DurationSeconds 150 -ValidationProfile Fast -DirectH` 通過，12 warnings / 0 errors。
+- smoke trace 觀察：`finish/set_click` 1 次且 `finish/consumed`；C 族 `maleInside` 消費到 `OrgasmM_IN`；`ina/pull_click` 走 auto pull，後續 trace 看到 `Pull/Drop` framing 並收斂到 `OrgasmM_OUT_A`；W/S script 有 4 次 step。
 
 ---
 
@@ -29,7 +35,7 @@
    說明目前卡住分類、`PoseLandedPolicy`、latch、invariant。仍是外層 FSM 真相。
 
 3. `HANDOFF_fsm_contract_review.md`
-   說明 FSM v1 切片 1～9 已完成，但它沒有完成 h-loop v2。
+   說明 FSM v1 切片 1～9 已完成；它是外層 FSM 依據，不涵蓋 2026-07-16 這輪 H-loop Slice 0～4 實作。
 
 4. `CHANGELOG.md`
    只代表已改過什麼，不代表新規格都已落地。
@@ -98,29 +104,29 @@
 | Idle 開幹 | `OrbitFsmFlow.ShouldForceVanillaIsStart` | 維持 |
 | AfterIdle 選池 | `OrbitFsmFlow` 5 秒後選池 | 維持 |
 | FEEL | `AccumulateFeelWhenOrbit` 同時加 `feel_f/feel_m`，W/S cap 0.74 | 維持灌條，但改為配合 session 劇本 |
-| W/S 劇本 | 目前主要單向加 speed | 新增 `OrbitSessionDirector` 控 W/S 順序與節奏 |
-| W/S → O | `TickWsToOLoopRecovery` 會 `setPlay(OLoop)` | 收斂成補洞；優先讓 Proc 自然消費 |
-| OLoop → 高潮 | `TickOLoopToOrgasmRecovery` 會 `setPlay(Orgasm*)` 並手寫副作用 | 改 `OrbitFinishDirector`：`IsFinishVisible + ctrlFlag.click` |
-| Finish 選擇 | 沒有正式 Ledger | 新增 `OrbitFinishPathLedger`，歷史比例最低 |
-| Sonyu 男側 In/Out/Same | 現碼用 `ClassifyOLoopOrgasm` 粗分，且漏 `maleInside` 正規 click | 分軌帳本，In/Out/Same 各自合法出口 |
-| IN_A Pull/Drop | 未實作成正式 session 行為 | 固定下滾輪 Pull → Drop，永不續幹 |
-| Spnking | 有 `TickSpankIdleToOrgasmRecovery` 直推 Orgasm | 改假滾輪/節奏，讓原版 ActionProc 跑 |
-| BetterHScenes offset/IK | 外部已安裝 BHS，但 Orbit 沒有相容/衝突偵測 | 採用 BHS solver/offset 品質層；AutoFinish 與 Orbit FinishDirector 不併存 |
-| 全姿態開放 | 舊 `HS2UnlockAllPoses` 沒併回現主線 | 恢復安全放寬 patch：放寬 state/pain/faintness，保留人數/事件/地點/AppendEV |
+| W/S 劇本 | 已補 `OrbitSessionDirector` 弱強節奏 | 跨 session 交替 W/S 順序 |
+| W/S → O | 舊 `TickWsToOLoopRecovery` 未在 C# 現碼找到 | 優先讓 Proc 自然消費 |
+| OLoop → 高潮 | 已補 `OrbitFinishDirector`；舊 `TickOLoopToOrgasmRecovery` 未在 C# 現碼找到 | 常規走 `IsFinishVisible + ctrlFlag.click` |
+| Finish 選擇 | 已補 `OrbitFinishPathLedger` | 歷史比例最低，同分偏較長橋段 |
+| Sonyu 男側 In/Out/Same | 已補 C 族 path gating：`canInside`、Same 只限 OLoop、69 down 外射限制 | 分軌帳本，In/Out/Same 各自合法出口 |
+| IN_A Pull/Drop | 已補 `OrbitSessionDirector` + `HAutoCtrl.IsPull` override | 固定下滾輪/auto pull → Drop，永不續幹 |
+| Spnking | 已補 `OrbitSpankingWheelPatch` 假滾輪節奏 | 讓原版 ActionProc 跑 |
+| BetterHScenes offset/IK | 已補 `OrbitBhsCompat` trace | 採用 BHS solver/offset 品質層；AutoFinish 與 Orbit FinishDirector 不併存 |
+| 全姿態開放 | 已補 `OrbitPoseUnlockPolicy` / `OrbitPoseUnlockPatches` | 安全放寬 state/pain/faintness，保留人數/事件/地點/AppendEV |
 
-明確沒有找到：
+2026-07-16 已新增：
 
 - `OrbitFinishDirector`
 - `OrbitFinishPathLedger`
 - `OrbitSessionDirector`
 - `OrbitPoseUnlockPolicy`
 - `OrbitBhsCompat`
+- `Patches/OrbitSpankingWheelPatch`
+- `Patches/OrbitAutoPullPatch`
 
 明確仍存在：
 
-- `OrbitBehaviorHub.TickOLoopToOrgasmRecovery`
-- `OrbitBehaviorHub.TickWsToOLoopRecovery`
-- `TryForceFemaleAnim(... setPlay ...)` 作為多個補洞出口
+- `TryForceFemaleAnim(... setPlay ...)`：目前只服務 `startsex`、`idle`、`afteridle` escape，不是常規 Finish/高潮出口。
 - 舊全姿態開放來源：`D:\HS4\.claude\worktrees\flamboyant-bhaskara\HS2UnlockAllPoses`
 - BHS source clone：`D:\HS4\third_party\BetterHScenes`
 
@@ -128,7 +134,7 @@
 
 ## 6. 下一步修復順序
 
-不要先刪舊補洞。先建新路，驗證後再降級舊路。
+Slice 0～5 已首輪落地；下面保留修復順序作為設計索引與後續驗證清單。
 
 ### Slice 0：恢復兩個前置品質層
 
@@ -205,7 +211,14 @@
 
 ### Slice 5：降級舊 setPlay recovery
 
-等 Slice 1～4 有 log 證明後：
+2026-07-16 首輪完成：
+
+- C# 現碼已找不到 `force_ws_to_oloop`、`force_oloop_to_orgasm`、`force_insert_to_wloop`、`force_spank_to_orgasm`。
+- `tools/_assert_fsm_regression.py` 仍把上述 legacy recovery message 視為 `legacy_setplay_recovery` error。
+- `tools/tests/test_orbit_trace_tools.py` 新增靜態測試，掃 C# source 防止 legacy recovery message 回歸。
+- 仍保留 start/Idle/AfterIdle escape 的 `setPlay(WLoop/D_WLoop)`，這是等待脫離保險，不是高潮出口。
+
+後續若要再收斂：
 
 - `TickOLoopToOrgasmRecovery` 從常規出口降成診斷/最後保險。
 - 族 B/C 不再用 setPlay 直跳高潮。

@@ -22,6 +22,7 @@ game_screenshot_fov.txt
 game_ready.txt
 load_card_request.txt
 debug-*.log
+HS2OrbitAndExciter/tools/orbit_smoke_report.html
 
 # BepInEx 插件編譯
 BepInEx_HS2_PhotoToCard/bin/

@@ -174,20 +174,9 @@ namespace HS2OrbitAndExciter
                 string wait = FormatWaiting(snap);
                 if (!string.IsNullOrEmpty(wait))
                 {
-                    bool blocked = !string.IsNullOrEmpty(snap.SuppressReasonKey)
-                        && snap.SuppressReasonKey != OrbitAssistReasons.None;
                     bool appreciate = snap.SuppressReasonKey == OrbitAssistReasons.LongAppreciation
                         && !OrbitBehaviorHub.IsMotionEscapeArmed();
-                    list.Add(new HudLine(
-                        blocked || appreciate ? LineKind.Alert : LineKind.Body,
-                        wait));
-                }
-
-                if (OrbitBehaviorHub.ShouldPauseOrbitCameraForUi()
-                    && OrbitBehaviorHub.IsOrbitCameraSpinning())
-                {
-                    // 與「擋推進」分開：選單只停相機
-                    list.Add(new HudLine(LineKind.Dim, "環視：選單操作中暫停轉動（推進不擋）"));
+                    list.Add(new HudLine(appreciate ? LineKind.Alert : LineKind.Body, wait));
                 }
 
                 list.Add(new HudLine(LineKind.Body, FormatOrgasmFx()));
@@ -245,29 +234,22 @@ namespace HS2OrbitAndExciter
         {
             string assist = FormatAssistPlain(snap.SuppressReasonKey);
             string timed = FormatTimedPlain(snap.SuppressReasonKey);
-            bool blocked = !string.IsNullOrEmpty(snap.SuppressReasonKey)
-                && snap.SuppressReasonKey != OrbitAssistReasons.None;
-            string core = !string.IsNullOrEmpty(timed) && timed != assist
-                ? assist + "｜" + timed
-                : assist;
-            if (blocked)
-                return "擋推進：" + core;
-            return core;
+            if (!string.IsNullOrEmpty(timed) && timed != assist)
+                return assist + "｜" + timed;
+            return assist;
         }
 
         private static string FormatAssistPlain(string reasonKey)
         {
             switch (reasonKey)
             {
-                case OrbitAssistReasons.PointerOverUi:
-                    // 已不擋推進；若舊 log／殘留 reason 仍出現則說明清楚
-                    return "游標在 UI（不擋推進；僅可能停環視）";
+                case OrbitAssistReasons.PointerOverUi: return "暫停自動：游標在 UI 上";
                 case OrbitAssistReasons.OrbitStartGrace:
                     {
                         float g = OrbitBehaviorHub.RemainingOrbitStartGraceSeconds();
                         return g > 0.05f ? $"剛啟動緩衝 {g:F0}s" : "剛啟動緩衝";
                     }
-                case OrbitAssistReasons.InputForcus: return "正在輸入";
+                case OrbitAssistReasons.InputForcus: return "暫停自動：正在輸入";
                 case OrbitAssistReasons.PoseQueued:
                 case OrbitAssistReasons.SelectionListPresentLegacy: return "正在選姿勢";
                 case OrbitAssistReasons.Changing:
@@ -275,7 +257,7 @@ namespace HS2OrbitAndExciter
                 case OrbitAssistReasons.PoseTransitionLegacy: return "正在換姿勢";
                 case OrbitAssistReasons.Rebinding: return "換姿勢綁定中";
                 case OrbitAssistReasons.PosePending: return "高潮後等待換姿勢";
-                case OrbitAssistReasons.MouseHolding: return "按住滑鼠";
+                case OrbitAssistReasons.MouseHolding: return "暫停自動：按住滑鼠";
                 case OrbitAssistReasons.RecentUiClick:
                     {
                         float u = OrbitBehaviorHub.RemainingManualUiSuppressSeconds();
@@ -294,11 +276,11 @@ namespace HS2OrbitAndExciter
                         : "欣賞中：按 L／滾輪／N 可手動跳出";
                 case OrbitAssistReasons.AssistInterval:
                 case OrbitAssistReasons.CheckpointInterval: return "稍候再自動推進";
-                case OrbitAssistReasons.None: return "推進：就緒";
+                case OrbitAssistReasons.None: return "自動：就緒";
                 default:
                     return string.IsNullOrEmpty(reasonKey) || reasonKey == OrbitAssistReasons.None
-                        ? "推進：就緒"
-                        : reasonKey;
+                        ? "自動：就緒"
+                        : "狀態：" + reasonKey;
             }
         }
 

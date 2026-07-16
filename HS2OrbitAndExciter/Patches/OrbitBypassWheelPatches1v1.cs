@@ -43,7 +43,8 @@ namespace HS2OrbitAndExciter.Patches
     {
         [HarmonyPrefix]
         private static void Prefix(int _state, ref float _wheel) =>
-            OrbitBypassWheelState.TryBypass(ref _wheel);
+            _ = OrbitSessionDirector.TryInjectInsideAfterWheel(ref _wheel)
+                || OrbitBypassWheelState.TryBypass(ref _wheel);
     }
 
     [HarmonyPatch(typeof(Sonyu), "AutoAfterTheInsideWaitingProc")]
