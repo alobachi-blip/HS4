@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Actor;
 using AIChara;
 using BepInEx;
@@ -21,12 +22,16 @@ namespace HS2DirectHLauncher
     {
         private ConfigEntry<bool> _alwaysEnabled = null!;
         private ConfigEntry<int> _mapId = null!;
+        private ConfigEntry<bool> _randomizeMap = null!;
+        private ConfigEntry<bool> _randomizeInitialClothes = null!;
         private ConfigEntry<float> _pollInterval = null!;
         private ConfigEntry<string> _femaleDirectory = null!;
         private ConfigEntry<string> _maleDirectory = null!;
         private ConfigEntry<bool> _recursive = null!;
         private ConfigEntry<bool> _enableOrbitAssist = null!;
         private readonly CardPicker _cardPicker = new CardPicker();
+        private readonly System.Random _random =
+            new System.Random(unchecked(Environment.TickCount * 397 ^ Guid.NewGuid().GetHashCode()));
         private readonly Dictionary<string, ChaFileControl> _validatedFemaleFiles =
             new Dictionary<string, ChaFileControl>(StringComparer.OrdinalIgnoreCase);
         private string _runMarkerPath = string.Empty;
@@ -34,6 +39,7 @@ namespace HS2DirectHLauncher
         private bool _requested;
         private bool _titleRequested;
         private bool _orbitAssistEnabled;
+        private bool _initialClothesRandomized;
         private float _nextPoll;
         private float _nextOrbitAssistPoll;
 
@@ -42,7 +48,11 @@ namespace HS2DirectHLauncher
             _alwaysEnabled = Config.Bind("Launcher", "AlwaysEnabled", false,
                 "Always jump directly to HScene. The one-click launcher does not require this setting.");
             _mapId = Config.Bind("Launcher", "MapId", 3,
-                "Map loaded for the direct H scene. 3 is the standard room.");
+                "Fallback map when random map selection is disabled or unavailable. 3 is the standard room.");
+            _randomizeMap = Config.Bind("Launcher", "RandomizeMap", true,
+                "Choose a random H-compatible map on every direct launch.");
+            _randomizeInitialClothes = Config.Bind("Launcher", "RandomizeInitialClothes", true,
+                "Randomize each loaded character's clothes state once the opening H animation is ready.");
             _pollInterval = Config.Bind("Launcher", "ReadyPollSeconds", 0.02f,
                 new ConfigDescription("How often startup readiness is checked.", new AcceptableValueRange<float>(0.01f, 0.5f)));
             _femaleDirectory = Config.Bind("Cards", "FemaleDirectory", "UserData/chara/female",
@@ -143,7 +153,8 @@ namespace HS2DirectHLauncher
                 return;
             if (_requested)
             {
-                TryEnableOrbitAssist();
+                if (TryRandomizeInitialClothes())
+                    TryEnableOrbitAssist();
                 return;
             }
             if (Time.unscaledTime < _nextPoll)
@@ -152,7 +163,8 @@ namespace HS2DirectHLauncher
             {
                 _requested = true;
                 ConsumeRunMarker();
-                TryEnableOrbitAssist();
+                if (TryRandomizeInitialClothes())
+                    TryEnableOrbitAssist();
                 return;
             }
 
@@ -173,6 +185,80 @@ namespace HS2DirectHLauncher
                 _nextPoll = Time.unscaledTime + 1f;
                 Logger.LogError("Direct-H request failed; will retry: " + ex);
             }
+        }
+
+        private bool TryRandomizeInitialClothes()
+        {
+            if (_initialClothesRandomized)
+                return true;
+            if (!_randomizeInitialClothes.Value)
+            {
+                _initialClothesRandomized = true;
+                return true;
+            }
+            if (!HSceneManager.isHScene || !Singleton<HSceneManager>.IsInstance())
+                return false;
+
+            var hScene = Singleton<HSceneManager>.Instance.Hscene;
+            var info = hScene?.ctrlFlag?.nowAnimationInfo;
+            if (hScene == null || info == null || info.id < 0)
+                return false;
+
+            ChaControl[] females = hScene.GetFemales();
+            ChaControl[] males = hScene.GetMales();
+            if (!PrimaryCharacterReady(females) || !PrimaryCharacterReady(males))
+                return false;
+
+            int changedSlots = RandomizeClothes(females);
+
+            // HScene.LateUpdate owns male wear state, so randomize its source
+            // settings as well as the currently loaded models.
+            var hData = Manager.Config.HData;
+            hData.Cloth = NextBool();
+            hData.Accessory = NextBool();
+            hData.Shoes = NextBool();
+            hData.SecondCloth = NextBool();
+            hData.SecondAccessory = NextBool();
+            hData.SecondShoes = NextBool();
+            changedSlots += RandomizeClothes(males);
+
+            var clothUi = FindObjectOfType<HSceneSpriteClothCondition>();
+            clothUi?.SetClothCharacter(init: true);
+            _initialClothesRandomized = true;
+            Logger.LogInfo($"Randomized opening clothes: slots={changedSlots}, male1Cloth={hData.Cloth}, male2Cloth={hData.SecondCloth}");
+            return true;
+        }
+
+        private static bool PrimaryCharacterReady(ChaControl[] characters)
+        {
+            return characters != null && characters.Length > 0 &&
+                   characters[0] != null && characters[0].loadEnd && characters[0].objBodyBone != null;
+        }
+
+        private int RandomizeClothes(IEnumerable<ChaControl> characters)
+        {
+            int changed = 0;
+            foreach (ChaControl cha in characters)
+            {
+                if (cha == null || !cha.loadEnd || cha.objBodyBone == null)
+                    continue;
+
+                var slots = Enumerable.Range(0, 8)
+                    .Where(cha.IsClothesStateKind)
+                    .OrderBy(_ => _random.Next())
+                    .ToArray();
+                foreach (int slot in slots)
+                {
+                    cha.SetClothesState(slot, (byte)_random.Next(3));
+                    changed++;
+                }
+            }
+            return changed;
+        }
+
+        private bool NextBool()
+        {
+            return _random.Next(2) == 0;
         }
 
         private void TryEnableOrbitAssist()
@@ -292,7 +378,7 @@ namespace HS2DirectHLauncher
             else if (string.Equals(males[0], males[1], StringComparison.OrdinalIgnoreCase))
                 Logger.LogWarning("Only one male card found; loading it into both male slots.");
 
-            int mapId = _mapId.Value;
+            int mapId = PickOpeningMap();
             game.eventNo = -1;
             game.peepKind = -1;
             game.isConciergeAngry = false;
@@ -319,6 +405,26 @@ namespace HS2DirectHLauncher
                 levelName = "HScene",
                 fadeType = FadeCanvas.Fade.None
             }, isLoadingImageDraw: false);
+        }
+
+        private int PickOpeningMap()
+        {
+            int fallback = _mapId.Value;
+            if (!_randomizeMap.Value || BaseMap.infoTable == null)
+                return fallback;
+
+            int[] candidates = BaseMap.infoTable.Values
+                .Where(map => map != null && map.No >= 0 && (map.Draw == 0 || map.Draw == 2))
+                .Select(map => map.No)
+                .Distinct()
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                Logger.LogWarning($"No H-compatible maps found; using fallback map {fallback}.");
+                return fallback;
+            }
+
+            return candidates[_random.Next(candidates.Length)];
         }
 
         private bool ValidateCardSex(string path, byte expectedSex)
