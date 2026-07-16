@@ -52,7 +52,7 @@
     </PropertyGroup>
     <!-- 避免 plugins 內同 GUID 多份 DLL 被 BepInEx 重複載入 -->
     <ItemGroup>
-      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName).dll" />
+      <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName).dll" Condition="Exists('$(HS2BepInEx)\plugins\$(AssemblyName).dll')" />
       <_HS2OldPluginDlls Include="$(HS2BepInEx)\plugins\$(AssemblyName)_*.dll" />
     </ItemGroup>
     <MakeDir Directories="$(_HS2DeployBackupDir)" Condition="'@(_HS2OldPluginDlls)' != ''" />
