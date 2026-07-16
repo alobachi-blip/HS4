@@ -1,5 +1,5 @@
-using System;
 using System.Collections;
+using System.Reflection;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
@@ -31,6 +31,11 @@ namespace HS2OrbitAndExciter
         /// <summary>§11：相機是否在轉。協助開時預設 true；停止環視鍵只關此旗標。</summary>
         private static bool _orbitCameraSpinning;
 
+        private static float _checkpointIdleTime;
+        private static MethodInfo? _getAutoAnimationMethod;
+        private static FieldInfo? _isAutoActionChangeField;
+        private static PropertyInfo? _isAutoActionChangeProp;
+        private static float _wheelBypassStartUnscaled = -1f;
         private static float _afterIdleAutoEscapeSinceUnscaled = -1f;
         private static float _idleAutoEscapeSinceUnscaled = -1f;
 
@@ -93,6 +98,7 @@ namespace HS2OrbitAndExciter
         {
             ResetNullSelectionTracking();
             _autoActionNullSelectionSinceUnscaled = Time.unscaledTime - AutoActionNullSelectionMinSeconds;
+            _checkpointIdleTime = 0f;
             ResetCheckpointInvokeCooldown();
 
             if (hScene?.ctrlFlag == null)
@@ -104,17 +110,7 @@ namespace HS2OrbitAndExciter
 
         private static void TryKickAutoActionAfterManualHotkey(HSceneFlagCtrl ctrlFlag)
         {
-            if (!CanAutoAdvance(ctrlFlag, out _))
-                return;
-            if (ctrlFlag.selectAnimationListInfo != null)
-                return;
-
-            ctrlFlag.isAutoActionChange = true;
-            try
-            {
-                Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            }
-            catch { /* ignore */ }
+            SuppressVanillaAutoAction(ctrlFlag);
         }
 
         internal static void NotifyUiHoverWhileOrbit()
@@ -154,11 +150,14 @@ namespace HS2OrbitAndExciter
         private static void BeginOrgasmAssistQuiet()
         {
             _orgasmAssistQuietUntilUnscaled = Time.unscaledTime + OrgasmAssistQuietSeconds;
+            _checkpointIdleTime = 0f;
         }
 
         internal static void NotifyOrbitToggled(bool active)
         {
             _orbitAssistActive = active;
+            _checkpointIdleTime = 0f;
+            _wheelBypassStartUnscaled = -1f;
             _afterIdleAutoEscapeSinceUnscaled = -1f;
             _idleAutoEscapeSinceUnscaled = -1f;
             _orgasmAssistQuietUntilUnscaled = -1f;
@@ -175,6 +174,8 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
+                OrbitFinishDirector.Reset();
+                OrbitSessionDirector.Reset();
                 OrbitFsmFlow.OnAssistStarted();
                 OrbitFaintnessAssist.ApplyOnAssistStart();
                 OrbitStatusHud.NotifyOrbitActivated();
@@ -190,6 +191,8 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
+                OrbitFinishDirector.Reset();
+                OrbitSessionDirector.Reset();
                 OrbitFaintnessAssist.RestoreOnAssistStop();
             }
         }
@@ -514,10 +517,18 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        /// <summary>Single path for auto-action assist. Does not clear initiative when gated off.</summary>
+        private static void SuppressVanillaAutoAction(HSceneFlagCtrl? ctrlFlag)
+        {
+            if (ctrlFlag == null)
+                return;
+            try { ctrlFlag.isAutoActionChange = false; } catch { /* ignore */ }
+        }
+
+        /// <summary>Legacy auto-action hook. Orbit flow disarms vanilla auto-pose changes and uses the pose pool instead.</summary>
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
             // §8 甲1：協助下不推 isAutoActionChange／initiative；換段只認選池
+            SuppressVanillaAutoAction(ctrlFlag);
             return false;
         }
 
@@ -717,8 +728,7 @@ namespace HS2OrbitAndExciter
                 ctrlFlag.speed = 1f;
                 ctrlFlag.nowOrgasm = false;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
-                ctrlFlag.isAutoActionChange = true;
-                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             try
@@ -752,6 +762,7 @@ namespace HS2OrbitAndExciter
                 ctrlFlag.speed = 1f;
                 ctrlFlag.nowOrgasm = false;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             // Match Sonyu AfterIdle escape: leave auto wait state so later sel can be consumed.
@@ -784,8 +795,7 @@ namespace HS2OrbitAndExciter
             {
                 ctrlFlag.speed = 1f;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
-                ctrlFlag.isAutoActionChange = true;
-                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             OrbitStateMachineLog.Event("idle", "force_cha_setPlay",
@@ -816,389 +826,6 @@ namespace HS2OrbitAndExciter
             {
                 return false;
             }
-        }
-
-        /// <summary>
-        /// Runtime: Orbit can fill gauges while LoopProc never advances W/S/M→O.
-        /// After ~1.5s still on W/S/M at threshold, force OLoop. Ignores vanilla pain gate.
-        /// Houshi uses feel_m; others use feel_f. Peeping (mode 5) excluded.
-        /// </summary>
-        private static float _wsToOStuckSinceUnscaled = -1f;
-
-        internal static void TickWsToOLoopRecovery(HScene? hScene)
-        {
-            if (hScene == null || !IsOrbitAssistActive())
-            {
-                _wsToOStuckSinceUnscaled = -1f;
-                return;
-            }
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null || ctrlFlag.nowOrgasm)
-            {
-                _wsToOStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (!OrbitHelpers.IsFirstFemaleInWsLoop(hScene))
-            {
-                _wsToOStuckSinceUnscaled = -1f;
-                return;
-            }
-
-            int mode = -1;
-            try { mode = Traverse.Create(hScene).Field("mode").GetValue<int>(); } catch { /* ignore */ }
-            if (mode == 5) // Peeping — appreciation route, do not force
-            {
-                _wsToOStuckSinceUnscaled = -1f;
-                return;
-            }
-
-            bool houshi = mode == 1;
-            // MultiPlay houshi submodes
-            if (mode == 7 || mode == 8)
-            {
-                int mc = -1;
-                try { mc = Traverse.Create(hScene).Field("modeCtrl").GetValue<int>(); } catch { /* ignore */ }
-                houshi = mc == 1 || mc == 2;
-            }
-            float gauge = houshi ? ctrlFlag.feel_m : ctrlFlag.feel_f;
-            if (gauge < 0.74f)
-            {
-                _wsToOStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (_wsToOStuckSinceUnscaled < 0f)
-                _wsToOStuckSinceUnscaled = Time.unscaledTime;
-            // Sticky: NowChangeAnim flicker must not wipe the arm timer.
-            if (hScene.NowChangeAnim)
-                return;
-            if (Time.unscaledTime - _wsToOStuckSinceUnscaled < 1.5f)
-                return;
-
-            bool useD = OrbitHelpers.IsFirstFemaleOnDMotion(hScene)
-                        || (ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2);
-            string anim = useD ? "D_OLoop" : "OLoop";
-            if (!TryForceFemaleAnim(hScene, anim))
-                return;
-
-            try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(2); } catch { /* ignore */ }
-            ctrlFlag.speed = 0f;
-            ctrlFlag.nowSpeedStateFast = false;
-            if (houshi)
-            {
-                if (ctrlFlag.feel_m < 0.75f) ctrlFlag.feel_m = 0.75f;
-            }
-            else if (ctrlFlag.feel_f < 0.75f)
-            {
-                ctrlFlag.feel_f = 0.75f;
-            }
-
-            OrbitStateMachineLog.Event("feel", "force_ws_to_oloop",
-                "{\"anim\":\"" + anim + "\",\"mode\":" + mode + "}");
-            _wsToOStuckSinceUnscaled = -1f;
-        }
-
-        /// <summary>
-        /// OLoop + full gauge but OLoopProc not running → force climax.
-        /// Runtime (79c2c8d9): arming logs showed armed==ut every sample → timer reset every frame
-        /// by brief !IsOLoop during animator transitions. Sticky leave + direct IsName + 0.6s force.
-        /// </summary>
-        private static float _oToOrgasmStuckSinceUnscaled = -1f;
-        private static float _oLoopLeftSinceUnscaled = -1f;
-        private const float OLoopForceSeconds = 0.6f;
-        private const float OLoopLeaveGraceSeconds = 0.45f;
-
-        internal static void TickOLoopToOrgasmRecovery(HScene? hScene)
-        {
-            if (hScene == null || !IsOrbitAssistActive())
-            {
-                _oToOrgasmStuckSinceUnscaled = -1f;
-                _oLoopLeftSinceUnscaled = -1f;
-                return;
-            }
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null || ctrlFlag.nowOrgasm)
-            {
-                _oToOrgasmStuckSinceUnscaled = -1f;
-                _oLoopLeftSinceUnscaled = -1f;
-                return;
-            }
-
-            int mode = -1;
-            int modeCtrl = -1;
-            try { mode = Traverse.Create(hScene).Field("mode").GetValue<int>(); } catch { /* ignore */ }
-            try { modeCtrl = Traverse.Create(hScene).Field("modeCtrl").GetValue<int>(); } catch { /* ignore */ }
-            if (mode == 5)
-            {
-                _oToOrgasmStuckSinceUnscaled = -1f;
-                _oLoopLeftSinceUnscaled = -1f;
-                return;
-            }
-
-            bool inO = OrbitHelpers.IsFirstFemaleInOLoop(hScene);
-            OrgasmForceKind kind = ClassifyOLoopOrgasm(mode, modeCtrl, ctrlFlag.feel_f, ctrlFlag.feel_m);
-
-            if (!inO)
-            {
-                // Sticky: single-frame animator miss must NOT wipe the arm timer.
-                if (_oToOrgasmStuckSinceUnscaled >= 0f)
-                {
-                    if (_oLoopLeftSinceUnscaled < 0f)
-                        _oLoopLeftSinceUnscaled = Time.unscaledTime;
-                    if (Time.unscaledTime - _oLoopLeftSinceUnscaled < OLoopLeaveGraceSeconds)
-                        return;
-                }
-                _oToOrgasmStuckSinceUnscaled = -1f;
-                _oLoopLeftSinceUnscaled = -1f;
-                return;
-            }
-            _oLoopLeftSinceUnscaled = -1f;
-
-            if (kind == OrgasmForceKind.None)
-            {
-                // Still on OLoop but gauge dipped — keep timer if already armed.
-                if (_oToOrgasmStuckSinceUnscaled < 0f)
-                    return;
-            }
-            else if (_oToOrgasmStuckSinceUnscaled < 0f)
-            {
-                _oToOrgasmStuckSinceUnscaled = Time.unscaledTime;
-            }
-
-            float armedFor = _oToOrgasmStuckSinceUnscaled < 0f
-                ? 0f
-                : Time.unscaledTime - _oToOrgasmStuckSinceUnscaled;
-
-            // Pose change in flight: after grace, cancel sel so climax can proceed.
-            if (hScene.NowChangeAnim || ctrlFlag.selectAnimationListInfo != null)
-            {
-                if (armedFor < 1.2f)
-                    return;
-                try { ctrlFlag.selectAnimationListInfo = null; } catch { /* ignore */ }
-                try
-                {
-                    var nca = Traverse.Create(hScene).Field("nowChangeAnim");
-                    if (nca.FieldExists()) nca.SetValue(false);
-                }
-                catch { /* ignore */ }
-            }
-
-            if (kind == OrgasmForceKind.None)
-                return;
-
-            if (armedFor < OLoopForceSeconds)
-                return;
-
-            bool useD = OrbitHelpers.IsFirstFemaleOnDMotion(hScene)
-                        || (ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2);
-            string anim = OrgasmAnimName(kind, useD);
-
-            if (!TryForceFemaleAnim(hScene, anim))
-                return;
-
-            try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(-1); } catch { /* ignore */ }
-            ctrlFlag.speed = 0f;
-            ctrlFlag.isGaugeHit = false;
-            try { ctrlFlag.isGaugeHit_M = false; } catch { /* ignore */ }
-            ctrlFlag.nowOrgasm = true;
-
-            bool maleClimax = kind == OrgasmForceKind.HoushiOut || kind == OrgasmForceKind.SonyuMaleOut;
-            if (maleClimax)
-            {
-                ctrlFlag.feel_m = 0f;
-                if (ctrlFlag.feel_f > 0.5f) ctrlFlag.feel_f = 0.5f;
-                try { ctrlFlag.numOutSide = Mathf.Clamp(ctrlFlag.numOutSide + 1, 0, 999999); } catch { /* ignore */ }
-            }
-            else
-            {
-                ctrlFlag.feel_f = 0f;
-                try { ctrlFlag.numOrgasm = Mathf.Clamp(ctrlFlag.numOrgasm + 1, 0, 10); } catch { /* ignore */ }
-                try { ctrlFlag.AddOrgasm(); } catch { /* ignore */ }
-            }
-
-            OrbitStateMachineLog.Event("feel", "force_oloop_to_orgasm",
-                "{\"anim\":\"" + anim + "\",\"mode\":" + mode + ",\"kind\":\"" + kind + "\"}");
-            _oToOrgasmStuckSinceUnscaled = -1f;
-            _oLoopLeftSinceUnscaled = -1f;
-        }
-
-        private enum OrgasmForceKind
-        {
-            None,
-            AibuOrgasm,      // Orgasm / D_Orgasm
-            HoushiOut,       // Orgasm_OUT
-            SonyuFemaleIn,   // OrgasmF_IN
-            SonyuMaleOut,    // OrgasmM_OUT (auto male finish when feel_m full)
-        }
-
-        /// <summary>
-        /// Pick climax kind from lstProc mode + MultiPlay modeCtrl + gauges.
-        /// Female gauge preferred when both full (matches vanilla F-first on Sonyu OLoop).
-        /// </summary>
-        private static OrgasmForceKind ClassifyOLoopOrgasm(int mode, int modeCtrl, float feelF, float feelM)
-        {
-            bool fFull = feelF >= 0.99f;
-            bool mFull = feelM >= 0.99f;
-            if (!fFull && !mFull)
-                return OrgasmForceKind.None;
-
-            // MultiPlay: modeCtrl 0=Aibu, 1|2=Houshi, 3|4=Sonyu
-            if (mode == 7 || mode == 8)
-            {
-                if (modeCtrl == 1 || modeCtrl == 2)
-                    return mFull ? OrgasmForceKind.HoushiOut : OrgasmForceKind.None;
-                if (modeCtrl == 0)
-                    return fFull ? OrgasmForceKind.AibuOrgasm : OrgasmForceKind.None;
-                // Sonyu-like
-                if (fFull) return OrgasmForceKind.SonyuFemaleIn;
-                if (mFull) return OrgasmForceKind.SonyuMaleOut;
-                return OrgasmForceKind.None;
-            }
-
-            switch (mode)
-            {
-                case 0: // Aibu
-                case 4: // Masturbation
-                case 6: // Les
-                case 3: // Spnking rarely on OLoop; still Orgasm
-                    return fFull ? OrgasmForceKind.AibuOrgasm : OrgasmForceKind.None;
-                case 1: // Houshi
-                    return mFull ? OrgasmForceKind.HoushiOut : OrgasmForceKind.None;
-                case 2: // Sonyu
-                    if (fFull) return OrgasmForceKind.SonyuFemaleIn;
-                    if (mFull) return OrgasmForceKind.SonyuMaleOut;
-                    return OrgasmForceKind.None;
-                default:
-                    if (fFull) return OrgasmForceKind.AibuOrgasm;
-                    if (mFull) return OrgasmForceKind.HoushiOut;
-                    return OrgasmForceKind.None;
-            }
-        }
-
-        private static string OrgasmAnimName(OrgasmForceKind kind, bool useD)
-        {
-            switch (kind)
-            {
-                case OrgasmForceKind.HoushiOut:
-                    return useD ? "D_Orgasm_OUT" : "Orgasm_OUT";
-                case OrgasmForceKind.SonyuFemaleIn:
-                    return useD ? "D_OrgasmF_IN" : "OrgasmF_IN";
-                case OrgasmForceKind.SonyuMaleOut:
-                    return useD ? "D_OrgasmM_OUT" : "OrgasmM_OUT";
-                default:
-                    return useD ? "D_Orgasm" : "Orgasm";
-            }
-        }
-
-        /// <summary>
-        /// Insert stuck with full feel (Proc never advances to WLoop) → force W/D_WLoop.
-        /// </summary>
-        private static float _insertStuckSinceUnscaled = -1f;
-
-        internal static void TickInsertToLoopRecovery(HScene? hScene)
-        {
-            if (hScene == null || !IsOrbitAssistActive())
-            {
-                _insertStuckSinceUnscaled = -1f;
-                return;
-            }
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null || ctrlFlag.nowOrgasm || hScene.NowChangeAnim)
-            {
-                _insertStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (!OrbitHelpers.IsFirstFemaleInInsert(hScene))
-            {
-                _insertStuckSinceUnscaled = -1f;
-                return;
-            }
-            int mode = -1;
-            try { mode = Traverse.Create(hScene).Field("mode").GetValue<int>(); } catch { /* ignore */ }
-            if (mode == 5)
-            {
-                _insertStuckSinceUnscaled = -1f;
-                return;
-            }
-            float gauge = Mathf.Max(ctrlFlag.feel_f, ctrlFlag.feel_m);
-            if (gauge < 0.74f)
-            {
-                _insertStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (_insertStuckSinceUnscaled < 0f)
-                _insertStuckSinceUnscaled = Time.unscaledTime;
-            if (Time.unscaledTime - _insertStuckSinceUnscaled < 0.6f)
-                return;
-
-            bool useD = OrbitHelpers.IsFirstFemaleOnDMotion(hScene)
-                        || (ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2);
-            string anim = useD ? "D_WLoop" : "WLoop";
-            if (!TryForceFemaleAnim(hScene, anim))
-                return;
-            try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
-            ctrlFlag.speed = 1f;
-            OrbitStateMachineLog.Event("feel", "force_insert_to_wloop",
-                "{\"anim\":\"" + anim + "\"}");
-            _insertStuckSinceUnscaled = -1f;
-        }
-
-        /// <summary>
-        /// Spnking (mode 3): no OLoop — orgasm from WIdle/SIdle when feel_f≥1.
-        /// </summary>
-        private static float _spankStuckSinceUnscaled = -1f;
-
-        internal static void TickSpankIdleToOrgasmRecovery(HScene? hScene)
-        {
-            if (hScene == null || !IsOrbitAssistActive())
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            var ctrlFlag = hScene.ctrlFlag;
-            if (ctrlFlag == null || ctrlFlag.nowOrgasm || hScene.NowChangeAnim)
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            int mode = -1;
-            try { mode = Traverse.Create(hScene).Field("mode").GetValue<int>(); } catch { /* ignore */ }
-            if (mode != 3)
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (!OrbitHelpers.TryGetFirstFemaleLayer0Name(hScene, out string? clip) || clip == null)
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (clip != "WIdle" && clip != "SIdle" && clip != "WAction" && clip != "SAction" && clip != "D_Action")
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (ctrlFlag.selectAnimationListInfo != null || ctrlFlag.feel_f < 0.99f)
-            {
-                _spankStuckSinceUnscaled = -1f;
-                return;
-            }
-            if (_spankStuckSinceUnscaled < 0f)
-                _spankStuckSinceUnscaled = Time.unscaledTime;
-            if (Time.unscaledTime - _spankStuckSinceUnscaled < 1.5f)
-                return;
-
-            bool useD = ctrlFlag.isFaintness && ctrlFlag.FaintnessType != 2;
-            string anim = useD ? "D_Orgasm" : "Orgasm";
-            if (!TryForceFemaleAnim(hScene, anim))
-                return;
-            ctrlFlag.speed = 0f;
-            ctrlFlag.nowOrgasm = true;
-            ctrlFlag.feel_f = 0f;
-            try { ctrlFlag.numOrgasm = Mathf.Clamp(ctrlFlag.numOrgasm + 1, 0, 10); } catch { /* ignore */ }
-            try { ctrlFlag.AddOrgasm(); } catch { /* ignore */ }
-            OrbitStateMachineLog.Event("feel", "force_spank_to_orgasm",
-                "{\"anim\":\"" + anim + "\"}");
-            _spankStuckSinceUnscaled = -1f;
         }
 
         /// <summary>

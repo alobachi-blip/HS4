@@ -70,7 +70,8 @@ namespace HS2OrbitAndExciter.Patches
         [HarmonyPrefix]
         static void Prefix(int _state, ref float _wheel, int _modeCtrl)
         {
-            OrbitBypassWheelState.TryBypass(ref _wheel);
+            if (!OrbitSessionDirector.TryInjectInsideAfterWheel(ref _wheel))
+                OrbitBypassWheelState.TryBypass(ref _wheel);
         }
     }
 

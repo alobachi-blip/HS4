@@ -52,65 +52,6 @@ namespace HS2OrbitAndExciter
         /// <summary>True when first female's animator layer 0 is in an action loop state (scene query only).</summary>
         public static bool IsFirstFemaleInActionLoop(HScene? hScene)
         {
-            return TryGetFirstFemaleLayer0Name(hScene, out _);
-        }
-
-        /// <summary>OLoop (pre-orgasm hold). Direct IsName — avoid HashSet miss during transitions.</summary>
-        public static bool IsFirstFemaleInOLoop(HScene? hScene)
-        {
-            if (hScene == null) return false;
-            var chaFemales = GetChaFemales(hScene);
-            if (chaFemales == null || chaFemales.Length == 0 || chaFemales[0] == null) return false;
-            var animBody = TryGetFemaleAnimBody(chaFemales[0]);
-            if (animBody == null) return false;
-            var st = animBody.GetCurrentAnimatorStateInfo(0);
-            return st.IsName("OLoop") || st.IsName("D_OLoop");
-        }
-
-        /// <summary>W/S/M loops. Direct IsName for stable recovery timers.</summary>
-        public static bool IsFirstFemaleInWsLoop(HScene? hScene)
-        {
-            if (hScene == null) return false;
-            var chaFemales = GetChaFemales(hScene);
-            if (chaFemales == null || chaFemales.Length == 0 || chaFemales[0] == null) return false;
-            var animBody = TryGetFemaleAnimBody(chaFemales[0]);
-            if (animBody == null) return false;
-            var st = animBody.GetCurrentAnimatorStateInfo(0);
-            return st.IsName("WLoop") || st.IsName("SLoop") || st.IsName("MLoop")
-                   || st.IsName("D_WLoop") || st.IsName("D_SLoop");
-        }
-
-        public static bool IsFirstFemaleInInsert(HScene? hScene)
-        {
-            if (hScene == null) return false;
-            var chaFemales = GetChaFemales(hScene);
-            if (chaFemales == null || chaFemales.Length == 0 || chaFemales[0] == null) return false;
-            var animBody = TryGetFemaleAnimBody(chaFemales[0]);
-            if (animBody == null) return false;
-            var st = animBody.GetCurrentAnimatorStateInfo(0);
-            return st.IsName("Insert") || st.IsName("D_Insert");
-        }
-
-        /// <summary>True when layer0 name starts with D_ (faint motion set).</summary>
-        public static bool IsFirstFemaleOnDMotion(HScene? hScene)
-        {
-            if (!TryGetFirstFemaleLayer0Name(hScene, out string? n) || n == null)
-            {
-                // Fallback: O/W D states via direct IsName
-                if (hScene == null) return false;
-                var chaFemales = GetChaFemales(hScene);
-                if (chaFemales == null || chaFemales.Length == 0 || chaFemales[0] == null) return false;
-                var animBody = TryGetFemaleAnimBody(chaFemales[0]);
-                if (animBody == null) return false;
-                var st = animBody.GetCurrentAnimatorStateInfo(0);
-                return st.IsName("D_OLoop") || st.IsName("D_WLoop") || st.IsName("D_SLoop") || st.IsName("D_Insert");
-            }
-            return n.StartsWith("D_", StringComparison.Ordinal);
-        }
-
-        public static bool TryGetFirstFemaleLayer0Name(HScene? hScene, out string? stateName)
-        {
-            stateName = null;
             if (hScene == null) return false;
             var chaFemales = GetChaFemales(hScene);
             if (chaFemales == null || chaFemales.Length == 0) return false;
@@ -122,10 +63,7 @@ namespace HS2OrbitAndExciter
             foreach (string name in ActionLoopStateNames)
             {
                 if (stateInfo.IsName(name))
-                {
-                    stateName = name;
                     return true;
-                }
             }
             return false;
         }

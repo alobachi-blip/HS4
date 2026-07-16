@@ -9,9 +9,8 @@ using UnityEngine.EventSystems;
 namespace HS2OrbitAndExciter
 {
     /// <summary>
-    /// Drives orbit camera in H scene: Ctrl+Shift+O. Character axes (torso / facing / lateral)
-    /// alternate each rotation with a random tilt; azimuth stays continuous across axis changes.
-    /// O pauses spin; Ctrl+Shift+O off restores user camera.
+    /// Drives orbit camera in H scene: Ctrl+Shift+O. Three spin axes (torso / world-up / body-lateral)
+    /// alternate each rotation; no zoom/pitch shake. O pauses spin; Ctrl+Shift+O off restores user camera.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public class OrbitController : MonoBehaviour
@@ -35,10 +34,6 @@ namespace HS2OrbitAndExciter
         /// <summary>本圈起始：相機相對當前繞軸的方位角（度）。</summary>
         private float _startRelativeAzimuth;
         private OrbitBodyAxis.OrbitAxisMode _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.Torso;
-        /// <summary>本圈實際旋轉軸（相對鎖定 basis 本地）；換圈重抽傾斜。</summary>
-        private Vector3 _spinAxisLocal = new Vector3(0f, 1f, 0f);
-        private float _spinTiltDegrees;
-        private bool _spinAxisLocalValid;
         private int _orbitPhase;
         private float _orbitAccumulatedDegrees;
         /// <summary>Completed single-direction 360° legs.</summary>
@@ -51,7 +46,6 @@ namespace HS2OrbitAndExciter
         private static OrbitController? _activeInstance;
 
         private static FieldInfo? _feelFField;
-        private static FieldInfo? _feelMField;
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
         private float _prepFrozenElapsed = -1f;
@@ -62,11 +56,9 @@ namespace HS2OrbitAndExciter
 
         /// <summary>§11 1A：上一有效骨焦點（世界座標），失敗時回退。</summary>
         private Vector3? _lastValidFocusWorld;
-        /// <summary>提前算好的下一圈：主軸＋傾斜軸本地分量。</summary>
+        /// <summary>提前算好的下一圈：軸模式＋起始方位角。</summary>
         private OrbitBodyAxis.OrbitAxisMode? _plannedAxisMode;
-        private Vector3 _plannedSpinAxisLocal;
-        private float _plannedTiltDegrees;
-        private bool _plannedSpinValid;
+        private float? _plannedStartAzimuth;
         private Vector3 _plannedAxisSnapshot;
         /// <summary>本圈距離倍率（相對焦點距離設定；1＝不 zoom）。</summary>
         private float _circleZoomMult = 1f;
@@ -98,6 +90,29 @@ namespace HS2OrbitAndExciter
 
         /// <summary>Whether orbit is currently active (for Harmony patches). Authoritative state is <see cref="OrbitBehaviorHub.IsOrbitAssistActive"/>.</summary>
         public static bool IsOrbitActive() => OrbitBehaviorHub.IsOrbitAssistActive();
+
+        internal static bool SetOrbitAssistActive(bool active, string reason)
+        {
+            if (OrbitBehaviorHub.IsOrbitAssistActive() == active)
+            {
+                OrbitStateMachineLog.Event("orbit", active ? "enable_already" : "disable_already",
+                    "{\"reason\":\"" + EscForJson(reason) + "\"}");
+                return true;
+            }
+
+            OrbitBehaviorHub.NotifyOrbitToggled(active);
+            if (_activeInstance == null)
+            {
+                OrbitStateMachineLog.Event("orbit", active ? "enable_no_controller" : "disable_no_controller",
+                    "{\"reason\":\"" + EscForJson(reason) + "\"}");
+                return false;
+            }
+
+            _activeInstance.OnOrbitToggled(active);
+            OrbitStateMachineLog.Event("orbit", active ? "enable" : "disable",
+                "{\"reason\":\"" + EscForJson(reason) + "\"}");
+            return true;
+        }
 
         private void OnEnable() => _activeInstance = this;
 
@@ -153,18 +168,13 @@ namespace HS2OrbitAndExciter
             return stateInfo.IsName("Idle") || stateInfo.IsName("D_Idle");
         }
 
-        /// <summary>
-        /// When orbit is active and in action loop: add feel_f and feel_m (Houshi needs feel_m for W→O / orgasm).
-        /// Cap both at 0.74 on W/S so vanilla LoopProc can still take the ≥0.75→OLoop branch when Proc runs.
-        /// </summary>
+        /// <summary>When orbit is active and in action loop only: add to excitement gauge and to speed so W/S/O segments advance without wheel.</summary>
         private void AccumulateFeelWhenOrbit(HScene hScene)
         {
             if (!OrbitBehaviorHub.CanAccumulateFeelDuringOrbit(hScene, _waitingForPrepStart)) return;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return;
             float addPerSec = GetOrbitFeelAddPerSecond();
-            bool ws = OrbitHelpers.IsFirstFemaleInWsLoop(hScene);
-            float cap = ws ? 0.74f : 1f;
             if (addPerSec > 0f)
             {
                 if (_feelFField == null)
@@ -173,19 +183,9 @@ namespace HS2OrbitAndExciter
                     if (_feelFField == null) return;
                 }
                 float current = (float)(_feelFField.GetValue(ctrlFlag) ?? 0f);
-                float next = Mathf.Min(cap, Mathf.Clamp01(current + addPerSec * Time.deltaTime));
+                float next = Mathf.Clamp01(current + addPerSec * Time.deltaTime);
                 if (next > current)
                     _feelFField.SetValue(ctrlFlag, next);
-
-                if (_feelMField == null)
-                    _feelMField = ctrlFlag.GetType().GetField("feel_m", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_feelMField != null)
-                {
-                    float curM = (float)(_feelMField.GetValue(ctrlFlag) ?? 0f);
-                    float nextM = Mathf.Min(cap, Mathf.Clamp01(curM + addPerSec * Time.deltaTime));
-                    if (nextM > curM)
-                        _feelMField.SetValue(ctrlFlag, nextM);
-                }
             }
             var speedField = Traverse.Create(ctrlFlag).Field("speed");
             if (speedField.FieldExists())
@@ -210,15 +210,13 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.TickStuckRecovery(hProbe);
                 OrbitVoiceTour.Tick(hProbe);
                 OrbitFsmFlow.Tick(hProbe);
+                OrbitFinishDirector.Tick(hProbe);
                 OrbitStateMachineLog.Tick(hProbe);
             }
             else
             {
                 if (_manualDirectorHSceneId != -1)
-                {
-                    OrbitOrgasmBustGrowth.OnHSceneExiting(null);
                     OrbitVoiceTour.OnHSceneExited();
-                }
                 _manualDirectorHSceneId = -1;
                 OrbitPoseDirector.Reset();
             }
@@ -229,7 +227,11 @@ namespace HS2OrbitAndExciter
                 if (overUi)
                     OrbitBehaviorHub.NotifyManualUiClick();
             }
-            // 游標停在 UI 上不再延長 suppress（會擋自動推進）；環視停轉見 ShouldPauseOrbitCameraForUi
+            else if (OrbitBehaviorHub.IsOrbitAssistActive() && EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                // Keep suppress window alive while cursor stays on UI, so auto-action can't race hover->click.
+                OrbitBehaviorHub.NotifyUiHoverWhileOrbit();
+            }
             bool mod2 = Input.GetKey(Modifier2);
             bool mod = Input.GetKey(Modifier);
             bool oDown = Input.GetKeyDown(OrbitHotkey);
@@ -239,8 +241,7 @@ namespace HS2OrbitAndExciter
                     return;
                 _lastHotkeyTime = Time.unscaledTime;
                 bool active = !OrbitBehaviorHub.IsOrbitAssistActive();
-                OrbitBehaviorHub.NotifyOrbitToggled(active);
-                OnOrbitToggled(active);
+                SetOrbitAssistActive(active, "hotkey");
             }
 
             TryManualHotkeys(hProbe);
@@ -415,11 +416,9 @@ namespace HS2OrbitAndExciter
                 }
             }
 
+            // Excitement gauge auto-accumulates while orbit is active (skipped during prep countdown)
             AccumulateFeelWhenOrbit(hScene);
-            OrbitBehaviorHub.TickWsToOLoopRecovery(hScene);
-            OrbitBehaviorHub.TickOLoopToOrgasmRecovery(hScene);
-            OrbitBehaviorHub.TickInsertToLoopRecovery(hScene);
-            OrbitBehaviorHub.TickSpankIdleToOrgasmRecovery(hScene);
+            OrbitSessionDirector.Tick(hScene);
 
             // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
@@ -486,16 +485,25 @@ namespace HS2OrbitAndExciter
                 }
 
                 // 空檔預算下一圈軸＋起始角（軸變則作廢）
-                MaybePrecomputeNextCircle(hScene);
-
-                ApplyBodyAxisCamera(hScene, ctrl);
+                if (OrbitPoseDirector.IsPoseChangeInFlight)
+                {
+                    ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
+                }
+                else
+                {
+                    MaybePrecomputeNextCircle(hScene);
+                    ApplyBodyAxisCamera(hScene, ctrl);
+                }
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
             else
             {
                 // 停轉：仍用鎖定骨焦點，保留看部位與距離（不改 Rot，避免搶手控）
-                ApplyBoneFocusOnly(hScene, ctrl);
+                if (OrbitPoseDirector.IsPoseChangeInFlight)
+                    ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
+                else
+                    ApplyBoneFocusOnly(hScene, ctrl);
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
@@ -512,7 +520,7 @@ namespace HS2OrbitAndExciter
                 _roundTripCount,
                 _currentViewOption,
                 _orbitAxisMode,
-                _spinTiltDegrees,
+                0f,
                 _circleZoomMult);
         }
 
@@ -544,70 +552,26 @@ namespace HS2OrbitAndExciter
 
             if (allowNewRelativeAngle)
             {
-                var cha = OrbitHelpers.GetChaFemales(hScene);
-                var basis = default(OrbitBodyAxis.Basis);
-                bool haveBasis = TryGetOrbitBasis(cha, BoneFocusIndex(), out basis);
-
-                Vector3 prevDir = Vector3.forward;
-                if (haveBasis)
+                if (_plannedAxisMode.HasValue && _plannedStartAzimuth.HasValue && IsPlannedAxisStillValid(hScene))
                 {
-                    Vector3 oldAxis = ResolveCurrentSpinAxis(basis);
-                    float curAz = NormalizeDeg(_startRelativeAzimuth + _orbitAccumulatedDegrees);
-                    prevDir = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, oldAxis, curAz);
-                }
-                else if (ctrl.thisCamera != null)
-                    prevDir = ctrl.thisCamera.transform.forward;
-                else
-                    prevDir = Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-
-                OrbitBodyAxis.OrbitAxisMode nextMode;
-                Vector3 nextLocal;
-                float nextTilt;
-                if (_plannedAxisMode.HasValue && _plannedSpinValid && IsPlannedAxisStillValid(hScene))
-                {
-                    nextMode = _plannedAxisMode.Value;
-                    nextLocal = _plannedSpinAxisLocal;
-                    nextTilt = _plannedTiltDegrees;
+                    _orbitAxisMode = _plannedAxisMode.Value;
+                    _startRelativeAzimuth = NormalizeDeg(_plannedStartAzimuth.Value);
                 }
                 else
                 {
-                    nextMode = OrbitBodyAxis.PickNextMode(_orbitAxisMode);
-                    if (haveBasis)
-                        BeginTiltedAxis(basis, nextMode, out nextLocal, out nextTilt);
-                    else
-                    {
-                        nextLocal = new Vector3(0f, 1f, 0f);
-                        nextTilt = 0f;
-                    }
+                    _orbitAxisMode = OrbitBodyAxis.PickNextMode(_orbitAxisMode);
+                    _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
                 }
-
-                _orbitAxisMode = nextMode;
-                _spinAxisLocal = nextLocal;
-                _spinTiltDegrees = nextTilt;
-                _spinAxisLocalValid = true;
                 _plannedAxisMode = null;
-                _plannedSpinValid = false;
-
-                // 連續方位角：對齊換軸前視線，不亂抽起始角、不 Invalidate 鎖定焦點
-                if (haveBasis)
-                {
-                    Vector3 newAxis = ResolveCurrentSpinAxis(basis);
-                    float matchAz = OrbitBodyAxis.AzimuthMatchingDirection(basis, newAxis, prevDir);
-                    _startRelativeAzimuth = NormalizeDeg(matchAz - _orbitAccumulatedDegrees);
-                }
-
-                OrbitStateMachineLog.Event(
-                    "環視",
-                    "換軸",
-                    "{\"axis\":\"" + OrbitBodyAxis.ModeLabel(_orbitAxisMode)
-                    + "\",\"tilt\":" + _spinTiltDegrees.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
-                    + "}");
+                _plannedStartAzimuth = null;
+                InvalidateLockedBasis("換軸");
+                OrbitStateMachineLog.Event("環視", "換軸", OrbitBodyAxis.ModeLabel(_orbitAxisMode));
             }
         }
 
         private void MaybePrecomputeNextCircle(HScene hScene)
         {
-            bool needAxis = !_plannedAxisMode.HasValue || !_plannedSpinValid;
+            bool needAxis = !_plannedAxisMode.HasValue || !_plannedStartAzimuth.HasValue;
             bool needZoom = HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true && !_plannedZoomMult.HasValue;
             if (!needAxis && !needZoom)
                 return;
@@ -624,12 +588,9 @@ namespace HS2OrbitAndExciter
             if (needAxis)
             {
                 var next = OrbitBodyAxis.PickNextMode(_orbitAxisMode);
-                BeginTiltedAxis(basis, next, out var local, out var tilt);
                 _plannedAxisMode = next;
-                _plannedSpinAxisLocal = local;
-                _plannedTiltDegrees = tilt;
-                _plannedSpinValid = true;
-                _plannedAxisSnapshot = OrbitBodyAxis.AxisFromBasisLocal(basis, local);
+                _plannedStartAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
+                _plannedAxisSnapshot = OrbitBodyAxis.SpinAxis(basis, next);
             }
             if (needZoom)
                 _plannedZoomMult = RollCircleZoomMult();
@@ -647,6 +608,7 @@ namespace HS2OrbitAndExciter
             }
             near = Mathf.Max(0f, near);
             far = Mathf.Max(near, far);
+            // 明顯拉近或拉遠（各半）；允許 <1 特寫與 >1 拉開
             float mid = Mathf.Lerp(near, far, 0.5f);
             return UnityEngine.Random.value < 0.5f
                 ? UnityEngine.Random.Range(near, Mathf.Lerp(near, mid, 0.7f))
@@ -655,40 +617,14 @@ namespace HS2OrbitAndExciter
 
         private bool IsPlannedAxisStillValid(HScene hScene)
         {
-            if (!_plannedAxisMode.HasValue || !_plannedSpinValid)
+            if (!_plannedAxisMode.HasValue)
                 return false;
             var cha = OrbitHelpers.GetChaFemales(hScene);
             var basis = OrbitBodyAxis.TryBuild(cha, BoneFocusIndex(), _lastValidFocusWorld);
             if (!basis.Valid)
                 return false;
-            Vector3 axis = OrbitBodyAxis.AxisFromBasisLocal(basis, _plannedSpinAxisLocal);
+            Vector3 axis = OrbitBodyAxis.SpinAxis(basis, _plannedAxisMode.Value);
             return Vector3.Dot(axis.normalized, _plannedAxisSnapshot.normalized) > 0.85f;
-        }
-
-        private void BeginTiltedAxis(
-            OrbitBodyAxis.Basis basis,
-            OrbitBodyAxis.OrbitAxisMode mode,
-            out Vector3 axisLocal,
-            out float tiltDegrees)
-        {
-            Vector3 nominal = OrbitBodyAxis.NominalSpinAxis(basis, mode);
-            Vector3 tilted = OrbitBodyAxis.RollTiltedSpinAxis(nominal, out tiltDegrees);
-            axisLocal = OrbitBodyAxis.AxisToBasisLocal(basis, tilted);
-        }
-
-        private Vector3 ResolveCurrentSpinAxis(OrbitBodyAxis.Basis basis)
-        {
-            if (_spinAxisLocalValid)
-                return OrbitBodyAxis.AxisFromBasisLocal(basis, _spinAxisLocal);
-            return OrbitBodyAxis.NominalSpinAxis(basis, _orbitAxisMode);
-        }
-
-        private void EnsureSpinAxisForBasis(OrbitBodyAxis.Basis basis)
-        {
-            if (_spinAxisLocalValid)
-                return;
-            BeginTiltedAxis(basis, _orbitAxisMode, out _spinAxisLocal, out _spinTiltDegrees);
-            _spinAxisLocalValid = true;
         }
 
         private int BoneFocusIndex()
@@ -712,14 +648,11 @@ namespace HS2OrbitAndExciter
             if (!TryGetOrbitBasis(chaFemales, focusIdx, out var basis))
                 return;
 
-            EnsureSpinAxisForBasis(basis);
-            Vector3 spinAxis = ResolveCurrentSpinAxis(basis);
-
             _lastValidFocusWorld = basis.FocusWorld;
             ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
 
             float azimuth = NormalizeDeg(_startRelativeAzimuth + _orbitAccumulatedDegrees);
-            Vector3 dirWorld = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, spinAxis, azimuth);
+            Vector3 dirWorld = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, _orbitAxisMode, azimuth);
             Vector3 floorSky = OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld);
             Vector3 upWorld = OrbitBodyAxis.CameraUp(basis, dirWorld, floorSky, ref _previousCameraUpWorld);
 
@@ -748,13 +681,27 @@ namespace HS2OrbitAndExciter
             SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
         }
 
+        /// <summary>During pose transitions, follow the live bone focus until the new pose is stable enough to lock.</summary>
+        private void ApplyLiveBoneFocusOnly(HScene hScene, CameraControl_Ver2 ctrl, string lockReason)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            if (chaFemales == null || ctrl.transBase == null)
+                return;
+            int focusIdx = BoneFocusIndex();
+            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            if (!basis.Valid)
+                return;
+
+            InvalidateLockedBasis(lockReason);
+            _lastValidFocusWorld = basis.FocusWorld;
+            ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
         /// <summary>鎖定基準：採樣時用骨焦點；之後只跟身體根節點剛體位移，不跟部位動畫。</summary>
-        private bool TryGetOrbitBasis(ChaControl[]? chaFemales, int focusIdx, out OrbitBodyAxis.Basis basis)
+        private bool TryGetOrbitBasis(ChaControl[] chaFemales, int focusIdx, out OrbitBodyAxis.Basis basis)
         {
             basis = default;
-            if (chaFemales == null || chaFemales.Length == 0)
-                return false;
-
             if (!_lockedBasisValid)
             {
                 var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
@@ -1086,8 +1033,6 @@ namespace HS2OrbitAndExciter
         /// <summary>每幀：鎖定焦點或身體根跳超過門檻立刻記 focus_jump。</summary>
         private void MaybeDetectFocusJump(HScene hScene, CameraControl_Ver2 ctrl)
         {
-            if (!OrbitStateMachineLog.Enabled)
-                return;
             if (!_lastValidFocusWorld.HasValue)
                 return;
 
@@ -1168,8 +1113,6 @@ namespace HS2OrbitAndExciter
         /// </summary>
         private void MaybeLogFramingDiag(HScene hScene, CameraControl_Ver2 ctrl)
         {
-            if (!OrbitStateMachineLog.Enabled)
-                return;
             float now = Time.unscaledTime;
             if (now < _nextFramingLogUnscaled)
                 return;
@@ -1210,7 +1153,6 @@ namespace HS2OrbitAndExciter
                     "{"
                     + "\"t\":" + now.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
                     + ",\"axis\":\"" + OrbitBodyAxis.ModeLabel(_orbitAxisMode) + "\""
-                    + ",\"tilt\":" + _spinTiltDegrees.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
                     + ",\"phase\":" + _orbitPhase
                     + ",\"az\":" + (_startRelativeAzimuth + _orbitAccumulatedDegrees).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
                     + ",\"focusIdx\":" + focusIdx
@@ -1303,7 +1245,7 @@ namespace HS2OrbitAndExciter
         }
 
         /// <summary>§11 1A：骨焦點優先；失敗回退上一有效焦點。環視中不用姿預設相機。</summary>
-        private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl)
+        private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl, string lockReason = "apply_view")
         {
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             if (chaFemales == null || ctrl == null) return;
@@ -1319,9 +1261,13 @@ namespace HS2OrbitAndExciter
             var basis = OrbitBodyAxis.TryBuild(chaFemales, option, _lastValidFocusWorld);
             if (basis.Valid && ctrl.transBase != null)
             {
+                string effectiveLockReason = _pendingLockReason ?? lockReason;
+                InvalidateLockedBasis(effectiveLockReason);
                 _lastValidFocusWorld = basis.FocusWorld;
                 ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
                 SetDistanceForFocus(ctrl, chaFemales, option, _circleZoomMult);
+                if (TryLockBasis(chaFemales, option, basis, _pendingLockReason ?? effectiveLockReason))
+                    _pendingLockReason = null;
                 return;
             }
 
@@ -1384,8 +1330,11 @@ namespace HS2OrbitAndExciter
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
             _currentViewOption = maxFocus > 1 ? 1 : 0;
+            ApplyCurrentViewOption(hScene, ctrl, "borrowed_camera");
             _startRelativeAzimuth = NormalizeDeg(ctrl.CameraAngle.y);
             _orbitAccumulatedDegrees = 0f;
+            _framingHavePrev = false;
+            _previousCameraUpWorld = null;
         }
 
         /// <summary>Rebind camera after pose transition completes (called by <see cref="OrbitPoseDirector"/>).</summary>
@@ -1395,21 +1344,13 @@ namespace HS2OrbitAndExciter
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
             if (_currentViewOption >= maxFocus)
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
-            ApplyCurrentViewOption(hScene, ctrl);
+            InvalidateLockedBasis("pose_rebind");
+            ApplyCurrentViewOption(hScene, ctrl, "pose_rebind");
+            _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
             _plannedAxisMode = null;
-            _plannedSpinValid = false;
-            _spinAxisLocalValid = false;
-            if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
-            {
-                BeginTiltedAxis(basis, _orbitAxisMode, out _spinAxisLocal, out _spinTiltDegrees);
-                _spinAxisLocalValid = true;
-                Vector3 camFwd = ctrl.thisCamera != null
-                    ? ctrl.thisCamera.transform.forward
-                    : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-                _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(
-                    basis, ResolveCurrentSpinAxis(basis), camFwd);
-                _orbitAccumulatedDegrees = 0f;
-            }
+            _plannedStartAzimuth = null;
+            _framingHavePrev = false;
+            _previousCameraUpWorld = null;
             _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
         }
 
@@ -1432,40 +1373,25 @@ namespace HS2OrbitAndExciter
                 try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
                 OrbitMapVanishAssist.EnsureInjected(hScene);
                 _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.Torso;
+                _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
                 _rotationCount = 0;
                 _roundTripCount = 0;
                 _plannedAxisMode = null;
-                _plannedSpinValid = false;
+                _plannedStartAzimuth = null;
                 _circleZoomMult = 1f;
                 _plannedZoomMult = null;
                 _lastValidFocusWorld = null;
                 InvalidateLockedBasis("orbit_enable");
                 _framingHavePrev = false;
                 _previousCameraUpWorld = null;
-                _spinAxisLocalValid = false;
                 OrbitFloorNormal.ResetCache();
                 var chaFemales = OrbitHelpers.GetChaFemales(hScene);
                 _currentClothesSequenceIndex = OrbitHelpers.GetClothesSequenceIndexFromCurrent(chaFemales);
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
-
-                // 初始軸＋傾斜；方位角對齊目前相機朝向
-                if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
-                {
-                    BeginTiltedAxis(basis, _orbitAxisMode, out _spinAxisLocal, out _spinTiltDegrees);
-                    _spinAxisLocalValid = true;
-                    Vector3 camFwd = ctrl.thisCamera != null
-                        ? ctrl.thisCamera.transform.forward
-                        : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-                    Vector3 axis = ResolveCurrentSpinAxis(basis);
-                    _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(basis, axis, camFwd);
-                }
-                else
-                    _startRelativeAzimuth = 0f;
-
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
                 if (IsInPreparationState(hScene))
                 {
@@ -1474,9 +1400,7 @@ namespace HS2OrbitAndExciter
                 }
                 else
                     _waitingForPrepStart = false;
-                HS2OrbitAndExciter.Log?.LogInfo(
-                    "Orbit: 協助開啟（擋手控相機；繞軸=" + OrbitBodyAxis.ModeLabel(_orbitAxisMode)
-                    + " 傾斜=" + _spinTiltDegrees.ToString("F0") + "°）");
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 協助開啟（擋手控相機；繞軸=" + OrbitBodyAxis.ModeLabel(_orbitAxisMode) + "）");
             }
             else
             {
@@ -1492,6 +1416,12 @@ namespace HS2OrbitAndExciter
         }
 
         private static HScene? GetHScene() => TryGetHScene();
+
+        private static string EscForJson(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            return value!.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
 
         /// <summary>For <see cref="OrbitHSceneLateAssist"/> and patches.</summary>
         internal static HScene? TryGetHScene()
@@ -1513,11 +1443,6 @@ namespace HS2OrbitAndExciter
             OrbitBehaviorHub.TickMotionEscapeLatch(hScene);
             OrbitBehaviorHub.TickAfterIdleEscape(hScene);
             OrbitBehaviorHub.TickIdleEscape(hScene);
-            // Feel FSM recovery after H proc (Proc not running still needs force W→O→Orgasm).
-            OrbitBehaviorHub.TickWsToOLoopRecovery(hScene);
-            OrbitBehaviorHub.TickOLoopToOrgasmRecovery(hScene);
-            OrbitBehaviorHub.TickInsertToLoopRecovery(hScene);
-            OrbitBehaviorHub.TickSpankIdleToOrgasmRecovery(hScene);
             OrbitBehaviorHub.TryPushOrbitAutoActionAssist(hScene.ctrlFlag);
             OrbitBehaviorHub.TickOrbitCheckpointAssist(hScene, Time.deltaTime);
         }
