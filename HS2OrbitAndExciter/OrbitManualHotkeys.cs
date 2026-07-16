@@ -32,7 +32,8 @@ namespace HS2OrbitAndExciter
             + "  Shift+Q／W／E　第二女角焦點\n"
             + "\n"
             + "【流程】\n"
-            + "  G　換女角　 H　換套裝　 J　亂數穿著\n"
+            + "  G　換女角（中性）　 Shift+G　降權目前女角並換下一個\n"
+            + "  H　換套裝　 J　亂數穿著\n"
             + "  K　換鏡頭　 L　換姿勢　 N　往前推（開幹／加速／選池）\n"
             + "\n"
             + "【特效／肚子】\n"
@@ -43,10 +44,10 @@ namespace HS2OrbitAndExciter
 
         /// <summary>HUD 精簡熱鍵提醒。</summary>
         internal const string HudLegendCompact =
-            "G女角 H套裝 J穿著 K鏡頭 L姿勢 N推進 | O停轉 P面板 | T刺青 B胸";
+            "G女角 Shift+G降權 H套裝 J穿著 K鏡頭 L姿勢 N推進 | O停轉 P面板";
 
         internal const string HudLegend =
-            "G換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
+            "G中性換女角·Shift+G降權換女角·H換套裝·J亂數穿著·K換鏡頭·L換姿勢·N往前推·T刺青·Shift+T關刺青·B胸回復";
 
         internal const string PregnancyHudLegend =
             "Y肚子+·U肚子-·I清空·O停轉·P面板";

@@ -10,7 +10,6 @@ namespace HS2OrbitAndExciter
     /// <summary>G/H/J manual actions: swap female[0], random coordinate, random multi-slot wear.</summary>
     internal static class OrbitManualDirector
     {
-        private const float ShortLivedOnStageSeconds = 30f;
         private const float LongStayBonusSeconds = 60f;
         private const float DislikedCharaWeight = 0.15f;
         private const float PreferredCharaWeight = 2.5f;
@@ -18,13 +17,10 @@ namespace HS2OrbitAndExciter
 
         private static readonly HashSet<string> UsedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> UsedCoordinates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        /// <summary>Quick-swap strike 1: reduced weight for rest of session.</summary>
+        /// <summary>Manual Shift+G: reduced weight for rest of session.</summary>
         private static readonly HashSet<string> DislikedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Stayed on stage ≥60s before swap: boosted weight in G pool for rest of session.</summary>
         private static readonly HashSet<string> PreferredCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        /// <summary>Quick-swap strike 2+: excluded from G pool for rest of session.</summary>
-        private static readonly HashSet<string> ExcludedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, int> QuickSwapStrikes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         private static string? _activeCharaPath;
         private static float _activeCharaSinceUnscaled = -1f;
@@ -113,7 +109,7 @@ namespace HS2OrbitAndExciter
             return OrbitAssistReasons.None;
         }
 
-        internal static bool TrySwapFemale0(HScene hScene, OrbitController host)
+        internal static bool TrySwapFemale0(HScene hScene, OrbitController host, bool lowerCurrentWeight = false)
         {
             if (!CanAcceptHotkey(hScene))
                 return false;
@@ -127,6 +123,8 @@ namespace HS2OrbitAndExciter
             string? current = OrbitHelpers.GetUserDataFemaleCharaPath(cha);
             EnsureActiveCharaTracked(current);
             RewardIfLongStay(current);
+            if (lowerCurrentWeight)
+                LowerCurrentCharaWeight(current);
             int currentPersonality = cha.chaFile.parameter2.personality;
             string? next = OrbitShufflePool.Pick(
                 paths,
@@ -280,30 +278,17 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private static void PenalizeIfQuickSwapAway(string? oldPath)
+        private static void LowerCurrentCharaWeight(string? path)
         {
-            if (string.IsNullOrEmpty(oldPath))
+            if (string.IsNullOrEmpty(path))
                 return;
-            if (!string.Equals(oldPath, _activeCharaPath, StringComparison.OrdinalIgnoreCase))
-                return;
-            if (_activeCharaSinceUnscaled < 0f)
-                return;
-            if (Time.unscaledTime - _activeCharaSinceUnscaled >= ShortLivedOnStageSeconds)
-                return;
-
-            int strikes = QuickSwapStrikes.TryGetValue(oldPath!, out int n) ? n + 1 : 1;
-            QuickSwapStrikes[oldPath!] = strikes;
-            if (strikes >= 2)
-            {
-                ExcludedCharas.Add(oldPath!);
-                DislikedCharas.Remove(oldPath!);
-                PreferredCharas.Remove(oldPath!);
-                HS2OrbitAndExciter.Log?.LogInfo($"Orbit: G 排除 {System.IO.Path.GetFileName(oldPath)}（快換×{strikes}）");
-            }
+            PreferredCharas.Remove(path!);
+            if (DislikedCharas.Add(path!))
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: Shift+G 降權 {System.IO.Path.GetFileName(path)}（出現率×{DislikedCharaWeight:0.##}）");
             else
-            {
-                DislikedCharas.Add(oldPath!);
-            }
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: Shift+G 已降權 {System.IO.Path.GetFileName(path)}");
         }
 
         private static void RewardIfLongStay(string? path)
@@ -338,7 +323,6 @@ namespace HS2OrbitAndExciter
             int oldPersonality)
         {
             _busy = true;
-            PenalizeIfQuickSwapAway(oldPath);
 
             if (!cha.chaFile.LoadCharaFile(newPath, 1))
             {
@@ -449,15 +433,7 @@ namespace HS2OrbitAndExciter
         {
             if (_cachedCharas == null || _cachedCharas.Count == 0)
                 return EmptyPaths;
-            if (ExcludedCharas.Count == 0)
-                return _cachedCharas;
-            var list = new List<string>(_cachedCharas.Count);
-            foreach (string path in _cachedCharas)
-            {
-                if (!ExcludedCharas.Contains(path))
-                    list.Add(path);
-            }
-            return list;
+            return _cachedCharas;
         }
 
         private static IReadOnlyList<string> GetUserDataFemaleCoordinatePaths()
@@ -569,16 +545,14 @@ namespace HS2OrbitAndExciter
         {
             internal readonly int CharaPool;
             internal readonly int Disliked;
-            internal readonly int Excluded;
             internal readonly int Preferred;
             internal readonly float OnStageSeconds;
             internal readonly bool OnStageTracked;
 
-            internal ManualHudStats(int charaPool, int disliked, int excluded, int preferred, float onStageSeconds, bool onStageTracked)
+            internal ManualHudStats(int charaPool, int disliked, int preferred, float onStageSeconds, bool onStageTracked)
             {
                 CharaPool = charaPool;
                 Disliked = disliked;
-                Excluded = excluded;
                 Preferred = preferred;
                 OnStageSeconds = onStageSeconds;
                 OnStageTracked = onStageTracked;
@@ -590,20 +564,14 @@ namespace HS2OrbitAndExciter
         {
             int pool = 0;
             if (_cachedCharas != null)
-            {
-                foreach (string path in _cachedCharas)
-                {
-                    if (!ExcludedCharas.Contains(path))
-                        pool++;
-                }
-            }
+                pool = _cachedCharas.Count;
 
             float onStage = -1f;
             bool tracked = _activeCharaSinceUnscaled >= 0f && !string.IsNullOrEmpty(_activeCharaPath);
             if (tracked)
                 onStage = Time.unscaledTime - _activeCharaSinceUnscaled;
 
-            return new ManualHudStats(pool, DislikedCharas.Count, ExcludedCharas.Count, PreferredCharas.Count, onStage, tracked);
+            return new ManualHudStats(pool, DislikedCharas.Count, PreferredCharas.Count, onStage, tracked);
         }
     }
 }

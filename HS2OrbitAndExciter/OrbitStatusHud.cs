@@ -372,7 +372,7 @@ namespace HS2OrbitAndExciter
             if (s.CharaPool <= 0 && !s.OnStageTracked)
                 return "";
             string line = $"女角池 {s.CharaPool}";
-            if (s.Excluded > 0) line += $"｜已排除 {s.Excluded}";
+            if (s.Disliked > 0) line += $"｜降權 {s.Disliked}";
             if (s.Preferred > 0) line += $"｜優先 {s.Preferred}";
             return line;
         }

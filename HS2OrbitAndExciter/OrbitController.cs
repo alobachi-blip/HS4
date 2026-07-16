@@ -258,7 +258,7 @@ namespace HS2OrbitAndExciter
             if (Time.unscaledTime - _lastHotkeyTime < HotkeyCooldownSeconds)
                 return;
 
-            // T / Shift+T before the bare-Shift gate used by G/H/J/…
+            // T / Shift+T and G / Shift+G before the bare-Shift gate used by H/J/…
             if (Input.GetKeyDown(OrbitManualHotkeys.TattooKey))
             {
                 bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
@@ -270,17 +270,18 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
-                return;
-
             if (Input.GetKeyDown(OrbitManualHotkeys.CharaKey))
             {
-                bool ok = OrbitManualDirector.TrySwapFemale0(hScene, this);
-                OrbitStateMachineLog.Hotkey("G", ok, ok ? "swap" : "reject");
+                bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                bool ok = OrbitManualDirector.TrySwapFemale0(hScene, this, lowerCurrentWeight: shift);
+                OrbitStateMachineLog.Hotkey(shift ? "Shift+G" : "G", ok, ok ? (shift ? "lower_swap" : "swap") : "reject");
                 if (ok)
                     _lastHotkeyTime = Time.unscaledTime;
                 return;
             }
+
+            if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                return;
             if (Input.GetKeyDown(OrbitManualHotkeys.CoordinateKey))
             {
                 bool ok = OrbitManualDirector.TrySwapCoordinate(hScene, this);
