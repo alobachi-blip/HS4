@@ -5,6 +5,11 @@ param(
     [string]$ValidationProfile = "Fast",
     [switch]$DirectH,
     [switch]$Coverage,
+    [switch]$FaintnessStress,
+    [ValidateRange(1, 100)]
+    [int]$FemaleOrgasmTarget = 10,
+    [ValidateRange(0.01, 20)]
+    [double]$FaintnessStressFeelPerSecond = 2.5,
     [switch]$NoDirectHOrbitAssist,
     [int]$DirectHMapId = 3,
     [int]$DirectHEventNo = -1,
@@ -73,6 +78,30 @@ $Key = $Value
         $text = $text.TrimEnd() + "`r`n`r`n[$Section]`r`n$desc$line`r`n"
     }
     Set-Content -LiteralPath $pluginCfg -Encoding UTF8 -Value $text
+}
+
+function Get-OrbitConfigValue {
+    param(
+        [string]$Section,
+        [string]$Key
+    )
+
+    if (!(Test-Path -LiteralPath $pluginCfg)) {
+        return $null
+    }
+    $text = Get-Content -LiteralPath $pluginCfg -Raw -Encoding UTF8
+    $escapedSection = [regex]::Escape($Section)
+    $escapedKey = [regex]::Escape($Key)
+    $sectionPattern = "(?ms)(^\[$escapedSection\]\s*(?:\r?\n))(?<body>.*?)(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($text, $sectionPattern)
+    if (!$sectionMatch.Success) {
+        return $null
+    }
+    $keyMatch = [regex]::Match($sectionMatch.Groups["body"].Value, "(?m)^$escapedKey\s*=\s*(?<value>.*)$")
+    if (!$keyMatch.Success) {
+        return $null
+    }
+    return $keyMatch.Groups["value"].Value.Trim()
 }
 
 function Set-OrbitTraceConfig {
@@ -144,6 +173,11 @@ Get-ChildItem -Path $logDir -File -Filter "debug-*.log" -ErrorAction SilentlyCon
     Remove-Item -Force -ErrorAction SilentlyContinue
 Set-OrbitTraceConfig -Enabled $true
 Set-OrbitDirectHConfig -Enabled ([bool]$DirectH)
+$originalFeelAddPerSecond = Get-OrbitConfigValue -Section "Exciter" -Key "FeelAddPerSecondWhenOrbit"
+if ($FaintnessStress) {
+    Set-OrbitConfigValue -Section "Exciter" -Key "FeelAddPerSecondWhenOrbit" -Value ([string]::Format([Globalization.CultureInfo]::InvariantCulture, "{0}", $FaintnessStressFeelPerSecond))
+    Write-Host "Faintness stress: target=$FemaleOrgasmTarget female orgasms, feel/s=$FaintnessStressFeelPerSecond"
+}
 
 $proc = $null
 try {
@@ -173,12 +207,25 @@ finally {
     }
     Set-OrbitTraceConfig -Enabled $false
     Set-OrbitDirectHConfig -Enabled $false
+    if ($FaintnessStress) {
+        $restoreFeel = if ($null -ne $originalFeelAddPerSecond) { $originalFeelAddPerSecond } else { "0.1" }
+        Set-OrbitConfigValue -Section "Exciter" -Key "FeelAddPerSecondWhenOrbit" -Value $restoreFeel
+    }
 }
 
 if (Test-Path -LiteralPath $tracePath) {
     $closureSeconds = if ($ValidationProfile -eq "Full") { 20 } else { 8 }
     $directHSeconds = if ($ValidationProfile -eq "Full") { 180 } else { 120 }
-    python (Join-Path $toolDir "_assert_fsm_regression.py") $tracePath --closure-seconds $closureSeconds --direct-h-seconds $directHSeconds
+    $assertArgs = @(
+        (Join-Path $toolDir "_assert_fsm_regression.py"),
+        $tracePath,
+        "--closure-seconds", $closureSeconds,
+        "--direct-h-seconds", $directHSeconds
+    )
+    if ($FaintnessStress) {
+        $assertArgs += @("--female-orgasm-target", $FemaleOrgasmTarget)
+    }
+    & python @assertArgs
     $assertExit = $LASTEXITCODE
     python (Join-Path $toolDir "orbit_trace_report.py") $tracePath $reportPath
     $reportExit = $LASTEXITCODE

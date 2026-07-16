@@ -80,6 +80,33 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertTrue(any(issue.code == "stale_selection_recovered" and issue.severity == "warning" for issue in issues))
         self.assertFalse([issue for issue in issues if issue.severity == "error"])
 
+    def test_faintness_stress_requires_target_and_post_faint_progress(self):
+        rows = [
+            row("female_orgasm", "add", ut=1.0),
+            row("female_orgasm", "add", ut=2.0),
+            row("faint", "enter", ut=3.0),
+            row("female_orgasm", "add", ut=4.0),
+        ]
+        issues = reg.analyze_rows(rows, female_orgasm_target=3)
+        self.assertFalse(any(issue.code.startswith("faint_stress_") for issue in issues))
+
+    def test_faintness_stress_flags_missing_post_faint_progress(self):
+        rows = [
+            row("female_orgasm", "add", ut=1.0),
+            row("female_orgasm", "add", ut=2.0),
+            row("female_orgasm", "add", ut=3.0),
+            row("faint", "enter", ut=4.0),
+        ]
+        issues = reg.analyze_rows(rows, female_orgasm_target=3)
+        self.assertTrue(any(issue.code == "faint_stress_no_post_faint_progress" for issue in issues))
+
+    def test_faintness_stress_flags_missing_entry(self):
+        issues = reg.analyze_rows(
+            [row("female_orgasm", "add", ut=1.0) for _ in range(10)],
+            female_orgasm_target=10,
+        )
+        self.assertTrue(any(issue.code == "faint_stress_not_entered" for issue in issues))
+
     def test_action_bridge_vanilla_auto_selection_is_error(self):
         rows = [
             row(
@@ -150,6 +177,8 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("OrbitPoseDirector.IsPoseChangeInFlight", source)
         self.assertIn('ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");', source)
         self.assertIn('InvalidateLockedBasis("pose_rebind");', source)
+        self.assertIn("live.FocusWorld,", source)
+        self.assertIn("The body root is stable across a pose change", source)
 
     def test_changing_focus_jump_must_stay_near_a_live_bone(self):
         rows = [
@@ -184,6 +213,42 @@ class TraceRegressionTests(unittest.TestCase):
         ]
         issues = reg.analyze_rows(rows)
         self.assertFalse(any(issue.code == "focus_jump_off_live_bone" for issue in issues))
+
+    def test_locked_focus_must_follow_the_selected_live_bone(self):
+        rows = [
+            row(
+                "framing",
+                "ok",
+                data={
+                    "locked": True,
+                    "focusIdx": 1,
+                    "focusW": [0, 8, 0],
+                    "liveHead": [0, 3, 0],
+                    "liveChest": [0, 1, 0],
+                    "livePelvis": [0, 0, 0],
+                },
+            )
+        ]
+        issues = reg.analyze_rows(rows)
+        self.assertTrue(any(issue.code == "locked_focus_off_selected_bone" for issue in issues))
+
+    def test_locked_focus_allows_the_selected_live_bone(self):
+        rows = [
+            row(
+                "framing",
+                "ok",
+                data={
+                    "locked": True,
+                    "focusIdx": 2,
+                    "focusW": [0, 0.1, 0],
+                    "liveHead": [0, 3, 0],
+                    "liveChest": [0, 1, 0],
+                    "livePelvis": [0, 0, 0],
+                },
+            )
+        ]
+        issues = reg.analyze_rows(rows)
+        self.assertFalse(any(issue.code == "locked_focus_off_selected_bone" for issue in issues))
 
     def test_finish_click_must_close(self):
         rows = [

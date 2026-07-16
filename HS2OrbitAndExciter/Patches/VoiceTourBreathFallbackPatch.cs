@@ -82,8 +82,15 @@ namespace HS2OrbitAndExciter.Patches
             }
 
             if (patternReplacements != 1 || voiceReplacements != 2)
-                throw new InvalidOperationException(
-                    $"Unexpected BreathProc dictionary layout: pattern={patternReplacements}, voice={voiceReplacements}");
+            {
+                // Do not make the whole patch class fail to apply when a game/mod build has a
+                // different BreathProc layout. Prefix + finalizer still keep the HScene update
+                // loop alive; on the normal HS2 layout the richer reuse path above is used.
+                HS2OrbitAndExciter.Log?.LogWarning(
+                    "Orbit: BreathProc dictionary layout changed; using finalizer fallback "
+                    + $"(pattern={patternReplacements}, voice={voiceReplacements}).");
+                return codes;
+            }
             return codes;
         }
 

@@ -213,16 +213,77 @@ def _changing_focus_jump_off_live_bone(row: dict[str, Any]) -> tuple[bool, float
     return (nearest > 2.0, nearest)
 
 
+def _locked_focus_off_selected_bone(row: dict[str, Any]) -> tuple[bool, float]:
+    """Detect a stale post-rebind focus even when no root jump occurs.
+
+    The camera can remain in view while following a focus point cached from the
+    outgoing pose.  A locked orbit must still use the current selected bone.
+    """
+    if _as_text(row.get("id")) != "framing":
+        return (False, 0.0)
+    data = _data(row)
+    if data.get("locked") is not True:
+        return (False, 0.0)
+    focus = _vector3(data.get("focusW"))
+    focus_idx = _as_int(data.get("focusIdx"))
+    bone_key = {0: "liveHead", 1: "liveChest", 2: "livePelvis"}.get(focus_idx % 3)
+    if focus is None or bone_key is None:
+        return (False, 0.0)
+    bone = _vector3(data.get(bone_key))
+    if bone is None:
+        return (False, 0.0)
+    distance = _distance3(focus, bone)
+    return (distance > 1.5, distance)
+
+
 def analyze_rows(
     rows: Iterable[dict[str, Any]],
     closure_seconds: float = 8.0,
     direct_h_seconds: float = 120.0,
+    female_orgasm_target: int = 0,
 ) -> list[TraceIssue]:
     materialized = list(rows)
     issues: list[TraceIssue] = []
 
     if not materialized:
         return [TraceIssue("empty_trace", "Trace has no parseable NDJSON rows.")]
+
+    if female_orgasm_target > 0:
+        female_orgasm_rows = [
+            index
+            for index, row in enumerate(materialized)
+            if _as_text(row.get("id")) == "female_orgasm"
+            and _as_text(row.get("msg")) == "add"
+        ]
+        faint_enter_rows = [
+            index
+            for index, row in enumerate(materialized)
+            if _as_text(row.get("id")) == "faint"
+            and _as_text(row.get("msg")) == "enter"
+        ]
+        if len(female_orgasm_rows) < female_orgasm_target:
+            issues.append(
+                TraceIssue(
+                    "faint_stress_insufficient_female_orgasms",
+                    "Faintness stress run recorded "
+                    f"{len(female_orgasm_rows)}/{female_orgasm_target} female orgasms.",
+                )
+            )
+        if not faint_enter_rows:
+            issues.append(
+                TraceIssue(
+                    "faint_stress_not_entered",
+                    "Faintness stress run never observed a native faintness enter event.",
+                )
+            )
+        elif not any(index > faint_enter_rows[0] for index in female_orgasm_rows):
+            issues.append(
+                TraceIssue(
+                    "faint_stress_no_post_faint_progress",
+                    "No female orgasm occurred after native faintness entered; the post-faint flow may be stuck.",
+                    faint_enter_rows[0],
+                )
+            )
 
     coverage_start_index: int | None = None
     coverage_expected: set[str] = set()
@@ -267,6 +328,17 @@ def analyze_rows(
                 TraceIssue(
                     "focus_jump_off_live_bone",
                     f"Changing focus jump was {nearest_live_bone:.1f}m from the nearest live head/chest/pelvis bone.",
+                    index,
+                )
+            )
+
+        locked_off_live_bone, locked_distance = _locked_focus_off_selected_bone(row)
+        if locked_off_live_bone:
+            issues.append(
+                TraceIssue(
+                    "locked_focus_off_selected_bone",
+                    "Locked orbit focus was "
+                    f"{locked_distance:.1f}m from its selected live bone after rebind.",
                     index,
                 )
             )
@@ -533,11 +605,22 @@ def main(argv: list[str] | None = None) -> int:
         default=120.0,
         help="Maximum allowed time from DirectH scene request to active H animation evidence.",
     )
+    parser.add_argument(
+        "--female-orgasm-target",
+        type=int,
+        default=0,
+        help="Require this many native female-orgasm callbacks plus post-faintness progression (0 disables the stress assertion).",
+    )
     parser.add_argument("--json", action="store_true", help="Print machine-readable issue list.")
     args = parser.parse_args(argv)
 
     rows = load_rows(args.trace)
-    issues = analyze_rows(rows, closure_seconds=args.closure_seconds, direct_h_seconds=args.direct_h_seconds)
+    issues = analyze_rows(
+        rows,
+        closure_seconds=args.closure_seconds,
+        direct_h_seconds=args.direct_h_seconds,
+        female_orgasm_target=max(0, args.female_orgasm_target),
+    )
     errors = [issue for issue in issues if issue.severity == "error"]
 
     if args.json:

@@ -740,9 +740,13 @@ namespace HS2OrbitAndExciter
         private bool TryGetOrbitBasis(ChaControl[] chaFemales, int focusIdx, out OrbitBodyAxis.Basis basis)
         {
             basis = default;
+            // The body root is stable across a pose change, but the selected head/chest/pelvis
+            // bone is not: animations can move it several metres after NowChangeAnim clears.
+            // Keep the locked axes for a smooth orbit, while always aiming at the live selected
+            // bone.  Using _lockedFocusLocal here leaves TargetPos at the outgoing pose.
+            var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
             if (!_lockedBasisValid)
             {
-                var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
                 if (!live.Valid)
                     return false;
                 if (!TryLockBasis(chaFemales, focusIdx, live, _pendingLockReason ?? "fresh"))
@@ -756,14 +760,34 @@ namespace HS2OrbitAndExciter
             if (!TryResolveLockedBasis(chaFemales, out basis))
             {
                 InvalidateLockedBasis("resolve_fail");
-                var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
                 if (!live.Valid)
                     return false;
-                if (TryLockBasis(chaFemales, focusIdx, live, "resolve_fail_relock"))
-                    return TryResolveLockedBasis(chaFemales, out basis);
+                if (TryLockBasis(chaFemales, focusIdx, live, "resolve_fail_relock")
+                    && TryResolveLockedBasis(chaFemales, out var relocked))
+                {
+                    basis = new OrbitBodyAxis.Basis(
+                        live.FocusWorld,
+                        relocked.TorsoUp,
+                        relocked.Facing,
+                        relocked.Right,
+                        true);
+                    return true;
+                }
                 basis = live;
                 return true;
             }
+
+            // A temporarily unavailable live bone is the only case where the last locked
+            // focus is preferable to no camera update at all.
+            if (!live.Valid)
+                return true;
+
+            basis = new OrbitBodyAxis.Basis(
+                live.FocusWorld,
+                basis.TorsoUp,
+                basis.Facing,
+                basis.Right,
+                true);
             return true;
         }
 
