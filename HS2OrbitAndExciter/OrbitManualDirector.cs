@@ -152,6 +152,7 @@ namespace HS2OrbitAndExciter
                 return false;
 
             EnsureFileCacheInitialized();
+            EnsureCoordinateNameIndexInitialized();
             var paths = GetUserDataFemaleCoordinatePaths();
             string? current = OrbitHelpers.GetCurrentCoordinatePath(cha, _coordNameToPath ?? new Dictionary<string, string>());
             string? next = OrbitShufflePool.Pick(paths, UsedCoordinates, current);
@@ -447,19 +448,23 @@ namespace HS2OrbitAndExciter
                 return;
             _cachedCharas = OrbitHelpers.ListUserDataPngFiles("chara/female/");
             _cachedCoords = OrbitHelpers.ListUserDataPngFiles("coordinate/female/");
-            _coordNameToPath = OrbitHelpers.BuildCoordinateNameIndex(_cachedCoords);
+            _coordNameToPath = null;
             _charaPersonalityByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             KnownCharaPaths.Clear();
             KnownCoordPaths.Clear();
             foreach (string p in _cachedCharas)
-            {
                 KnownCharaPaths.Add(p);
-                IndexCharaPersonality(p);
-            }
             foreach (string p in _cachedCoords)
                 KnownCoordPaths.Add(p);
             HS2OrbitAndExciter.Log?.LogInfo(
                 $"Orbit: 初掃女角 {_cachedCharas.Count}、coordinate {_cachedCoords.Count}");
+        }
+
+        private static void EnsureCoordinateNameIndexInitialized()
+        {
+            if (_coordNameToPath != null)
+                return;
+            _coordNameToPath = OrbitHelpers.BuildCoordinateNameIndex(_cachedCoords ?? new List<string>());
         }
 
         private static bool TryGetKnownCharaPersonality(string path, out int personality)
@@ -505,7 +510,7 @@ namespace HS2OrbitAndExciter
 
         private static void MergeNewUserDataFiles()
         {
-            if (_cachedCharas == null || _cachedCoords == null || _coordNameToPath == null)
+            if (_cachedCharas == null || _cachedCoords == null)
                 return;
 
             int newCharas = MergeNewPaths("chara/female/", _cachedCharas, KnownCharaPaths);
@@ -515,7 +520,8 @@ namespace HS2OrbitAndExciter
                 if (!KnownCoordPaths.Add(path))
                     continue;
                 _cachedCoords.Add(path);
-                OrbitHelpers.TryIndexCoordinatePath(path, _coordNameToPath);
+                if (_coordNameToPath != null)
+                    OrbitHelpers.TryIndexCoordinatePath(path, _coordNameToPath);
                 newCoords++;
             }
 
@@ -534,8 +540,6 @@ namespace HS2OrbitAndExciter
                 if (!known.Add(path))
                     continue;
                 cache.Add(path);
-                if (relativeDir.StartsWith("chara/female", StringComparison.OrdinalIgnoreCase))
-                    IndexCharaPersonality(path);
                 added++;
             }
             return added;
