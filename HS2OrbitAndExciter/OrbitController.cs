@@ -86,6 +86,17 @@ namespace HS2OrbitAndExciter
             return v;
         }
 
+        private static bool IsStoryboardSafeCameraEnabled() =>
+            HS2OrbitAndExciter.StoryboardPackageEnabled?.Value == true
+            && (HS2OrbitAndExciter.StoryboardSafeCameraEnabled?.Value ?? true);
+
+        private static float GetStoryboardSafeSpeedDegPerSec()
+        {
+            float shotSeconds = Mathf.Clamp(HS2OrbitAndExciter.StoryboardShotDurationSeconds?.Value ?? 4f, 3f, 6f);
+            float maxDegrees = Mathf.Clamp(HS2OrbitAndExciter.StoryboardMaxOrbitDegreesPerShot?.Value ?? 12f, 0f, 45f);
+            return maxDegrees <= 0f ? 0f : maxDegrees / shotSeconds;
+        }
+
         private const float OrbitSpeedAddPerSecond = 0.35f;
 
         /// <summary>Whether orbit is currently active (for Harmony patches). Authoritative state is <see cref="OrbitBehaviorHub.IsOrbitAssistActive"/>.</summary>
@@ -445,6 +456,9 @@ namespace HS2OrbitAndExciter
             float orbitTime = HS2OrbitAndExciter.OrbitTimePer360?.Value ?? 10f;
             if (orbitTime <= 0f) orbitTime = 10f;
             float speedDegPerSec = 360f / orbitTime;
+            bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+            if (storyboardSafeCamera)
+                speedDegPerSec = Mathf.Min(speedDegPerSec, GetStoryboardSafeSpeedDegPerSec());
             float dt = Time.deltaTime;
 
             bool spinning = OrbitBehaviorHub.IsOrbitCameraSpinning()
@@ -491,7 +505,8 @@ namespace HS2OrbitAndExciter
                 }
                 else
                 {
-                    MaybePrecomputeNextCircle(hScene);
+                    if (!storyboardSafeCamera)
+                        MaybePrecomputeNextCircle(hScene);
                     ApplyBodyAxisCamera(hScene, ctrl);
                 }
                 MaybeDetectFocusJump(hScene, ctrl);
@@ -519,9 +534,9 @@ namespace HS2OrbitAndExciter
                 _rotationCount,
                 _roundTripCount,
                 _currentViewOption,
-                _orbitAxisMode,
+                storyboardSafeCamera ? OrbitBodyAxis.OrbitAxisMode.WorldVertical : _orbitAxisMode,
                 0f,
-                _circleZoomMult);
+                storyboardSafeCamera ? 1f : _circleZoomMult);
         }
 
         private void OnRotationBoundary(
@@ -534,6 +549,15 @@ namespace HS2OrbitAndExciter
                 this, hScene, ctrl, _rotationCount, allowNewRelativeAngle, roundTripJustCompleted);
 
             // 每圈 zoom（可關；幅度由設定 Near／Far 決定）
+            if (IsStoryboardSafeCameraEnabled())
+            {
+                _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
+                _plannedAxisMode = null;
+                _plannedZoomMult = null;
+                _circleZoomMult = 1f;
+                return;
+            }
+
             if (HS2OrbitAndExciter.OrbitCircleZoomEnabled?.Value == true)
             {
                 if (_plannedZoomMult.HasValue)
@@ -648,12 +672,18 @@ namespace HS2OrbitAndExciter
             if (!TryGetOrbitBasis(chaFemales, focusIdx, out var basis))
                 return;
 
+            bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+            if (storyboardSafeCamera)
+                _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
             _lastValidFocusWorld = basis.FocusWorld;
             ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(basis.FocusWorld);
 
             float azimuth = NormalizeDeg(_startRelativeAzimuth + _orbitAccumulatedDegrees);
-            Vector3 dirWorld = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, _orbitAxisMode, azimuth);
             Vector3 floorSky = OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld);
+            Vector3 spinAxis = storyboardSafeCamera
+                ? floorSky
+                : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
+            Vector3 dirWorld = OrbitBodyAxis.DirectionFromAxisAzimuth(basis, spinAxis, azimuth);
             Vector3 upWorld = OrbitBodyAxis.CameraUp(basis, dirWorld, floorSky, ref _previousCameraUpWorld);
 
             Vector3 dirLocal = ctrl.transBase.InverseTransformDirection(dirWorld);
@@ -841,9 +871,11 @@ namespace HS2OrbitAndExciter
 
         private void RefreshHudSnapshot(HScene hScene, float orbitTimePer360, float speedDegPerSec)
         {
-            float tLeg = _orbitPhase == 0
-                ? (360f - _orbitAccumulatedDegrees) / speedDegPerSec
-                : _orbitAccumulatedDegrees / speedDegPerSec;
+            float tLeg = speedDegPerSec > 0.001f
+                ? (_orbitPhase == 0
+                    ? (360f - _orbitAccumulatedDegrees) / speedDegPerSec
+                    : _orbitAccumulatedDegrees / speedDegPerSec)
+                : 0f;
             float tCompleteRoundTrip = _orbitPhase == 0 ? tLeg + orbitTimePer360 : tLeg;
             float roundTripSec = 2f * orbitTimePer360;
 
@@ -1351,6 +1383,21 @@ namespace HS2OrbitAndExciter
             _plannedStartAzimuth = null;
             _framingHavePrev = false;
             _previousCameraUpWorld = null;
+            if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
+            {
+                bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+                if (storyboardSafeCamera)
+                    _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
+                Vector3 camFwd = ctrl.thisCamera != null
+                    ? ctrl.thisCamera.transform.forward
+                    : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
+                Vector3 axis = storyboardSafeCamera
+                    ? OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld)
+                    : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
+                _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(
+                    basis, axis, camFwd);
+                _orbitAccumulatedDegrees = 0f;
+            }
             _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
         }
 
@@ -1372,8 +1419,10 @@ namespace HS2OrbitAndExciter
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
                 try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
                 OrbitMapVanishAssist.EnsureInjected(hScene);
-                _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.Torso;
-                _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
+                bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+                _orbitAxisMode = storyboardSafeCamera
+                    ? OrbitBodyAxis.OrbitAxisMode.WorldVertical
+                    : OrbitBodyAxis.OrbitAxisMode.Torso;
                 _orbitPhase = 0;
                 _orbitAccumulatedDegrees = 0f;
                 _rotationCount = 0;
@@ -1392,6 +1441,19 @@ namespace HS2OrbitAndExciter
                 int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
+                // 初始軸＋傾斜；方位角對齊目前相機朝向
+                if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
+                {
+                    Vector3 camFwd = ctrl.thisCamera != null
+                        ? ctrl.thisCamera.transform.forward
+                        : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
+                    Vector3 axis = storyboardSafeCamera
+                        ? OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld)
+                        : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
+                    _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(basis, axis, camFwd);
+                }
+                else
+                    _startRelativeAzimuth = 0f;
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
                 if (IsInPreparationState(hScene))
                 {

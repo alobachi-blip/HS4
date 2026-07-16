@@ -156,6 +156,28 @@ namespace HS2OrbitAndExciter
                     HS2OrbitAndExciter.StoryboardCaptureEndFrame.Value,
                     " Capture end frame for each shot");
             }
+            if (HS2OrbitAndExciter.StoryboardSafeCameraEnabled != null)
+            {
+                HS2OrbitAndExciter.StoryboardSafeCameraEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.StoryboardSafeCameraEnabled.Value,
+                    " Safe camera: horizon-locked small world-vertical orbit");
+            }
+            DrawFloatControl(
+                "Max deg/shot",
+                "Storyboard safe camera cap; lower is more stable for I2V",
+                HS2OrbitAndExciter.StoryboardMaxOrbitDegreesPerShot,
+                0f, 45f, 1f, "F0", "deg");
+            if (HS2OrbitAndExciter.StoryboardRawSequenceEnabled != null)
+            {
+                HS2OrbitAndExciter.StoryboardRawSequenceEnabled.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.StoryboardRawSequenceEnabled.Value,
+                    " Capture raw PNG sequence to frames_raw/source_%04d.png");
+            }
+            DrawFloatControl(
+                "Raw sequence",
+                "Captured once per package session at Target FPS",
+                HS2OrbitAndExciter.StoryboardRawSequenceSeconds,
+                1f, 6f, 0.1f, "F1", "s");
             if (HS2OrbitAndExciter.StoryboardPackageOutputRoot != null)
             {
                 GUILayout.Label("Output root:", label);

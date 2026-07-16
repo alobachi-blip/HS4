@@ -171,6 +171,12 @@ namespace HS2OrbitAndExciter
         internal static Vector3 DirectionFromAxisAzimuth(Basis basis, OrbitAxisMode mode, float azimuthDegrees)
         {
             Vector3 axis = SpinAxis(basis, mode);
+            return DirectionFromAxisAzimuth(basis, axis, azimuthDegrees);
+        }
+
+        internal static Vector3 DirectionFromAxisAzimuth(Basis basis, Vector3 spinAxis, float azimuthDegrees)
+        {
+            Vector3 axis = spinAxis.sqrMagnitude > 1e-8f ? spinAxis.normalized : SpinAxis(basis, OrbitAxisMode.Torso);
             Vector3 radial0 = Vector3.ProjectOnPlane(-basis.Facing, axis);
             if (radial0.sqrMagnitude < 1e-4f)
                 radial0 = Vector3.ProjectOnPlane(basis.TorsoUp, axis);
@@ -180,6 +186,24 @@ namespace HS2OrbitAndExciter
                 radial0 = Vector3.forward;
             radial0.Normalize();
             return (Quaternion.AngleAxis(azimuthDegrees, axis) * radial0).normalized;
+        }
+
+        internal static float AzimuthMatchingDirection(Basis basis, Vector3 spinAxis, Vector3 desiredDir)
+        {
+            Vector3 axis = spinAxis.sqrMagnitude > 1e-8f ? spinAxis.normalized : SpinAxis(basis, OrbitAxisMode.Torso);
+            Vector3 radial0 = Vector3.ProjectOnPlane(-basis.Facing, axis);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.ProjectOnPlane(basis.TorsoUp, axis);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.Cross(axis, Vector3.right);
+            if (radial0.sqrMagnitude < 1e-4f)
+                radial0 = Vector3.forward;
+            radial0.Normalize();
+            Vector3 desired = Vector3.ProjectOnPlane(desiredDir, axis);
+            if (desired.sqrMagnitude < 1e-6f)
+                return 0f;
+            float angle = Vector3.SignedAngle(radial0, desired.normalized, axis);
+            return angle < 0f ? angle + 360f : angle;
         }
 
         /// <summary>

@@ -28,6 +28,8 @@ namespace HS2OrbitAndExciter
         private static int _writtenShots;
         private static int _hSceneId = -1;
         private static ActiveShot? _shot;
+        private static bool _rawSequenceStarted;
+        private static int _rawFramesWritten;
         private static float _lastWarnUnscaled = -999f;
 
         internal static string StatusText { get; private set; } = "Storyboard: idle";
@@ -122,12 +124,15 @@ namespace HS2OrbitAndExciter
             try
             {
                 Directory.CreateDirectory(Path.Combine(sessionDir, "frames"));
+                Directory.CreateDirectory(Path.Combine(sessionDir, "frames_raw"));
                 Directory.CreateDirectory(Path.Combine(sessionDir, "prompts"));
                 Directory.CreateDirectory(Path.Combine(sessionDir, "jobs"));
                 _sessionDir = sessionDir;
                 _storyboardPath = Path.Combine(sessionDir, "storyboard.ndjson");
                 _shotIndex = 0;
                 _writtenShots = 0;
+                _rawSequenceStarted = false;
+                _rawFramesWritten = 0;
                 _hSceneId = hScene.GetInstanceID();
                 _shot = null;
                 _sessionActive = true;
@@ -239,6 +244,7 @@ namespace HS2OrbitAndExciter
             };
             _shot = shot;
             QueueCapture(host, ctrl, shot.StartFrameRel);
+            TryStartRawSequence(host, ctrl);
             StatusText = "Storyboard: recording " + shot.ShotId + " -> " + _sessionDir;
         }
 
@@ -285,13 +291,15 @@ namespace HS2OrbitAndExciter
                     CompleteShot(host, hScene, ctrl, Time.unscaledTime);
             }
 
-            HS2OrbitAndExciter.Log?.LogInfo("[Storyboard] stopped (" + reason + "), shots=" + _writtenShots + ", dir=" + _sessionDir);
+            string rawSummary = _rawFramesWritten > 0 ? ", raw_frames=" + _rawFramesWritten : "";
+            HS2OrbitAndExciter.Log?.LogInfo("[Storyboard] stopped (" + reason + "), shots=" + _writtenShots + rawSummary + ", dir=" + _sessionDir);
             StatusText = _writtenShots > 0
-                ? "Storyboard: stopped, " + _writtenShots + " shot(s) -> " + _sessionDir
+                ? "Storyboard: stopped, " + _writtenShots + " shot(s)" + rawSummary + " -> " + _sessionDir
                 : "Storyboard: idle";
             _sessionActive = false;
             _shot = null;
             _hSceneId = -1;
+            _rawSequenceStarted = false;
         }
 
         private static void QueueCapture(MonoBehaviour host, CameraControl_Ver2 ctrl, string relPath)
@@ -307,11 +315,90 @@ namespace HS2OrbitAndExciter
             host.StartCoroutine(CaptureCameraPng(cam, RelToAbs(relPath), relPath));
         }
 
+        private static void TryStartRawSequence(MonoBehaviour host, CameraControl_Ver2 ctrl)
+        {
+            if (_rawSequenceStarted
+                || HS2OrbitAndExciter.StoryboardRawSequenceEnabled?.Value != true
+                || host == null
+                || ctrl == null
+                || string.IsNullOrEmpty(_sessionDir))
+                return;
+
+            Camera cam = ctrl.thisCamera != null ? ctrl.thisCamera : Camera.main;
+            if (cam == null)
+            {
+                WarnThrottled("[Storyboard] no camera for frames_raw");
+                return;
+            }
+
+            _rawSequenceStarted = true;
+            int fps = Mathf.Clamp(HS2OrbitAndExciter.StoryboardFps?.Value ?? 24, 12, 60);
+            float seconds = Mathf.Clamp(HS2OrbitAndExciter.StoryboardRawSequenceSeconds?.Value ?? 2f, 1f, 6f);
+            int frameCount = Mathf.Max(1, Mathf.RoundToInt(seconds * fps));
+            string sessionAtStart = _sessionDir;
+            string rawDir = RelToAbs("frames_raw");
+            host.StartCoroutine(CaptureRawSequence(cam, rawDir, sessionAtStart, fps, frameCount));
+        }
+
         private static IEnumerator CaptureCameraPng(Camera camera, string absPath, string relPath)
         {
             yield return new WaitForEndOfFrame();
             if (camera == null)
                 yield break;
+
+            CaptureCameraPngNow(camera, absPath, relPath);
+        }
+
+        private static IEnumerator CaptureRawSequence(Camera camera, string rawDir, string sessionAtStart, int fps, int frameCount)
+        {
+            float start = Time.unscaledTime;
+            int progressStep = Mathf.Max(1, fps / 2);
+            try
+            {
+                Directory.CreateDirectory(rawDir);
+            }
+            catch (Exception ex)
+            {
+                WarnThrottled("[Storyboard] failed to create frames_raw: " + ex.Message);
+                yield break;
+            }
+
+            for (int i = 1; i <= frameCount; i++)
+            {
+                if (!IsSameSession(sessionAtStart) || camera == null)
+                    yield break;
+
+                yield return new WaitForEndOfFrame();
+
+                if (!IsSameSession(sessionAtStart) || camera == null)
+                    yield break;
+
+                string fileName = "source_" + i.ToString("0000", CultureInfo.InvariantCulture) + ".png";
+                string relPath = "frames_raw/" + fileName;
+                string absPath = Path.Combine(rawDir, fileName);
+                if (CaptureCameraPngNow(camera, absPath, relPath))
+                {
+                    _rawFramesWritten = i;
+                    if (i == 1 || i == frameCount || i % progressStep == 0)
+                        StatusText = "Storyboard: raw frames " + i + "/" + frameCount + " -> " + _sessionDir;
+                }
+
+                float nextAt = start + (i / (float)fps);
+                while (Time.unscaledTime < nextAt)
+                {
+                    if (!IsSameSession(sessionAtStart))
+                        yield break;
+                    yield return null;
+                }
+            }
+
+            HS2OrbitAndExciter.Log?.LogInfo("[Storyboard] raw sequence captured " + _rawFramesWritten + " frame(s) -> " + Path.Combine(sessionAtStart, "frames_raw"));
+        }
+
+        private static bool CaptureCameraPngNow(Camera camera, string absPath, string relPath)
+        {
+            if (camera == null)
+                return false;
 
             RenderTexture? rt = null;
             RenderTexture? previousTarget = camera.targetTexture;
@@ -331,10 +418,12 @@ namespace HS2OrbitAndExciter
                 tex.ReadPixels(new Rect(0, 0, CaptureWidth, CaptureHeight), 0, 0);
                 tex.Apply(updateMipmaps: false);
                 File.WriteAllBytes(absPath, tex.EncodeToPNG());
+                return true;
             }
             catch (Exception ex)
             {
                 WarnThrottled("[Storyboard] capture failed for " + relPath + ": " + ex.Message);
+                return false;
             }
             finally
             {
@@ -346,6 +435,9 @@ namespace HS2OrbitAndExciter
                     RenderTexture.ReleaseTemporary(rt);
             }
         }
+
+        private static bool IsSameSession(string sessionAtStart) =>
+            _sessionActive && string.Equals(_sessionDir, sessionAtStart, StringComparison.OrdinalIgnoreCase);
 
         private static string BuildStoryboardLine(HScene hScene, ActiveShot shot, float duration, bool endFrame)
         {
@@ -462,6 +554,13 @@ namespace HS2OrbitAndExciter
         {
             if (!shot.SawCameraSpin)
                 return "Hold the current orbit framing with only subtle stabilization; no cut, no sudden zoom, no camera reset.";
+
+            if (shot.StartAxisMode == OrbitBodyAxis.OrbitAxisMode.WorldVertical)
+                return "Small horizon-locked world-vertical orbit around " + FocusLabel(shot.StartFocusIndex)
+                       + ", from " + shot.StartOrbitDegrees.ToString("0", CultureInfo.InvariantCulture)
+                       + " degrees to " + shot.EndOrbitDegrees.ToString("0", CultureInfo.InvariantCulture)
+                       + " degrees over " + duration.ToString("0.0", CultureInfo.InvariantCulture)
+                       + " seconds. Keep the room horizon upright, preserve the exact character silhouette, and avoid roll, flip, zoom jump, or reframing.";
 
             return "Smooth body-axis orbit around " + FocusLabel(shot.StartFocusIndex)
                    + ", axis " + shot.StartAxisMode

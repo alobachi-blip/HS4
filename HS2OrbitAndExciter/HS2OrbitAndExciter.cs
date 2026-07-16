@@ -121,6 +121,10 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? StoryboardCaptureEndFrame;
         internal static ConfigEntry<int>? StoryboardFps;
         internal static ConfigEntry<string>? StoryboardModelTarget;
+        internal static ConfigEntry<bool>? StoryboardSafeCameraEnabled;
+        internal static ConfigEntry<float>? StoryboardMaxOrbitDegreesPerShot;
+        internal static ConfigEntry<bool>? StoryboardRawSequenceEnabled;
+        internal static ConfigEntry<float>? StoryboardRawSequenceSeconds;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -251,7 +255,7 @@ namespace HS2OrbitAndExciter
             EnableDirectHSmokeOrbitAssist = Config.Bind("Smoke", "EnableDirectHSmokeOrbitAssist", false,
                 "Smoke test only: turn on Orbit assist after DirectH reaches an active H scene.");
             EnableSmokeKeyframeScreenshots = Config.Bind("Smoke", "EnableSmokeKeyframeScreenshots", false,
-                "Smoke test only: capture a keyframe screenshot when DirectH reaches an active H animation.");
+                "Smoke test only: capture keyframe screenshots during DirectH smoke runs.");
             SmokeKeyframeDirectory = Config.Bind("Smoke", "SmokeKeyframeDirectory", "",
                 "Directory for smoke keyframe screenshots. Empty uses BepInEx/LogOutput/OrbitSmokeKeyframes.");
             EnableSmokeFamilyCoverage = Config.Bind("Smoke", "EnableSmokeFamilyCoverage", false,
@@ -261,7 +265,7 @@ namespace HS2OrbitAndExciter
                 "Comma-separated family sequence used when EnableSmokeFamilyCoverage is true.");
             StoryboardPackageEnabled = Config.Bind("StoryboardPackage", "Enabled", false,
                 "When true, orbit records Storyboard Package v1 assets for local Wan2GP / ComfyUI / FramePack use.");
-            StoryboardPackageOutputRoot = Config.Bind("StoryboardPackage", "OutputRoot", "D:\\HS4\\Output\\StoryboardPackages",
+            StoryboardPackageOutputRoot = Config.Bind("StoryboardPackage", "OutputRoot", "D:\\HS4\\Output\\OrbitSourcePackages",
                 "Output root for Storyboard Package v1. Must stay outside the HS2 game/BepInEx folders.");
             StoryboardShotDurationSeconds = Config.Bind("StoryboardPackage", "ShotDurationSeconds", 4f,
                 new ConfigDescription("Seconds per generated shot. Runtime clamps to 3..6 seconds.", new AcceptableValueRange<float>(3f, 6f)));
@@ -271,6 +275,14 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("Target FPS written to metadata/job files.", new AcceptableValueRange<int>(12, 60)));
             StoryboardModelTarget = Config.Bind("StoryboardPackage", "ModelTarget", "Wan2GP/ComfyUI/FramePack",
                 "Metadata label for the intended local video generation target.");
+            StoryboardSafeCameraEnabled = Config.Bind("StoryboardPackage", "SafeCameraEnabled", true,
+                "When recording storyboard packages, use a horizon-locked world-vertical camera path instead of rolling around body axes.");
+            StoryboardMaxOrbitDegreesPerShot = Config.Bind("StoryboardPackage", "MaxOrbitDegreesPerShot", 12f,
+                new ConfigDescription("Storyboard safe camera cap: maximum camera orbit degrees per shot.", new AcceptableValueRange<float>(0f, 45f)));
+            StoryboardRawSequenceEnabled = Config.Bind("StoryboardPackage", "RawSequenceEnabled", true,
+                "When true, also captures a short in-game PNG sequence to frames_raw/source_%04d.png for EbSynth/deflicker tests.");
+            StoryboardRawSequenceSeconds = Config.Bind("StoryboardPackage", "RawSequenceSeconds", 2f,
+                new ConfigDescription("Seconds of raw PNG sequence capture per storyboard package session.", new AcceptableValueRange<float>(1f, 6f)));
             OrbitStateMachineLog.Boot();
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
