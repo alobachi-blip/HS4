@@ -14,9 +14,24 @@ namespace HS2OrbitAndExciter.Patches
         public static float DelaySecondsAtFull = 0f;
         private static float _becameFullTime = -1f;
         private static bool _consumed;
+        private static bool _forceNext;
+
+        public static void ForceNextOrgasmTrigger()
+        {
+            _forceNext = true;
+            _consumed = false;
+            _becameFullTime = -1f;
+        }
 
         public static bool ShouldTriggerOrgasmNow()
         {
+            if (_forceNext)
+            {
+                _forceNext = false;
+                _consumed = true;
+                _becameFullTime = -1f;
+                return true;
+            }
             if (Input.GetMouseButtonDown(0))
             {
                 if (_consumed) return false;
@@ -42,6 +57,7 @@ namespace HS2OrbitAndExciter.Patches
         {
             _becameFullTime = -1f;
             _consumed = false;
+            _forceNext = false;
         }
 
         /// <summary>

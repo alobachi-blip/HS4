@@ -110,17 +110,7 @@ namespace HS2OrbitAndExciter
 
         private static void TryKickAutoActionAfterManualHotkey(HSceneFlagCtrl ctrlFlag)
         {
-            if (!CanAutoAdvance(ctrlFlag, out _))
-                return;
-            if (ctrlFlag.selectAnimationListInfo != null)
-                return;
-
-            ctrlFlag.isAutoActionChange = true;
-            try
-            {
-                Traverse.Create(ctrlFlag).Field("initiative").SetValue(1);
-            }
-            catch { /* ignore */ }
+            SuppressVanillaAutoAction(ctrlFlag);
         }
 
         internal static void NotifyUiHoverWhileOrbit()
@@ -184,6 +174,8 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
+                OrbitFinishDirector.Reset();
+                OrbitSessionDirector.Reset();
                 OrbitFsmFlow.OnAssistStarted();
                 OrbitFaintnessAssist.ApplyOnAssistStart();
                 OrbitStatusHud.NotifyOrbitActivated();
@@ -199,6 +191,8 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.Reset();
                 OrbitManualDirector.Reset();
                 OrbitFsmFlow.Reset();
+                OrbitFinishDirector.Reset();
+                OrbitSessionDirector.Reset();
                 OrbitFaintnessAssist.RestoreOnAssistStop();
             }
         }
@@ -523,10 +517,18 @@ namespace HS2OrbitAndExciter
             return true;
         }
 
-        /// <summary>Single path for auto-action assist. Does not clear initiative when gated off.</summary>
+        private static void SuppressVanillaAutoAction(HSceneFlagCtrl? ctrlFlag)
+        {
+            if (ctrlFlag == null)
+                return;
+            try { ctrlFlag.isAutoActionChange = false; } catch { /* ignore */ }
+        }
+
+        /// <summary>Legacy auto-action hook. Orbit flow disarms vanilla auto-pose changes and uses the pose pool instead.</summary>
         internal static bool TryPushOrbitAutoActionAssist(HSceneFlagCtrl? ctrlFlag)
         {
             // §8 甲1：協助下不推 isAutoActionChange／initiative；換段只認選池
+            SuppressVanillaAutoAction(ctrlFlag);
             return false;
         }
 
@@ -726,8 +728,7 @@ namespace HS2OrbitAndExciter
                 ctrlFlag.speed = 1f;
                 ctrlFlag.nowOrgasm = false;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
-                ctrlFlag.isAutoActionChange = true;
-                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             try
@@ -761,6 +762,7 @@ namespace HS2OrbitAndExciter
                 ctrlFlag.speed = 1f;
                 ctrlFlag.nowOrgasm = false;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             // Match Sonyu AfterIdle escape: leave auto wait state so later sel can be consumed.
@@ -793,8 +795,7 @@ namespace HS2OrbitAndExciter
             {
                 ctrlFlag.speed = 1f;
                 try { Traverse.Create(ctrlFlag).Field("loopType").SetValue(0); } catch { /* ignore */ }
-                ctrlFlag.isAutoActionChange = true;
-                try { Traverse.Create(ctrlFlag).Field("initiative").SetValue(1); } catch { /* ignore */ }
+                SuppressVanillaAutoAction(ctrlFlag);
             }
 
             OrbitStateMachineLog.Event("idle", "force_cha_setPlay",

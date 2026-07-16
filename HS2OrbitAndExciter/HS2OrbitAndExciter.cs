@@ -21,6 +21,10 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? ClothesChangeEnabled;
         /// <summary>When orbit is on: enable game auto action (isAutoActionChange + initiative) so user rarely needs to operate.</summary>
         internal static ConfigEntry<bool>? OrbitAutoActionEnabled;
+        /// <summary>Use IsFinishVisible + ctrlFlag.click for B/C finish paths during Orbit assist.</summary>
+        internal static ConfigEntry<bool>? EnableOrbitFinishDirector;
+        /// <summary>Drive per-pose H-loop session script: W/S pacing and IN_A Pull.</summary>
+        internal static ConfigEntry<bool>? EnableOrbitSessionDirector;
         /// <summary>When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds (0 = use game auto only).</summary>
         internal static ConfigEntry<float>? OrbitCheckpointTimeoutSeconds;
         /// <summary>Minimum unscaled seconds between orbit assist pushes (flag write and checkpoint invoke).</summary>
@@ -41,6 +45,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrbitZoomFarMult;
         /// <summary>Override faintness state in H scene (HScene.ctrlFlag.isFaintness). When toggled, pose list and camera view update.</summary>
         internal static ConfigEntry<bool>? OverrideFaintness;
+        /// <summary>Relax safe pose gates while preserving actor/event/place/AppendEV hard limits.</summary>
+        internal static ConfigEntry<bool>? EnableSafePoseUnlock;
         /// <summary>When false, the compact orbit status HUD is disabled entirely.</summary>
         internal static ConfigEntry<bool>? OrbitStatusHudEnabled;
         /// <summary>When true, each female orgasm spawns a st_paint tattoo decal on a body attach point (thigh→face). Toggle with T in H.</summary>
@@ -103,8 +109,11 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<string>? DirectHSmokeFemaleCardPath;
         internal static ConfigEntry<string>? DirectHSmokeSecondFemaleCardPath;
         internal static ConfigEntry<string>? DirectHSmokeMaleCardPath;
+        internal static ConfigEntry<bool>? EnableDirectHSmokeOrbitAssist;
         internal static ConfigEntry<bool>? EnableSmokeKeyframeScreenshots;
         internal static ConfigEntry<string>? SmokeKeyframeDirectory;
+        internal static ConfigEntry<bool>? EnableSmokeFamilyCoverage;
+        internal static ConfigEntry<string>? SmokeFamilyCoverageSequence;
 
         private static void PatchSafe(Harmony harmony, System.Type patchType)
         {
@@ -132,6 +141,10 @@ namespace HS2OrbitAndExciter
                 "When orbit (Ctrl+Shift+O) is active, add this much to excitement gauge per second (0 = only game default / mouse). 0.1 = fill in 10 s.");
             OrbitAutoActionEnabled = Config.Bind("Orbit", "OrbitAutoActionEnabled", true,
                 "When orbit is on: enable game auto action so next pose/action is chosen automatically (user rarely needs to operate).");
+            EnableOrbitFinishDirector = Config.Bind("HLoop", "EnableOrbitFinishDirector", true,
+                "Slice 3: during Orbit assist, pick B/C finish paths with Orbit ledger and set ctrlFlag.click instead of setPlay.");
+            EnableOrbitSessionDirector = Config.Bind("HLoop", "EnableOrbitSessionDirector", true,
+                "Slice 4: during Orbit assist, drive W/S pacing and force Orgasm_IN_A down-wheel Pull -> Drop.");
             OrbitCheckpointTimeoutSeconds = Config.Bind("Orbit", "OrbitCheckpointTimeoutSeconds", 5f,
                 "When orbit is on and stuck at checkpoint (Idle, no selection): auto-advance after this many seconds. 0 = only use game auto, no forced advance.");
             AutoAssistMinIntervalSeconds = Config.Bind("Orbit", "AutoAssistMinIntervalSeconds", 2.5f,
@@ -152,6 +165,8 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("Per-circle zoom-out multiplier vs focus distance (larger = farther; if Near>Far they are swapped).", new AcceptableValueRange<float>(0f, 3f)));
             OverrideFaintness = Config.Bind("State", "OverrideFaintness", false,
                 "In H scene: force faintness state on/off (ctrlFlag.isFaintness). Affects pose list and triggers camera reapply when orbit is on.");
+            EnableSafePoseUnlock = Config.Bind("State", "EnableSafePoseUnlock", true,
+                "Slice 0: relax safe pose gates (state/achievement/pain/faintness) while preserving actor/event/place/AppendEV limits.");
             OrbitStatusHudEnabled = Config.Bind("Orbit", "OrbitStatusHudEnabled", true,
                 "Enable compact orbit status HUD (bottom-left, Traditional Chinese). Toggle with P or Ctrl+Shift+I while orbit is on.");
             OrgasmTattooEnabled = Config.Bind("Orbit", "OrgasmTattooEnabled", true,
@@ -226,10 +241,17 @@ namespace HS2OrbitAndExciter
                 "Optional second female card path for direct-H smoke.");
             DirectHSmokeMaleCardPath = Config.Bind("Smoke", "DirectHSmokeMaleCardPath", "",
                 "Optional male card path for direct-H smoke. Empty uses the saved player card when available.");
+            EnableDirectHSmokeOrbitAssist = Config.Bind("Smoke", "EnableDirectHSmokeOrbitAssist", false,
+                "Smoke test only: turn on Orbit assist after DirectH reaches an active H scene.");
             EnableSmokeKeyframeScreenshots = Config.Bind("Smoke", "EnableSmokeKeyframeScreenshots", false,
                 "Smoke test only: capture a keyframe screenshot when DirectH reaches an active H animation.");
             SmokeKeyframeDirectory = Config.Bind("Smoke", "SmokeKeyframeDirectory", "",
                 "Directory for smoke keyframe screenshots. Empty uses BepInEx/LogOutput/OrbitSmokeKeyframes.");
+            EnableSmokeFamilyCoverage = Config.Bind("Smoke", "EnableSmokeFamilyCoverage", false,
+                "Smoke test only: make Orbit pose selection cycle through configured H-loop families for coverage.");
+            SmokeFamilyCoverageSequence = Config.Bind("Smoke", "SmokeFamilyCoverageSequence",
+                "A_Aibu,B_Houshi,C_Sonyu,D_Masturbation,E_Spnking,A_Les",
+                "Comma-separated family sequence used when EnableSmokeFamilyCoverage is true.");
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
@@ -244,6 +266,7 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F1M2_OLoopAibuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_F1M2_OLoopSonyuProc));
             PatchSafe(harmony, typeof(Patches.ExciterTranspiler_Spnking_ActionProc));
+            PatchSafe(harmony, typeof(Patches.OrbitSpankingWheelPatch));
             PatchSafe(harmony, typeof(Patches.OrbitBypass_StartProcTrigger));
             PatchSafe(harmony, typeof(Patches.OrbitBypass_StartAibuProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass_StartHoushiProc));
@@ -269,6 +292,7 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitForceSonyuManualAfterIdlePatch));
             PatchSafe(harmony, typeof(Patches.OrbitForceF2M1AutoAfterIdlePatch));
             PatchSafe(harmony, typeof(Patches.OrbitForceF1M2AutoAfterIdlePatch));
+            PatchSafe(harmony, typeof(Patches.OrbitAutoPullPatch));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProcTrigger));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_StartProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Aibu_FaintnessStartProcTrigger));
@@ -278,6 +302,7 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_StartProc));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProcTrigger));
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProc));
+            PatchSafe(harmony, typeof(Patches.OrbitPoseUnlockPatches));
             PatchSafe(harmony, typeof(Patches.OrbitAutoActionAfterProcPatches));
             // Masturbation/Les/Sonyu/Aibu 不載入（此遊戲 build 無對應方法，避免警告）
             var go = new GameObject("HS2OrbitAndExciterController");

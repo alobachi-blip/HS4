@@ -4,6 +4,8 @@ param(
     [ValidateSet("Fast", "Full")]
     [string]$ValidationProfile = "Fast",
     [switch]$DirectH,
+    [switch]$Coverage,
+    [switch]$NoDirectHOrbitAssist,
     [int]$DirectHMapId = 3,
     [int]$DirectHEventNo = -1,
     [double]$DirectHDelaySeconds = 8,
@@ -95,8 +97,13 @@ function Set-OrbitDirectHConfig {
     Set-OrbitConfigValue -Section "Smoke" -Key "DirectHSmokeFemaleCardPath" -Value $DirectHFemaleCardPath
     Set-OrbitConfigValue -Section "Smoke" -Key "DirectHSmokeSecondFemaleCardPath" -Value $DirectHSecondFemaleCardPath
     Set-OrbitConfigValue -Section "Smoke" -Key "DirectHSmokeMaleCardPath" -Value $DirectHMaleCardPath
+    $orbitAssistValue = if ($Enabled -and !$NoDirectHOrbitAssist) { "true" } else { "false" }
+    Set-OrbitConfigValue -Section "Smoke" -Key "EnableDirectHSmokeOrbitAssist" -Value $orbitAssistValue
     Set-OrbitConfigValue -Section "Smoke" -Key "EnableSmokeKeyframeScreenshots" -Value $enabledValue
     Set-OrbitConfigValue -Section "Smoke" -Key "SmokeKeyframeDirectory" -Value $keyframeDir
+    $coverageValue = if ($Enabled -and $Coverage) { "true" } else { "false" }
+    Set-OrbitConfigValue -Section "Smoke" -Key "EnableSmokeFamilyCoverage" -Value $coverageValue
+    Set-OrbitConfigValue -Section "Smoke" -Key "SmokeFamilyCoverageSequence" -Value "A_Aibu,B_Houshi,C_Sonyu,D_Masturbation,E_Spnking,A_Les"
 }
 
 function Resolve-DefaultFemaleCardPath {
@@ -123,6 +130,9 @@ function Resolve-DefaultFemaleCardPath {
 
 if ($DirectH) {
     $DirectHFemaleCardPath = Resolve-DefaultFemaleCardPath
+    if ($Coverage -and [string]::IsNullOrWhiteSpace($DirectHSecondFemaleCardPath)) {
+        $DirectHSecondFemaleCardPath = $DirectHFemaleCardPath
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

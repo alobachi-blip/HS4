@@ -6,6 +6,19 @@
 
 ---
 
+## 最新實作檢查點
+
+Slice 0～4 已首輪落地到 `HS2OrbitAndExciter`：
+
+- Slice 0：`OrbitPoseUnlockPolicy` / `OrbitPoseUnlockPatches` 回補安全全姿態開放；`OrbitBhsCompat` 把 BHS installed/config/offset/solver/AutoFinish 狀態寫入 trace。
+- Slice 1：`session/start`、`session/state` passive trace 已有 `fsmCell`、`sessionFamily`、pose/clip/norm、feel/speed、finishVisible、posePool、poseUnlock、BHS 欄位。
+- Slice 2/3：`OrbitFinishPathLedger` + `OrbitFinishDirector` 以 `IsFinishVisible + ctrlFlag.click` 交給原版 Proc 消費，不走常規 `setPlay`。
+- Slice 4：`OrbitSessionDirector` 控 W/S 弱強節奏、IN_A Pull、Spnking wheel pulse；auto `Orgasm_IN_A` 透過 `HAutoCtrl.IsPull` override 進原版 Pull。
+
+驗證：`run_orbit_local_tests.ps1` 通過，17 個 Python regression 通過；`run_orbit_smoke.ps1 -DurationSeconds 150 -ValidationProfile Fast -DirectH` 通過，12 warnings / 0 errors。Slice 5 已完成首輪 audit：舊 OLoop／Spnking 直跳高潮 recovery 未在 C# 現碼找到，且有 analyzer / 靜態測試防回歸。
+
+---
+
 ## 0. 審查結論：這是不是最佳方向？
 
 **結論：是，目前最佳方向是「外層 Orbit 管策略，內層 H Proc 管出口」。**
@@ -96,9 +109,9 @@ BHS v2.6.5 的 AutoFinish 可作為 HS2 實用映射參考：
 | B 侍奉 | `drink` | `IsFinishVisible(1) && modeCtrl != 0 && !(!IsFinishVisible(4) && IsFinishVisible(1) && modeCtrl == 1)` | `FinishDrink` |
 | B | `vomit` | `IsFinishVisible(3)` | `FinishVomit` |
 | B | `outSide` | `IsFinishVisible(4) || (IsFinishVisible(1) && (modeCtrl == 0 || modeCtrl == 1))` | `FinishOutSide` |
-| C 插入 | `maleInside` | `IsFinishVisible(1)` | `FinishInSide` |
-| C | `same` | `IsFinishVisible(2)` | `FinishSame` |
-| C | `maleOutside` | `IsFinishVisible(5)` | `FinishOutSide` |
+| C 插入 | `maleInside` | `IsFinishVisible(1)` + `canInside` | `FinishInSide` |
+| C | `same` | `IsFinishVisible(2)` + 目前 clip 是 `OLoop/D_OLoop` | `FinishSame` |
+| C | `maleOutside` | `IsFinishVisible(5)` + 非禁用 69 down state | `FinishOutSide` |
 
 **實作權威：**
 
@@ -493,9 +506,9 @@ pick = argmin(ratio among available)
 | B 侍奉 | `drink` | `FinishDrink` | `IsFinishVisible(1) && modeCtrl != 0 && !(!IsFinishVisible(4) && IsFinishVisible(1) && modeCtrl == 1)` | BHS 註解指出與 OnBody 共用部分模式，需保留這個特殊排除 |
 | B | `vomit` | `FinishVomit` | `IsFinishVisible(3)` | 吐出 |
 | B | `outSide` | `FinishOutSide` | `IsFinishVisible(4) || (IsFinishVisible(1) && (modeCtrl == 0 || modeCtrl == 1))` | 身上／外出；BHS 註解指出與 Drink 有共用模式 |
-| C 插入 | `maleInside` | `FinishInSide` | `IsFinishVisible(1)` | 仍需 Proc 驗 `canInside` 等條件 |
-| C | `same` | `FinishSame` | `IsFinishVisible(2)` | 同時高潮；不抵扣 In／Out 帳本；UI 通常還要求女側條件 |
-| C | `maleOutside` | `FinishOutSide` | `IsFinishVisible(5)` | 男單獨外射；69／state 限制交 Proc 再驗 |
+| C 插入 | `maleInside` | `FinishInSide` | `IsFinishVisible(1)` + `canInside` | `canInside = (ActionCtrl.Item1==2 && modeCtrl==0) || (ActionCtrl.Item1==3 && modeCtrl in 1/7)`；否則 click 會被 Proc 清掉 |
+| C | `same` | `FinishSame` | `IsFinishVisible(2)` + `OLoop/D_OLoop` | 同時高潮；不抵扣 In／Out 帳本；WLoop/SLoop 不會消費 Same |
+| C | `maleOutside` | `FinishOutSide` | `IsFinishVisible(5)` + 非禁用 69 down state | 男單獨外射；69 down state 不可消費 |
 
 **slot 來源校正**
 
@@ -649,8 +662,8 @@ session/afteridle
 | 族 A 卡 OLoop | setPlay 強推 Orgasm | feel／`FinishBefore`；**禁止** setPlay 高潮表 |
 | Sonyu 男高潮覆蓋 | 若只強制 Same，會漏 `OrgasmM_IN`／`OrgasmM_OUT` | Ledger 分軌，挑低比例；Same 不抵扣 In／Out |
 | W/S 劇本 | 無 | **新增** SessionDirector |
-| IN_A | 無 | 固定 inject 下滾輪 Pull；**永不續幹** |
-| Spnking 打擊 | 無 | 假滾輪節奏 |
+| IN_A | 已實作 | manual path inject 下滾輪；auto path force `HAutoCtrl.IsPull()`；**永不續幹** |
+| Spnking 打擊 | 已實作 | `SpnkingProc` 內的 `Input.GetAxis("Mouse ScrollWheel")` transpiler 產生 wheel pulse |
 | 高潮後欣賞 | `OrbitFsmFlow` 5s | 維持；**不**在本階段改再選池 |
 | BHS offset／IK solver | 目前只是外部 BHS 安裝狀態 | **採用相容層**：偵測 BHS solver/offset 狀態，必要時移植最小 fixer |
 | 全姿態開放 | 舊 `HS2UnlockAllPoses` 未併入現主線；`OrbitPosePool` 只做池抽選 | **恢復安全放寬 patch**：放寬 state/pain/faintness 等，保留人數/地點/事件/AppendEV |
@@ -662,7 +675,7 @@ session/afteridle
 - **`OrbitPoseUnlockPolicy`**：恢復全姿態開放的安全放寬策略（§0.4）
 - **`OrbitBhsCompat`**：偵測並協調 BetterHScenes offset／IK fixer／AutoFinish 衝突（§0.1）
 
-H-loop 修復本身不重寫 `RequestSelectPool` 的 FSM 語意；但全姿態開放是選池前置條件，需另案恢復。收斂刪除 `TickOLoopToOrgasmRecovery` 的 setPlay 高潮強推。
+H-loop 修復本身不重寫 `RequestSelectPool` 的 FSM 語意；全姿態開放已回補為 `OrbitPoseUnlockPolicy` / `OrbitPoseUnlockPatches`。舊 `TickOLoopToOrgasmRecovery` 類 setPlay 高潮強推未在 C# 現碼找到；後續重點是用 analyzer 防回歸並累積更長 smoke / 實玩 trace。
 
 ---
 

@@ -91,6 +91,29 @@ namespace HS2OrbitAndExciter
         /// <summary>Whether orbit is currently active (for Harmony patches). Authoritative state is <see cref="OrbitBehaviorHub.IsOrbitAssistActive"/>.</summary>
         public static bool IsOrbitActive() => OrbitBehaviorHub.IsOrbitAssistActive();
 
+        internal static bool SetOrbitAssistActive(bool active, string reason)
+        {
+            if (OrbitBehaviorHub.IsOrbitAssistActive() == active)
+            {
+                OrbitStateMachineLog.Event("orbit", active ? "enable_already" : "disable_already",
+                    "{\"reason\":\"" + EscForJson(reason) + "\"}");
+                return true;
+            }
+
+            OrbitBehaviorHub.NotifyOrbitToggled(active);
+            if (_activeInstance == null)
+            {
+                OrbitStateMachineLog.Event("orbit", active ? "enable_no_controller" : "disable_no_controller",
+                    "{\"reason\":\"" + EscForJson(reason) + "\"}");
+                return false;
+            }
+
+            _activeInstance.OnOrbitToggled(active);
+            OrbitStateMachineLog.Event("orbit", active ? "enable" : "disable",
+                "{\"reason\":\"" + EscForJson(reason) + "\"}");
+            return true;
+        }
+
         private void OnEnable() => _activeInstance = this;
 
         private void OnDisable()
@@ -187,6 +210,7 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.TickStuckRecovery(hProbe);
                 OrbitVoiceTour.Tick(hProbe);
                 OrbitFsmFlow.Tick(hProbe);
+                OrbitFinishDirector.Tick(hProbe);
                 OrbitStateMachineLog.Tick(hProbe);
             }
             else
@@ -217,8 +241,7 @@ namespace HS2OrbitAndExciter
                     return;
                 _lastHotkeyTime = Time.unscaledTime;
                 bool active = !OrbitBehaviorHub.IsOrbitAssistActive();
-                OrbitBehaviorHub.NotifyOrbitToggled(active);
-                OnOrbitToggled(active);
+                SetOrbitAssistActive(active, "hotkey");
             }
 
             TryManualHotkeys(hProbe);
@@ -391,6 +414,7 @@ namespace HS2OrbitAndExciter
 
             // Excitement gauge auto-accumulates while orbit is active (skipped during prep countdown)
             AccumulateFeelWhenOrbit(hScene);
+            OrbitSessionDirector.Tick(hScene);
 
             // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
@@ -1337,6 +1361,12 @@ namespace HS2OrbitAndExciter
         }
 
         private static HScene? GetHScene() => TryGetHScene();
+
+        private static string EscForJson(string? value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            return value!.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
 
         /// <summary>For <see cref="OrbitHSceneLateAssist"/> and patches.</summary>
         internal static HScene? TryGetHScene()

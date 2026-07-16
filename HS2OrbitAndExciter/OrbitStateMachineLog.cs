@@ -14,15 +14,21 @@ namespace HS2OrbitAndExciter
     internal static class OrbitStateMachineLog
     {
         private const float SnapIntervalSeconds = 0.5f;
+        private const float SessionStateIntervalSeconds = 0.5f;
         private static readonly string RunId = Guid.NewGuid().ToString("N").Substring(0, 8);
         private static string? _path;
         private static float _nextSnapUnscaled;
+        private static float _nextSessionStateUnscaled;
         private static string _lastSuppress = "";
         private static string _lastDirector = "";
         private static bool _lastFaint;
         private static bool _lastNowOrgasm;
         private static bool _lastNowChangeAnim;
         private static bool _lastBusy;
+        private static int _lastHSceneId = -1;
+        private static int _lastSessionPoseId = -999;
+        private static int _sessionIndex;
+        private static string _lastSessionStateSignature = "";
         private static bool _bootWritten;
 
         internal static bool Enabled => HS2OrbitAndExciter.EnableStateMachineTrace?.Value == true;
@@ -73,6 +79,7 @@ namespace HS2OrbitAndExciter
             if (!Enabled) return;
             Boot();
             if (hScene == null) return;
+            OrbitBhsCompat.LogIfChanged();
 
             var ctrl = hScene.ctrlFlag;
             bool faint = ctrl != null && ctrl.isFaintness;
@@ -82,6 +89,7 @@ namespace HS2OrbitAndExciter
             string director = OrbitPoseDirector.DebugStateName;
             OrbitBehaviorHub.CanAutoAdvance(ctrl, out string suppress);
             // Log field "suppress" = CanAutoAdvance reason (none = allowed).
+            TickSessionTrace(hScene, suppress, director);
 
             if (suppress != _lastSuppress)
             {
@@ -132,35 +140,68 @@ namespace HS2OrbitAndExciter
                 "{\"ok\":" + (ok ? "true" : "false") + ",\"detail\":\"" + Esc(detail) + "\"}");
         }
 
+        private static void TickSessionTrace(HScene hScene, string suppress, string director)
+        {
+            int hSceneId = hScene.GetInstanceID();
+            var ctrl = hScene.ctrlFlag;
+            int poseId = ctrl?.nowAnimationInfo?.id ?? -1;
+            string signature = BuildSessionStateSignature(hScene, suppress, director);
+            bool newScene = hSceneId != _lastHSceneId;
+            bool newPose = poseId != _lastSessionPoseId;
+
+            if (newScene || newPose)
+            {
+                _sessionIndex++;
+                _lastHSceneId = hSceneId;
+                _lastSessionPoseId = poseId;
+                _lastSessionStateSignature = "";
+                _nextSessionStateUnscaled = 0f;
+                Write("session/start", "trace", newScene ? "hscene" : "pose",
+                    BuildSnapshotJson(hScene, suppress, director));
+            }
+
+            if (Time.unscaledTime < _nextSessionStateUnscaled
+                && string.Equals(signature, _lastSessionStateSignature, StringComparison.Ordinal))
+                return;
+
+            _nextSessionStateUnscaled = Time.unscaledTime + SessionStateIntervalSeconds;
+            _lastSessionStateSignature = signature;
+            Write("session/state", "trace", "state", BuildSnapshotJson(hScene, suppress, director));
+        }
+
+        private static string BuildSessionStateSignature(HScene hScene, string suppress, string director)
+        {
+            var ctrl = hScene.ctrlFlag;
+            int mode = TryReadHSceneInt(hScene, "mode", -1);
+            int modeCtrl = TryReadHSceneInt(hScene, "modeCtrl", -1);
+            string clip = TryGetLayer0State(hScene, out float _, out int hash);
+            int poseId = ctrl?.nowAnimationInfo?.id ?? -1;
+            int selId = ctrl?.selectAnimationListInfo?.id ?? -1;
+            string click = ctrl != null ? ctrl.click.ToString() : "";
+            bool[] finishVisible = TryReadFinishVisible(hScene, out bool finishKnown);
+            var cell = OrbitFsmCellClassifier.Classify(hScene);
+
+            var sb = new StringBuilder(160);
+            sb.Append(mode).Append('|').Append(modeCtrl).Append('|').Append(cell).Append('|');
+            sb.Append(poseId).Append('|').Append(selId).Append('|').Append(clip).Append('|').Append(hash).Append('|');
+            sb.Append(ctrl != null && ctrl.isFaintness ? "F" : "f").Append('|');
+            sb.Append(ctrl != null && ctrl.nowOrgasm ? "O" : "o").Append('|');
+            sb.Append(hScene.NowChangeAnim ? "C" : "c").Append('|');
+            sb.Append(click).Append('|').Append(suppress).Append('|').Append(director).Append('|').Append(finishKnown ? "V" : "v");
+            for (int i = 0; i < finishVisible.Length; i++)
+                sb.Append(finishVisible[i] ? '1' : '0');
+            return sb.ToString();
+        }
+
         private static string BuildSnapshotJson(HScene hScene, string suppress, string director)
         {
             var ctrl = hScene.ctrlFlag;
-            var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
-            var anim = OrbitHelpers.TryGetFemaleAnimBody(cha);
-            string clip = "?";
-            float clipNorm = -1f;
-            if (anim != null)
-            {
-                try
-                {
-                    var st = anim.GetCurrentAnimatorStateInfo(0);
-                    clipNorm = st.normalizedTime;
-                    // Hash-only; name via short IsName probe of common states is heavy — store hash + loop flags.
-                    clip = "h=" + st.fullPathHash + ";norm=" + st.normalizedTime.ToString("0.###", CultureInfo.InvariantCulture);
-                    foreach (string n in ProbeStateNames)
-                    {
-                        if (st.IsName(n))
-                        {
-                            clip = n;
-                            break;
-                        }
-                    }
-                }
-                catch { /* ignore */ }
-            }
+            string clip = TryGetLayer0State(hScene, out float clipNorm, out int clipHash);
 
             int mode = TryReadHSceneInt(hScene, "mode", -1);
             int modeCtrl = TryReadHSceneInt(hScene, "modeCtrl", -1);
+            int actionCtrl1 = -1;
+            int actionCtrl2 = -1;
 
             string nowName = ctrl?.nowAnimationInfo != null
                 ? Esc(ctrl.nowAnimationInfo.nameAnimation) + "#id" + ctrl.nowAnimationInfo.id + ";down" + ctrl.nowAnimationInfo.nDownPtn
@@ -172,6 +213,8 @@ namespace HS2OrbitAndExciter
             if (ctrl?.nowAnimationInfo != null)
             {
                 var ac = ctrl.nowAnimationInfo.ActionCtrl;
+                actionCtrl1 = ac.Item1;
+                actionCtrl2 = ac.Item2;
                 actCtrl = ac.Item1 + "," + ac.Item2;
             }
 
@@ -187,18 +230,21 @@ namespace HS2OrbitAndExciter
             float feelM = ctrl?.feel_m ?? -1f;
             string click = ctrl != null ? ctrl.click.ToString() : "";
             int clickValue = ctrl != null ? (int)ctrl.click : -999;
-            bool finishVisibleKnown = TryGetHSceneSprite(hScene, out var sprite);
-            bool[] finishVisible = new bool[5];
-            if (finishVisibleKnown && sprite != null)
-            {
-                for (int i = 0; i < finishVisible.Length; i++)
-                    finishVisible[i] = TryIsFinishVisible(sprite, i + 1);
-            }
+            bool[] finishVisible = TryReadFinishVisible(hScene, out bool finishVisibleKnown);
+            OrbitPosePool.RefreshTraceStats(ctrl);
+            var posePoolStats = OrbitPoseUnlockPolicy.LastPosePoolStats;
+            var bhs = OrbitBhsCompat.Snapshot();
+            var fsmCell = OrbitFsmCellClassifier.Classify(hScene);
+            bool peeping = OrbitPosePool.IsPeepingPose(ctrl?.nowAnimationInfo);
+            string sessionFamily = DescribeSessionFamily(mode, modeCtrl, actionCtrl1, actionCtrl2, peeping);
 
-            var sb = new StringBuilder(768);
+            var sb = new StringBuilder(1400);
             sb.Append('{');
-            sb.Append("\"suppress\":\"").Append(Esc(suppress)).Append('"');
+            sb.Append("\"sessionIndex\":").Append(_sessionIndex);
+            sb.Append(",\"suppress\":\"").Append(Esc(suppress)).Append('"');
             sb.Append(",\"director\":\"").Append(Esc(director)).Append('"');
+            sb.Append(",\"fsmCell\":\"").Append(Esc(fsmCell.ToString())).Append('"');
+            sb.Append(",\"sessionFamily\":\"").Append(Esc(sessionFamily)).Append('"');
             sb.Append(",\"mode\":").Append(mode);
             sb.Append(",\"modeCtrl\":").Append(modeCtrl);
             sb.Append(",\"orbit\":").Append(OrbitBehaviorHub.IsOrbitAssistActive() ? "true" : "false");
@@ -216,10 +262,19 @@ namespace HS2OrbitAndExciter
             sb.Append(",\"clickValue\":").Append(clickValue);
             sb.Append(",\"inActionLoop\":").Append(OrbitHelpers.IsFirstFemaleInActionLoop(hScene) ? "true" : "false");
             sb.Append(",\"clip\":\"").Append(Esc(clip)).Append('"');
+            sb.Append(",\"clipHash\":").Append(clipHash);
             sb.Append(",\"clipNorm\":").Append(clipNorm.ToString("R", CultureInfo.InvariantCulture));
             sb.Append(",\"nowAnim\":\"").Append(nowName).Append('"');
+            sb.Append(",\"nowAnimId\":").Append(ctrl?.nowAnimationInfo?.id ?? -1);
+            sb.Append(",\"nowAnimName\":\"").Append(Esc(ctrl?.nowAnimationInfo?.nameAnimation)).Append('"');
+            sb.Append(",\"nowAnimDown\":").Append(ctrl?.nowAnimationInfo?.nDownPtn ?? -1);
             sb.Append(",\"selAnim\":\"").Append(selName).Append('"');
+            sb.Append(",\"selAnimId\":").Append(ctrl?.selectAnimationListInfo?.id ?? -1);
+            sb.Append(",\"selAnimName\":\"").Append(Esc(ctrl?.selectAnimationListInfo?.nameAnimation)).Append('"');
+            sb.Append(",\"selAnimDown\":").Append(ctrl?.selectAnimationListInfo?.nDownPtn ?? -1);
             sb.Append(",\"actCtrl\":\"").Append(actCtrl).Append('"');
+            sb.Append(",\"actionCtrl1\":").Append(actionCtrl1);
+            sb.Append(",\"actionCtrl2\":").Append(actionCtrl2);
             sb.Append(",\"finishVisibleKnown\":").Append(finishVisibleKnown ? "true" : "false");
             sb.Append(",\"finishVisible\":[");
             for (int i = 0; i < finishVisible.Length; i++)
@@ -228,10 +283,132 @@ namespace HS2OrbitAndExciter
                 sb.Append(finishVisible[i] ? "true" : "false");
             }
             sb.Append(']');
-            sb.Append(",\"peeping\":").Append(OrbitPosePool.IsPeepingPose(ctrl?.nowAnimationInfo) ? "true" : "false");
+            sb.Append(",\"posePool\":{\"total\":").Append(posePoolStats.Total);
+            sb.Append(",\"afterUnlock\":").Append(posePoolStats.AfterUnlock);
+            sb.Append(",\"afterFaintness\":").Append(posePoolStats.AfterFaintness).Append('}');
+            sb.Append(",\"poseUnlock\":{\"enabled\":")
+                .Append(HS2OrbitAndExciter.EnableSafePoseUnlock?.Value != false ? "true" : "false");
+            sb.Append(",\"motionLimitRelaxed\":").Append(OrbitPoseUnlockPolicy.RelaxedMotionLimitCount);
+            sb.Append(",\"recoverRelaxed\":").Append(OrbitPoseUnlockPolicy.RelaxedMotionLimitRecoverCount);
+            sb.Append(",\"autoRelaxed\":").Append(OrbitPoseUnlockPolicy.RelaxedAutoMotionLimitCount);
+            sb.Append(",\"unsafeRejects\":").Append(OrbitPoseUnlockPolicy.UnsafeRejectCount);
+            sb.Append(",\"errors\":").Append(OrbitPoseUnlockPolicy.ErrorCount).Append('}');
+            sb.Append(",\"bhsInstalled\":").Append(bhs.Installed ? "true" : "false");
+            sb.Append(",\"bhsConfigFound\":").Append(bhs.ConfigFound ? "true" : "false");
+            sb.Append(",\"bhsAutoFinishEnabled\":").Append(bhs.AutoFinishEnabled ? "true" : "false");
+            sb.Append(",\"bhsOffsetApplied\":").Append(bhs.OffsetApplied ? "true" : "false");
+            sb.Append(",\"bhsSolverEnabled\":").Append(bhs.SolverEnabled ? "true" : "false");
+            sb.Append(",\"peeping\":").Append(peeping ? "true" : "false");
             sb.Append(",\"orgasmQuiet\":").Append(OrbitBehaviorHub.RemainingOrgasmQuietSeconds().ToString("0.##", CultureInfo.InvariantCulture));
             sb.Append('}');
             return sb.ToString();
+        }
+
+        private static string TryGetLayer0State(HScene hScene, out float normalizedTime, out int fullPathHash)
+        {
+            normalizedTime = -1f;
+            fullPathHash = 0;
+            var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
+            var anim = OrbitHelpers.TryGetFemaleAnimBody(cha);
+            string clip = "?";
+            if (anim == null)
+                return clip;
+            try
+            {
+                var st = anim.GetCurrentAnimatorStateInfo(0);
+                normalizedTime = st.normalizedTime;
+                fullPathHash = st.fullPathHash;
+                clip = "h=" + st.fullPathHash + ";norm=" + st.normalizedTime.ToString("0.###", CultureInfo.InvariantCulture);
+                foreach (string n in ProbeStateNames)
+                {
+                    if (st.IsName(n))
+                    {
+                        clip = n;
+                        break;
+                    }
+                }
+            }
+            catch { /* ignore */ }
+            return clip;
+        }
+
+        private static bool[] TryReadFinishVisible(HScene hScene, out bool known)
+        {
+            bool[] finishVisible = new bool[5];
+            known = TryGetHSceneSprite(hScene, out var sprite);
+            if (known && sprite != null)
+            {
+                for (int i = 0; i < finishVisible.Length; i++)
+                    finishVisible[i] = TryIsFinishVisible(sprite, i + 1);
+            }
+            return finishVisible;
+        }
+
+        private static string DescribeSessionFamily(int mode, int modeCtrl, int actionCtrl1, int actionCtrl2, bool peeping)
+        {
+            if (peeping || mode == 5)
+                return "Peeping";
+
+            string actionFamily = DescribeActionFamily(actionCtrl1, actionCtrl2);
+            if (actionFamily != "Unknown")
+                return actionFamily;
+
+            switch (mode)
+            {
+                case 0:
+                    return "A_Aibu";
+                case 1:
+                    return "B_Houshi";
+                case 2:
+                    return "C_Sonyu";
+                case 3:
+                    return "E_Spnking";
+                case 4:
+                    return "D_Masturbation";
+                case 6:
+                    return "A_Les";
+                case 7:
+                case 8:
+                    if (modeCtrl == 0)
+                        return "A_MultiPlay";
+                    if (modeCtrl == 1 || modeCtrl == 2)
+                        return "B_MultiPlay";
+                    if (modeCtrl == 3 || modeCtrl == 4)
+                        return "C_MultiPlay";
+                    return "MultiPlay";
+                default:
+                    return "Unknown";
+            }
+        }
+
+        private static string DescribeActionFamily(int actionCtrl1, int actionCtrl2)
+        {
+            if (actionCtrl1 == 0)
+                return "A_Aibu";
+            if (actionCtrl1 == 1)
+                return "B_Houshi";
+            if (actionCtrl1 == 2)
+                return "C_Sonyu";
+            if (actionCtrl1 == 3)
+            {
+                if (actionCtrl2 == 0 || actionCtrl2 == 1 || actionCtrl2 == 7)
+                    return "C_Sonyu";
+                if (actionCtrl2 == 2)
+                    return "E_Spnking";
+                if (actionCtrl2 == 3)
+                    return "A_Aibu";
+                if (actionCtrl2 == 4 || actionCtrl2 == 5)
+                    return "D_Masturbation";
+                if (actionCtrl2 == 6)
+                    return "Peeping";
+            }
+            if (actionCtrl1 == 4)
+                return "A_Les";
+            if (actionCtrl1 == 5)
+                return "B_MultiPlay";
+            if (actionCtrl1 == 6)
+                return "C_MultiPlay";
+            return "Unknown";
         }
 
         private static int TryReadHSceneInt(HScene hScene, string fieldName, int fallback)
