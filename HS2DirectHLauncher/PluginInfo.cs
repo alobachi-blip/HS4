@@ -4,7 +4,7 @@ namespace HS2DirectHLauncher
     {
         internal const string Guid = "com.hs2.directhlauncher";
         internal const string Name = "HS2 Direct H Launcher";
-        internal const string Version = "1.1.2";
+        internal const string Version = "1.2.0";
         internal const string RunMarkerFileName = "HS2DirectHLauncher.run";
     }
 }

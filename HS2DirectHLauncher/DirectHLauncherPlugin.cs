@@ -25,6 +25,7 @@ namespace HS2DirectHLauncher
         private ConfigEntry<string> _femaleDirectory = null!;
         private ConfigEntry<string> _maleDirectory = null!;
         private ConfigEntry<bool> _recursive = null!;
+        private ConfigEntry<bool> _enableOrbitAssist = null!;
         private readonly CardPicker _cardPicker = new CardPicker();
         private readonly Dictionary<string, ChaFileControl> _validatedFemaleFiles =
             new Dictionary<string, ChaFileControl>(StringComparer.OrdinalIgnoreCase);
@@ -32,7 +33,9 @@ namespace HS2DirectHLauncher
         private bool _armed;
         private bool _requested;
         private bool _titleRequested;
+        private bool _orbitAssistEnabled;
         private float _nextPoll;
+        private float _nextOrbitAssistPoll;
 
         private void Awake()
         {
@@ -48,6 +51,8 @@ namespace HS2DirectHLauncher
                 "Absolute path or path relative to the game root.");
             _recursive = Config.Bind("Cards", "SearchSubdirectories", true,
                 "Include cards in subdirectories.");
+            _enableOrbitAssist = Config.Bind("Integration", "EnableOrbitAssist", true,
+                "Automatically enable HS2 Orbit and Exciter after the direct H scene is ready.");
 
             _runMarkerPath = Path.Combine(Paths.ConfigPath, PluginInfo.RunMarkerFileName);
             _armed = _alwaysEnabled.Value || File.Exists(_runMarkerPath);
@@ -134,12 +139,20 @@ namespace HS2DirectHLauncher
 
         private void Update()
         {
-            if (!_armed || _requested || Time.unscaledTime < _nextPoll)
+            if (!_armed)
+                return;
+            if (_requested)
+            {
+                TryEnableOrbitAssist();
+                return;
+            }
+            if (Time.unscaledTime < _nextPoll)
                 return;
             if (HSceneManager.isHScene)
             {
                 _requested = true;
                 ConsumeRunMarker();
+                TryEnableOrbitAssist();
                 return;
             }
 
@@ -159,6 +172,53 @@ namespace HS2DirectHLauncher
             {
                 _nextPoll = Time.unscaledTime + 1f;
                 Logger.LogError("Direct-H request failed; will retry: " + ex);
+            }
+        }
+
+        private void TryEnableOrbitAssist()
+        {
+            if (_orbitAssistEnabled || !_enableOrbitAssist.Value || Time.unscaledTime < _nextOrbitAssistPoll)
+                return;
+
+            _nextOrbitAssistPoll = Time.unscaledTime + 0.5f;
+            if (!HSceneManager.isHScene || !Singleton<HSceneManager>.IsInstance())
+                return;
+
+            var hScene = Singleton<HSceneManager>.Instance.Hscene;
+            var info = hScene?.ctrlFlag?.nowAnimationInfo;
+            if (hScene?.ctrlFlag?.cameraCtrl == null || info == null || info.id < 0)
+                return;
+
+            try
+            {
+                Type? orbitType = Type.GetType(
+                    "HS2OrbitAndExciter.OrbitController, HS2OrbitAndExciter",
+                    throwOnError: false);
+                if (orbitType == null)
+                    return;
+
+                const System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Public;
+                var isActive = orbitType.GetMethod("IsOrbitActive", flags);
+                if (isActive?.Invoke(null, null) is bool alreadyActive && alreadyActive)
+                {
+                    _orbitAssistEnabled = true;
+                    Logger.LogInfo("Orbit assist was already active in the direct H scene.");
+                    return;
+                }
+
+                var enable = orbitType.GetMethod("SetOrbitAssistActive", flags);
+                if (enable?.Invoke(null, new object[] { true, "direct_h_launcher" }) is bool ok && ok)
+                {
+                    _orbitAssistEnabled = true;
+                    Logger.LogInfo("Enabled Orbit assist for the direct H scene.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not enable Orbit assist yet; will retry: " + ex.Message);
             }
         }
 
