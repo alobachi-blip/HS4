@@ -252,6 +252,7 @@ namespace HS2OrbitAndExciter
             SmokeFamilyCoverageSequence = Config.Bind("Smoke", "SmokeFamilyCoverageSequence",
                 "A_Aibu,B_Houshi,C_Sonyu,D_Masturbation,E_Spnking,A_Les",
                 "Comma-separated family sequence used when EnableSmokeFamilyCoverage is true.");
+            OrbitStateMachineLog.Boot();
 
             Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
             ExcitementTriggerDelaySeconds.SettingChanged += (_, __) => Patches.ExciterState.DelaySecondsAtFull = ExcitementTriggerDelaySeconds.Value;
