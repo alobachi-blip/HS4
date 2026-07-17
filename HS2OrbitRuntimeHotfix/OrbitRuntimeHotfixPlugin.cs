@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
@@ -23,17 +25,33 @@ namespace HS2OrbitRuntimeHotfix
         private bool _pregnancyRepairComplete;
         private bool _vanishPatchInstalled;
         private bool _cameraPatchInstalled;
+        private bool _cumflationPatchInstalled;
         private float _nextResolveAt;
+        private ConfigEntry<bool>? _verifyFiveStepCumflation;
+        private ConfigEntry<bool>? _deflateOnPoseLanding;
 
         private void Awake()
         {
             RendererOnlyVanishFallback.SetLogger(Logger);
+            CumflationRuntime.SetLogger(Logger);
+            _verifyFiveStepCumflation = Config.Bind(
+                "Diagnostics",
+                "VerifyFiveStepCumflation",
+                false,
+                "One H-scene diagnostic: reset then verify five consecutive PregnancyPlus growth levels.");
+            _deflateOnPoseLanding = Config.Bind(
+                "Cumflation",
+                "DeflateOnPoseLanding",
+                true,
+                "When true, foreplay or female-female pose landing reduces the PregnancyPlus belly by one level.");
+            CumflationRuntime.SetDeflateOnPoseLandingConfig(_deflateOnPoseLanding);
             InvokeRepeating(nameof(TryInitialize), 0.5f, 1f);
         }
 
         private void Update()
         {
             RendererOnlyVanishFallback.RestoreWhenOrbitStops();
+            CumflationRuntime.TryStartFiveStepVerification(this, _verifyFiveStepCumflation);
         }
 
         private void TryInitialize()
@@ -48,8 +66,10 @@ namespace HS2OrbitRuntimeHotfix
                 _vanishPatchInstalled = TryInstallRendererFallback();
             if (!_cameraPatchInstalled)
                 _cameraPatchInstalled = TryInstallCameraStabilizer();
+            if (!_cumflationPatchInstalled)
+                _cumflationPatchInstalled = TryInstallCumflationDeflateFix();
 
-            if (_pregnancyRepairComplete && _vanishPatchInstalled && _cameraPatchInstalled)
+            if (_pregnancyRepairComplete && _vanishPatchInstalled && _cameraPatchInstalled && _cumflationPatchInstalled)
                 CancelInvoke(nameof(TryInitialize));
         }
 
@@ -146,6 +166,29 @@ namespace HS2OrbitRuntimeHotfix
             }
         }
 
+        private bool TryInstallCumflationDeflateFix()
+        {
+            var assistType = FindLoadedType("HS2OrbitAndExciter.PregnancyPlusAssist", OrbitAssembly);
+            var target = assistType == null ? null : AccessTools.Method(assistType, "TryDeflateOneLevel");
+            if (target == null)
+                return false;
+
+            try
+            {
+                new Harmony(PluginGuid + ".cumflation").Patch(
+                    target,
+                    prefix: new HarmonyMethod(typeof(OrbitRuntimeHotfixPlugin), nameof(DeflateOneLevelPrefix)));
+                CumflationRuntime.Initialize();
+                Logger.LogInfo("Installed PregnancyPlus one-level deflate fix.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not patch Orbit cumflation deflate yet: " + ex.Message);
+                return false;
+            }
+        }
+
         private static void DirectLineOfSightPostfix(Vector3 origin, Vector3 target)
         {
             RendererOnlyVanishFallback.Apply(origin, target);
@@ -154,6 +197,19 @@ namespace HS2OrbitRuntimeHotfix
         private static void StableFocusPostfix(object __instance, object[] __args)
         {
             LockedFocusStabilizer.Apply(__instance, __args);
+        }
+
+        private static bool DeflateOneLevelPrefix(object[] __args, ref bool __result)
+        {
+            if (!CumflationRuntime.DeflateOnPoseLandingEnabled)
+            {
+                __result = false;
+                return false;
+            }
+            __result = CumflationRuntime.TryDecreaseOneLevel(__args.Length > 0 ? __args[0] : null);
+            // The original build calls HS2Inflation(true), which is a full reset.
+            // Always suppress it, including while PregnancyPlus is still loading.
+            return false;
         }
 
         private static Type? FindLoadedType(string fullName, string? assemblyName = null)
@@ -261,6 +317,364 @@ namespace HS2OrbitRuntimeHotfix
 
             _targetPosField ??= AccessTools.Field(type, "TargetPos");
             _targetPosField?.SetValue(cameraControl, value);
+        }
+
+        private static Type? FindLoadedType(string fullName, string? assemblyName = null)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                var assembly = assemblies[i];
+                if (assemblyName != null && !string.Equals(assembly.GetName().Name, assemblyName, StringComparison.Ordinal))
+                    continue;
+                try
+                {
+                    var type = assembly.GetType(fullName, throwOnError: false);
+                    if (type != null)
+                        return type;
+                }
+                catch { }
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Adapts the deployed Orbit build to the actual PregnancyPlus HS2 API.
+    /// HS2Inflation(true) means reset, so a one-level deflate must notify the
+    /// controller at the preceding level instead.  It also owns the opt-in
+    /// five-step in-game verification used to prove the increment path.
+    /// </summary>
+    internal static class CumflationRuntime
+    {
+        private const string OrbitAssembly = "HS2OrbitAndExciter";
+        private const string PregnancyController = "KK_PregnancyPlus.PregnancyPlusCharaController";
+
+        private static ManualLogSource? _log;
+        private static Type? _controllerType;
+        private static MethodInfo? _hs2Inflation;
+        private static MethodInfo? _onInflationChanged;
+        private static FieldInfo? _currentInflationLevel;
+        private static FieldInfo? _initialized;
+        private static MethodInfo? _getHScene;
+        private static MethodInfo? _getChaFemales;
+        private static PropertyInfo? _targetPregPlusSize;
+        private static PropertyInfo? _currentInflationChange;
+        private static PropertyInfo? _maxLevelEntry;
+        private static FieldInfo? _maxLevelEntryField;
+        private static bool _verificationRunning;
+        private static bool _verificationStarted;
+        private static bool _suppressDeflate;
+        private static float _nextVerificationAt;
+        private static ConfigEntry<bool>? _deflateOnPoseLanding;
+        private static FieldInfo? _orbitDeflateOnPoseLanding;
+        private static bool _checkedOrbitDeflateSetting;
+
+        internal static void SetLogger(ManualLogSource logger) => _log = logger;
+
+        internal static void SetDeflateOnPoseLandingConfig(ConfigEntry<bool> setting)
+        {
+            _deflateOnPoseLanding = setting;
+        }
+
+        internal static bool DeflateOnPoseLandingEnabled
+        {
+            get
+            {
+                if (TryReadOrbitDeflateSetting(out bool value))
+                    return value;
+                return _deflateOnPoseLanding?.Value ?? true;
+            }
+        }
+
+        internal static void Initialize()
+        {
+            Resolve();
+        }
+
+        internal static bool TryDecreaseOneLevel(object? hScene)
+        {
+            if (_suppressDeflate)
+            {
+                _log?.LogInfo("[CumflationVerify] suppressed a pose-change deflate during verification.");
+                return false;
+            }
+
+            if (!Resolve() || hScene == null || !TryGetControllers(hScene, out var controllers))
+                return false;
+
+            bool changed = false;
+            int max = GetMaxLevel();
+            for (int i = 0; i < controllers.Count; i++)
+            {
+                var controller = controllers[i];
+                int current = GetLevel(controller);
+                if (current <= 0)
+                    continue;
+
+                int next = current - 1;
+                SetLevelAndNotify(controller, next, Math.Max(max, current));
+                changed = true;
+                _log?.LogInfo("[Cumflation] deflate level " + current + " -> " + next + ".");
+            }
+
+            return changed;
+        }
+
+        internal static void TryStartFiveStepVerification(MonoBehaviour host, ConfigEntry<bool>? requested)
+        {
+            if (requested == null || !requested.Value || _verificationRunning || _verificationStarted ||
+                Time.realtimeSinceStartup < _nextVerificationAt || !Resolve())
+                return;
+
+            var hScene = GetHScene();
+            if (hScene == null || !TryGetControllers(hScene, out var controllers) || controllers.Count == 0)
+                return;
+
+            _verificationStarted = true;
+            _verificationRunning = true;
+            host.StartCoroutine(VerifyFiveSteps(controllers, requested));
+        }
+
+        private static IEnumerator VerifyFiveSteps(List<Component> controllers, ConfigEntry<bool> requested)
+        {
+            _suppressDeflate = true;
+            _log?.LogInfo("[CumflationVerify] starting controlled five-step PregnancyPlus check.");
+
+            string? failure = null;
+            for (int i = 0; i < controllers.Count; i++)
+            {
+                if (!TryInvokeInflation(controllers[i], true))
+                {
+                    failure = "could not reset PregnancyPlus controller";
+                    break;
+                }
+            }
+
+            yield return new WaitForSecondsRealtime(0.75f);
+            for (int i = 0; i < controllers.Count && failure == null; i++)
+            {
+                int level = GetLevel(controllers[i]);
+                if (level != 0)
+                {
+                    failure = "reset expected level 0, got " + level;
+                    break;
+                }
+            }
+
+            float? previousTarget = null;
+            if (failure == null && controllers.Count > 0)
+                previousTarget = ReadFloat(_targetPregPlusSize, controllers[0]);
+
+            for (int step = 1; step <= 5 && failure == null; step++)
+            {
+                for (int i = 0; i < controllers.Count; i++)
+                {
+                    if (!TryInvokeInflation(controllers[i], false))
+                    {
+                        failure = "could not invoke growth at step " + step;
+                        break;
+                    }
+                }
+
+                if (failure != null)
+                    break;
+                yield return null;
+
+                for (int i = 0; i < controllers.Count; i++)
+                {
+                    int level = GetLevel(controllers[i]);
+                    if (level != step)
+                    {
+                        failure = "step " + step + " expected level " + step + ", got " + level;
+                        break;
+                    }
+                }
+
+                // PregnancyPlus animates at the configured speed.  Let the
+                // target and mesh settle before accepting each next step.
+                yield return new WaitForSecondsRealtime(3.5f);
+                if (failure != null)
+                    break;
+
+                float? target = ReadFloat(_targetPregPlusSize, controllers[0]);
+                float? current = ReadFloat(_currentInflationChange, controllers[0]);
+                if (target.HasValue && previousTarget.HasValue && target.Value <= previousTarget.Value + 0.0001f)
+                {
+                    failure = "step " + step + " target size did not increase (" +
+                              previousTarget.Value.ToString("F4") + " -> " + target.Value.ToString("F4") + ")";
+                    break;
+                }
+
+                _log?.LogInfo("[CumflationVerify] step " + step + "/5 level=" + GetLevel(controllers[0]) +
+                              " target=" + Format(target) + " current=" + Format(current));
+                if (target.HasValue)
+                    previousTarget = target;
+            }
+
+            _suppressDeflate = false;
+            _verificationRunning = false;
+
+            if (failure == null)
+            {
+                requested.Value = false;
+                _log?.LogInfo("[CumflationVerify] PASS levels 0 -> 1 -> 2 -> 3 -> 4 -> 5; every target value increased.");
+                yield break;
+            }
+
+            _log?.LogError("[CumflationVerify] FAILED: " + failure + "; will retry while the diagnostic config remains enabled.");
+            _verificationStarted = false;
+            _nextVerificationAt = Time.realtimeSinceStartup + 6f;
+        }
+
+        private static bool Resolve()
+        {
+            _controllerType ??= FindLoadedType(PregnancyController);
+            if (_controllerType == null)
+                return false;
+
+            _hs2Inflation ??= AccessTools.Method(_controllerType, "HS2Inflation", new[] { typeof(bool) });
+            _onInflationChanged ??= AccessTools.Method(
+                _controllerType,
+                "OnInflationChanged",
+                new[] { typeof(float), typeof(int), typeof(int) });
+            _currentInflationLevel ??= AccessTools.Field(_controllerType, "_currentInflationLevel");
+            _initialized ??= AccessTools.Field(_controllerType, "initialized");
+            _targetPregPlusSize ??= _controllerType.GetProperty("TargetPregPlusSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            _currentInflationChange ??= _controllerType.GetProperty("CurrentInflationChange", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            var orbitType = FindLoadedType("HS2OrbitAndExciter.OrbitController", OrbitAssembly);
+            _getHScene ??= orbitType == null ? null : AccessTools.Method(orbitType, "TryGetHScene");
+            var helperType = FindLoadedType("HS2OrbitAndExciter.OrbitHelpers", OrbitAssembly);
+            _getChaFemales ??= helperType == null ? null : AccessTools.Method(helperType, "GetChaFemales");
+
+            var pluginType = FindLoadedType("KK_PregnancyPlus.PregnancyPlusPlugin");
+            if (pluginType != null)
+            {
+                _maxLevelEntry ??= AccessTools.Property(pluginType, "HS2InflationMaxLevel");
+                _maxLevelEntryField ??= AccessTools.Field(pluginType, "HS2InflationMaxLevel");
+            }
+
+            return _hs2Inflation != null && _onInflationChanged != null && _currentInflationLevel != null &&
+                   _getHScene != null && _getChaFemales != null;
+        }
+
+        private static bool TryReadOrbitDeflateSetting(out bool value)
+        {
+            value = false;
+            if (!_checkedOrbitDeflateSetting)
+            {
+                var orbitPluginType = FindLoadedType("HS2OrbitAndExciter.HS2OrbitAndExciter", OrbitAssembly);
+                _orbitDeflateOnPoseLanding = orbitPluginType?.GetField(
+                    "CumflationDeflateOnPoseLanding",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                _checkedOrbitDeflateSetting = true;
+            }
+
+            if (_orbitDeflateOnPoseLanding == null)
+                return false;
+
+            try
+            {
+                object? entry = _orbitDeflateOnPoseLanding.GetValue(null);
+                object? configured = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                if (configured is bool boolValue)
+                {
+                    value = boolValue;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static object? GetHScene()
+        {
+            try { return _getHScene?.Invoke(null, null); }
+            catch { return null; }
+        }
+
+        private static bool TryGetControllers(object hScene, out List<Component> controllers)
+        {
+            controllers = new List<Component>();
+            try
+            {
+                if (_getChaFemales?.Invoke(null, new[] { hScene }) is not IEnumerable females)
+                    return false;
+
+                foreach (var female in females)
+                {
+                    if (female is not Component cha || _controllerType == null)
+                        continue;
+                    var controller = cha.GetComponent(_controllerType) ?? cha.GetComponentInChildren(_controllerType, true);
+                    if (controller == null)
+                        continue;
+                    if (_initialized?.GetValue(controller) is bool initialized && !initialized)
+                        continue;
+                    controllers.Add(controller);
+                }
+            }
+            catch
+            {
+                controllers.Clear();
+            }
+
+            return controllers.Count > 0;
+        }
+
+        private static int GetLevel(Component controller)
+        {
+            try { return Math.Max(0, Convert.ToInt32(_currentInflationLevel!.GetValue(controller))); }
+            catch { return -1; }
+        }
+
+        private static void SetLevelAndNotify(Component controller, int level, int maxLevel)
+        {
+            _currentInflationLevel!.SetValue(controller, level);
+            _onInflationChanged!.Invoke(controller, new object[] { (float)level, maxLevel, 0 });
+        }
+
+        private static bool TryInvokeInflation(Component controller, bool deflate)
+        {
+            try
+            {
+                _hs2Inflation!.Invoke(controller, new object[] { deflate });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning("[CumflationVerify] HS2Inflation failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static int GetMaxLevel()
+        {
+            try
+            {
+                object? entry = _maxLevelEntry?.GetValue(null, null) ?? _maxLevelEntryField?.GetValue(null);
+                var value = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                return Math.Max(6, Convert.ToInt32(value));
+            }
+            catch
+            {
+                return 18;
+            }
+        }
+
+        private static float? ReadFloat(PropertyInfo? property, Component controller)
+        {
+            if (property == null)
+                return null;
+            try { return Convert.ToSingle(property.GetValue(controller, null)); }
+            catch { return null; }
+        }
+
+        private static string Format(float? value)
+        {
+            return value.HasValue ? value.Value.ToString("F4") : "n/a";
         }
 
         private static Type? FindLoadedType(string fullName, string? assemblyName = null)

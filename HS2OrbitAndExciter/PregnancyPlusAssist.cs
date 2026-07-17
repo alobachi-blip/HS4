@@ -17,6 +17,7 @@ namespace HS2OrbitAndExciter
         private static MethodInfo? _hs2Inflation;
         private static MethodInfo? _resetInflation;
         private static MethodInfo? _meshInflateFloat;
+        private static MethodInfo? _onInflationChanged;
         private static FieldInfo? _currentInflationLevel;
         private static FieldInfo? _infConfig;
         private static FieldInfo? _inflationSize;
@@ -202,6 +203,8 @@ namespace HS2OrbitAndExciter
         {
             if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
                 return false;
+            if (HS2OrbitAndExciter.CumflationDeflateOnPoseLanding?.Value != true)
+                return false;
             if (hScene == null)
                 return false;
 
@@ -219,7 +222,6 @@ namespace HS2OrbitAndExciter
                 var cha = females[i];
                 if (cha == null)
                     continue;
-                // HS2Inflation(true) = 降一級（Preg+ API）
                 if (TryDeflateOnCha(cha))
                     any = true;
             }
@@ -232,11 +234,24 @@ namespace HS2OrbitAndExciter
         private static bool TryDeflateOnCha(ChaControl cha)
         {
             var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
-            if (ctrl == null)
+            if (ctrl == null || _currentInflationLevel == null || _onInflationChanged == null)
                 return false;
             try
             {
-                _hs2Inflation!.Invoke(ctrl, new object[] { true });
+                // PregnancyPlus interprets HS2Inflation(true) as a full reset,
+                // not a one-level decrease.  Update its level and notify the
+                // controller directly so the mesh transitions to the prior step.
+                int current = Math.Max(0, Convert.ToInt32(_currentInflationLevel.GetValue(ctrl)));
+                if (current == 0)
+                    return false;
+
+                int maxLevel = Math.Max(current, GetInflationMaxLevel());
+                if (maxLevel == 0)
+                    return false;
+
+                int next = current - 1;
+                _currentInflationLevel.SetValue(ctrl, next);
+                _onInflationChanged.Invoke(ctrl, new object[] { (float)next, maxLevel, 0 });
                 return true;
             }
             catch
@@ -367,6 +382,10 @@ namespace HS2OrbitAndExciter
             _hs2Inflation = AccessTools.Method(_controllerType, "HS2Inflation", new[] { typeof(bool) });
             _resetInflation = AccessTools.Method(_controllerType, "ResetInflation");
             _meshInflateFloat = AccessTools.Method(_controllerType, "MeshInflate", new[] { typeof(float), typeof(string) });
+            _onInflationChanged = AccessTools.Method(
+                _controllerType,
+                "OnInflationChanged",
+                new[] { typeof(float), typeof(int), typeof(int) });
             _currentInflationLevel = AccessTools.Field(_controllerType, "_currentInflationLevel");
             _infConfig = AccessTools.Field(_controllerType, "infConfig");
             if (_infConfig != null)

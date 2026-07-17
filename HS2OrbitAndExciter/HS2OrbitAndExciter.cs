@@ -88,6 +88,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
         /// <summary>When true, inside finish grows PregnancyPlus H-scene belly (cumflation).</summary>
         internal static ConfigEntry<bool>? CumflationEnabled;
+        /// <summary>When true, landing on foreplay/female-female poses deflates the PregnancyPlus belly one level.</summary>
+        internal static ConfigEntry<bool>? CumflationDeflateOnPoseLanding;
         /// <summary>Advance H voice banks by orgasm / houshi male finish (session overlay; card stats unchanged).</summary>
         internal static ConfigEntry<bool>? VoiceTourEnabled;
         /// <summary>Hits (female orgasm or houshi male finish) required per voice stage.</summary>
@@ -226,6 +228,8 @@ namespace HS2OrbitAndExciter
                 new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
             CumflationEnabled = Config.Bind("Orbit", "CumflationEnabled", true,
                 "When true, each inside finish grows PregnancyPlus H-scene belly one level (HS2Inflation). I clears.");
+            CumflationDeflateOnPoseLanding = Config.Bind("Orbit", "CumflationDeflateOnPoseLanding", true,
+                "When true, landing on foreplay or female-female poses decreases the PregnancyPlus belly one level.");
             VoiceTourEnabled = Config.Bind("VoiceTour", "VoiceTourEnabled", true,
                 "H voice tour: cycle Blank→Favor→…→Dependence→Broken by orgasm/houshi finish. Does not write card Favor/etc.");
             VoiceTourHitsPerStage = Config.Bind("VoiceTour", "VoiceTourHitsPerStage", 1,

@@ -193,7 +193,13 @@ namespace HS2OrbitAndExciter
             {
                 HS2OrbitAndExciter.CumflationEnabled.Value = GUILayout.Toggle(
                     HS2OrbitAndExciter.CumflationEnabled.Value,
-                    " 內射時肚子脹一級；愛撫／女女落地消一級（需 PregnancyPlus）");
+                    " 內射時肚子脹一級（需 PregnancyPlus）");
+            }
+            if (HS2OrbitAndExciter.CumflationDeflateOnPoseLanding != null)
+            {
+                HS2OrbitAndExciter.CumflationDeflateOnPoseLanding.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.CumflationDeflateOnPoseLanding.Value,
+                    " 愛撫／女女落地時肚子降一級");
             }
             GUILayout.Label(PregnancyPlusAssist.InflationCapStatus, label);
 
