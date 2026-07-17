@@ -26,6 +26,9 @@ namespace HS2OrbitAndExciter
         private static HScene? _trackedHScene;
         private static int _lastInsideCount = -1;
         private static bool _resolved;
+        private static float _nextResolveAttemptAt;
+        private static bool _unavailableLogged;
+        private static bool _methodUnavailableLogged;
 
         private const int OriginalHs2InflationMaxLevel = 6;
         private const int InflationMaxLevelMultiplier = 3;
@@ -337,10 +340,15 @@ namespace HS2OrbitAndExciter
         {
             if (_resolved)
                 return;
-            _resolved = true;
 
-            _controllerType = AccessTools.TypeByName("KK_PregnancyPlus.PregnancyPlusCharaController");
-            _pluginType = AccessTools.TypeByName("KK_PregnancyPlus.PregnancyPlusPlugin");
+            // PregnancyPlus is optional.  A transient startup-order miss must
+            // not permanently disable cumflation for the rest of this session.
+            if (Time.realtimeSinceStartup < _nextResolveAttemptAt)
+                return;
+            _nextResolveAttemptAt = Time.realtimeSinceStartup + 1f;
+
+            _controllerType = FindLoadedType("KK_PregnancyPlus.PregnancyPlusCharaController");
+            _pluginType = FindLoadedType("KK_PregnancyPlus.PregnancyPlusPlugin");
             if (_pluginType != null)
             {
                 _maxLevelEntryProperty = AccessTools.Property(_pluginType, "HS2InflationMaxLevel");
@@ -348,7 +356,11 @@ namespace HS2OrbitAndExciter
             }
             if (_controllerType == null)
             {
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus 未載入，肚子膨脹／清腹略過");
+                if (!_unavailableLogged)
+                {
+                    _unavailableLogged = true;
+                    HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus unavailable; belly grow/reset will retry after it loads.");
+                }
                 return;
             }
 
@@ -359,6 +371,40 @@ namespace HS2OrbitAndExciter
             _infConfig = AccessTools.Field(_controllerType, "infConfig");
             if (_infConfig != null)
                 _inflationSize = AccessTools.Field(_infConfig.FieldType, "inflationSize");
+
+            _resolved = _hs2Inflation != null;
+            if (_resolved)
+            {
+                _unavailableLogged = false;
+                _methodUnavailableLogged = false;
+                HS2OrbitAndExciter.Log?.LogInfo("Orbit: PregnancyPlus integration ready.");
+            }
+            else if (!_methodUnavailableLogged)
+            {
+                _methodUnavailableLogged = true;
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus loaded but HS2Inflation was not found; will retry.");
+            }
+        }
+
+        private static Type? FindLoadedType(string fullName)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                try
+                {
+                    var type = assemblies[i].GetType(fullName, throwOnError: false);
+                    if (type != null)
+                        return type;
+                }
+                catch
+                {
+                    // An unrelated mod can transiently fail reflection while its
+                    // assembly is loading.  Keep the next retry available.
+                }
+            }
+
+            return null;
         }
     }
 }

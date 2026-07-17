@@ -794,17 +794,13 @@ namespace HS2OrbitAndExciter
                 return true;
             }
 
-            // A temporarily unavailable live bone is the only case where the last locked
-            // focus is preferable to no camera update at all.
+            // Keep the selected bone's position relative to the body root for the
+            // whole orbit leg.  The old behaviour used live.FocusWorld here, which
+            // passed every animation jiggle directly into TargetPos and made large
+            // actions uncomfortable to watch.  Pose transitions still use
+            // ApplyLiveBoneFocusOnly until their new basis is locked.
             if (!live.Valid)
                 return true;
-
-            basis = new OrbitBodyAxis.Basis(
-                live.FocusWorld,
-                basis.TorsoUp,
-                basis.Facing,
-                basis.Right,
-                true);
             return true;
         }
 

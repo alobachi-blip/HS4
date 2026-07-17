@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <HS2DeployThisPlugin>true</HS2DeployThisPlugin>
+    <AssemblyName>HS2OrbitRuntimeHotfix</AssemblyName>
+    <RootNamespace>HS2OrbitRuntimeHotfix</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <HS2Managed Condition="'$(HS2Managed)' == ''">D:\HS2\HoneySelect2_Data\Managed</HS2Managed>
+    <HS2BepInEx Condition="'$(HS2BepInEx)' == ''">D:\HS2\BepInEx</HS2BepInEx>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>$(HS2Managed)\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(HS2Managed)\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(HS2Managed)\UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(HS2Managed)\UnityEngine.ParticleSystemModule.dll</HintPath>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(HS2BepInEx)\core\0Harmony.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

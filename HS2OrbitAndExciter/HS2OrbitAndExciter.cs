@@ -7,6 +7,7 @@ using UnityEngine;
 namespace HS2OrbitAndExciter
 {
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
+    [BepInDependency("KK_PregnancyPlus", BepInDependency.DependencyFlags.SoftDependency)]
     public class HS2OrbitAndExciter : BaseUnityPlugin
     {
         internal static ManualLogSource? Log;
