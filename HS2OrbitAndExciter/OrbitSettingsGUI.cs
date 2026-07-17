@@ -187,14 +187,24 @@ namespace HS2OrbitAndExciter
             }
             GUILayout.Label(StoryboardPackageRecorder.StatusText, label);
 
-            // ─── 流程 ───────────────────────────────────────────
-            Section("流程");
-            if (HS2OrbitAndExciter.CumflationEnabled != null)
+            // ─── 流程／肚子變化 ──────────────────────────────────
+            Section("流程／肚子變化");
+            if (HS2OrbitAndExciter.CumflationInflateOnInside != null)
             {
-                HS2OrbitAndExciter.CumflationEnabled.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.CumflationEnabled.Value,
-                    " 內射時肚子脹一級（需 PregnancyPlus）");
+                HS2OrbitAndExciter.CumflationInflateOnInside.Value = GUILayout.Toggle(
+                    HS2OrbitAndExciter.CumflationInflateOnInside.Value,
+                    " 男女任一高潮時肚子變大（需 PregnancyPlus）");
             }
+            DrawIntControl(
+                "肚子上限（級）",
+                "到達後不再因高潮變大",
+                HS2OrbitAndExciter.CumflationMaxLevel,
+                1, 60);
+            DrawIntControl(
+                "每次高潮變大（級）",
+                "1＝標準；超過上限時會停在上限",
+                HS2OrbitAndExciter.CumflationInflateStep,
+                1, 10);
             if (HS2OrbitAndExciter.CumflationDeflateOnPoseLanding != null)
             {
                 HS2OrbitAndExciter.CumflationDeflateOnPoseLanding.Value = GUILayout.Toggle(

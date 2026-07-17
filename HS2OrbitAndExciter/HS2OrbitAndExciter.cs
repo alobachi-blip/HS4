@@ -86,8 +86,14 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountStart;
         /// <summary>Last custom pulse volume weight.</summary>
         internal static ConfigEntry<float>? OrgasmNippleSprayAmountEnd;
-        /// <summary>When true, inside finish grows PregnancyPlus H-scene belly (cumflation).</summary>
+        /// <summary>Legacy default used when the split cumflation switches are first created.</summary>
         internal static ConfigEntry<bool>? CumflationEnabled;
+        /// <summary>When true, every female orgasm and male finish grows the PregnancyPlus belly.</summary>
+        internal static ConfigEntry<bool>? CumflationInflateOnInside;
+        /// <summary>Maximum PregnancyPlus level that automatic inside-finish growth may reach.</summary>
+        internal static ConfigEntry<int>? CumflationMaxLevel;
+        /// <summary>PregnancyPlus levels added by one orgasm event.</summary>
+        internal static ConfigEntry<int>? CumflationInflateStep;
         /// <summary>When true, landing on foreplay/female-female poses deflates the PregnancyPlus belly one level.</summary>
         internal static ConfigEntry<bool>? CumflationDeflateOnPoseLanding;
         /// <summary>Advance H voice banks by orgasm / houshi male finish (session overlay; card stats unchanged).</summary>
@@ -227,8 +233,15 @@ namespace HS2OrbitAndExciter
             OrgasmNippleSprayAmountEnd = Config.Bind("Orbit", "OrgasmNippleSprayAmountEnd", 0.5f,
                 new ConfigDescription("Last custom pulse volume weight.", new AcceptableValueRange<float>(0.1f, 15f)));
             CumflationEnabled = Config.Bind("Orbit", "CumflationEnabled", true,
-                "When true, each inside finish grows PregnancyPlus H-scene belly one level (HS2Inflation). I clears.");
-            CumflationDeflateOnPoseLanding = Config.Bind("Orbit", "CumflationDeflateOnPoseLanding", true,
+                "Legacy default for the split cumflation inflate and deflate settings.");
+            bool legacyCumflationDefault = CumflationEnabled.Value;
+            CumflationInflateOnInside = Config.Bind("Orbit", "CumflationInflateOnInside", legacyCumflationDefault,
+                "When true, every female orgasm and male finish grows the PregnancyPlus H-scene belly.");
+            CumflationMaxLevel = Config.Bind("Orbit", "CumflationMaxLevel", 18,
+                new ConfigDescription("Maximum PregnancyPlus level automatic inside-finish growth may reach.", new AcceptableValueRange<int>(1, 60)));
+            CumflationInflateStep = Config.Bind("Orbit", "CumflationInflateStep", 1,
+                new ConfigDescription("PregnancyPlus levels added by each orgasm event.", new AcceptableValueRange<int>(1, 10)));
+            CumflationDeflateOnPoseLanding = Config.Bind("Orbit", "CumflationDeflateOnPoseLanding", legacyCumflationDefault,
                 "When true, landing on foreplay or female-female poses decreases the PregnancyPlus belly one level.");
             VoiceTourEnabled = Config.Bind("VoiceTour", "VoiceTourEnabled", true,
                 "H voice tour: cycle Blank→Favor→…→Dependence→Broken by orgasm/houshi finish. Does not write card Favor/etc.");

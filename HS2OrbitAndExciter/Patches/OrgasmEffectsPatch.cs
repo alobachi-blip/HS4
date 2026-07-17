@@ -3,7 +3,7 @@ using HarmonyLib;
 namespace HS2OrbitAndExciter.Patches
 {
     /// <summary>
-    /// Female orgasm entry → <see cref="OrbitBehaviorHub.NotifyFemaleOrgasm"/> (FX + assist quiet).
+    /// Female orgasm entry → unified FX and optional PregnancyPlus growth.
     /// </summary>
     [HarmonyPatch(typeof(HSceneFlagCtrl), nameof(HSceneFlagCtrl.AddOrgasm))]
     internal static class OrgasmEffectsPatch
@@ -20,6 +20,7 @@ namespace HS2OrbitAndExciter.Patches
                 "{\"faint\":" + (__instance.isFaintness ? "true" : "false")
                 + ",\"faintType\":" + __instance.FaintnessType + "}");
             OrbitBehaviorHub.NotifyFemaleOrgasm(__instance);
+            PregnancyPlusAssist.TryInflateOnOrgasm(OrbitController.TryGetHScene());
         }
     }
 }

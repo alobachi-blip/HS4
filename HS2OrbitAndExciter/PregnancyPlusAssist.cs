@@ -9,7 +9,7 @@ namespace HS2OrbitAndExciter
     /// <summary>
     /// PregnancyPlus live shortcuts: Y/U are handled by Preg+ (step scaled by our patch).
     /// R reset often fails for HS2 H-scene belly (<c>HS2Inflation</c> level), so we force deflate on hotkey I.
-    /// Optional inside-finish belly grow via <c>HS2Inflation(false)</c> (menu default on).
+    /// Optional orgasm-triggered belly grow via <c>HS2Inflation(false)</c> (menu default on).
     /// </summary>
     internal static class PregnancyPlusAssist
     {
@@ -31,13 +31,13 @@ namespace HS2OrbitAndExciter
         private static bool _unavailableLogged;
         private static bool _methodUnavailableLogged;
 
-        private const int OriginalHs2InflationMaxLevel = 6;
-        private const int InflationMaxLevelMultiplier = 3;
+        private const int DefaultInflationMaxLevel = 18;
+        private const int DefaultInflationStep = 1;
 
-        /// <summary>Grow H-scene belly one level on inside finish (cumflation).</summary>
-        internal static bool TryInflateOnInside(HScene? hScene)
+        /// <summary>Grow the H-scene belly for any male or female orgasm.</summary>
+        internal static bool TryInflateOnOrgasm(HScene? hScene)
         {
-            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
+            if (HS2OrbitAndExciter.CumflationInflateOnInside?.Value != true)
                 return false;
             if (hScene == null)
                 return false;
@@ -47,7 +47,8 @@ namespace HS2OrbitAndExciter
                 return false;
 
             // PregnancyPlus clips HS2Inflation(false) before it animates the mesh.
-            // Raise the original six-level cap to 18 before invoking it.
+            // Raise its cap when necessary, while retaining a separate cap for
+            // automatic inside-finish growth.
             TryRaiseMaxInflationLevel();
 
             var females = OrbitHelpers.GetChaFemales(hScene);
@@ -65,12 +66,19 @@ namespace HS2OrbitAndExciter
             }
 
             if (any)
-                HS2OrbitAndExciter.Log?.LogInfo("Orbit: 內射肚子變大（PregnancyPlus HS2Inflation）");
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: 高潮肚子變大 {InflationStep} 級（自動上限 {InflationMaxLevel} 級）");
             return any;
         }
 
         /// <summary>
-        /// Track HS2's cumulative inside-finish counter independently of VoiceTour.
+        /// Compatibility entry point retained for the runtime hotfix and older
+        /// callers.  Its behavior now follows the all-orgasm setting.
+        /// </summary>
+        internal static bool TryInflateOnInside(HScene? hScene) => TryInflateOnOrgasm(hScene);
+
+        /// <summary>
+        /// Track all native male-finish counters independently of VoiceTour.
         /// This keeps the menu toggle functional even when voice-tour progression is off.
         /// </summary>
         internal static void TickInsideFinish(HScene? hScene)
@@ -85,27 +93,27 @@ namespace HS2OrbitAndExciter
             if (ctrl == null)
                 return;
 
-            int inside = ctrl.numInside;
+            int maleFinishes = ctrl.numInside + ctrl.numOutSide + ctrl.numDrink + ctrl.numVomit;
             if (!ReferenceEquals(_trackedHScene, hScene))
             {
                 _trackedHScene = hScene;
-                _lastInsideCount = inside;
+                _lastInsideCount = maleFinishes;
                 return;
             }
 
-            if (inside <= _lastInsideCount)
+            if (maleFinishes <= _lastInsideCount)
             {
-                _lastInsideCount = inside;
+                _lastInsideCount = maleFinishes;
                 return;
             }
 
-            int delta = inside - _lastInsideCount;
-            _lastInsideCount = inside;
-            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
+            int delta = maleFinishes - _lastInsideCount;
+            _lastInsideCount = maleFinishes;
+            if (HS2OrbitAndExciter.CumflationInflateOnInside?.Value != true)
                 return;
 
             for (int i = 0; i < delta; i++)
-                TryInflateOnInside(hScene);
+                TryInflateOnOrgasm(hScene);
         }
 
         internal static void ResetInsideTracking()
@@ -114,7 +122,7 @@ namespace HS2OrbitAndExciter
             _lastInsideCount = -1;
         }
 
-        /// <summary>Ensure the PregnancyPlus HS2 inflation cap is at least three times its original default.</summary>
+        /// <summary>Ensure PregnancyPlus can reach the configured automatic-growth cap.</summary>
         internal static bool TryRaiseMaxInflationLevel()
         {
             EnsureResolved();
@@ -144,12 +152,12 @@ namespace HS2OrbitAndExciter
             try
             {
                 int current = Convert.ToInt32(valueProperty.GetValue(entry, null));
-                int requested = Math.Max(current, OriginalHs2InflationMaxLevel * InflationMaxLevelMultiplier);
+                int requested = Math.Max(current, InflationMaxLevel);
                 if (current < requested)
                 {
                     valueProperty.SetValue(entry, requested, null);
                     HS2OrbitAndExciter.Log?.LogInfo(
-                        $"Orbit: PregnancyPlus 肚子上限由 {current} 級提高至 {requested} 級（原始上限 3 倍）");
+                        $"Orbit: PregnancyPlus 肚子上限由 {current} 級提高至 {requested} 級");
                 }
                 return true;
             }
@@ -167,10 +175,20 @@ namespace HS2OrbitAndExciter
                 TryRaiseMaxInflationLevel();
                 int level = GetInflationMaxLevel();
                 return level > 0
-                    ? $"PregnancyPlus 肚子上限：{level} 級（原始 6 級的 3 倍）"
+                    ? $"高潮自動上限：{InflationMaxLevel} 級；PregnancyPlus 可用上限：{level} 級"
                     : "PregnancyPlus 未載入：肚子上限未套用";
             }
         }
+
+        internal static int InflationMaxLevel => Mathf.Clamp(
+            HS2OrbitAndExciter.CumflationMaxLevel?.Value ?? DefaultInflationMaxLevel,
+            1,
+            60);
+
+        internal static int InflationStep => Mathf.Clamp(
+            HS2OrbitAndExciter.CumflationInflateStep?.Value ?? DefaultInflationStep,
+            1,
+            10);
 
         private static int GetInflationMaxLevel()
         {
@@ -201,8 +219,6 @@ namespace HS2OrbitAndExciter
         /// <summary>§19：愛撫／女女落地縮腹一級（與內射對稱）。</summary>
         internal static bool TryDeflateOneLevel(HScene? hScene)
         {
-            if (HS2OrbitAndExciter.CumflationEnabled?.Value != true)
-                return false;
             if (HS2OrbitAndExciter.CumflationDeflateOnPoseLanding?.Value != true)
                 return false;
             if (hScene == null)
@@ -291,13 +307,19 @@ namespace HS2OrbitAndExciter
         private static bool TryInflateOnCha(ChaControl cha)
         {
             var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
-            if (ctrl == null)
+            if (ctrl == null || _currentInflationLevel == null)
                 return false;
 
             try
             {
+                int current = Math.Max(0, Convert.ToInt32(_currentInflationLevel.GetValue(ctrl)));
+                int steps = Math.Min(InflationStep, Math.Max(0, InflationMaxLevel - current));
+                if (steps == 0)
+                    return false;
+
                 // HS2Inflation(false) = +1 level (same as Preg+ Allow cumflation).
-                _hs2Inflation!.Invoke(ctrl, new object[] { false });
+                for (int i = 0; i < steps; i++)
+                    _hs2Inflation!.Invoke(ctrl, new object[] { false });
                 return true;
             }
             catch (Exception ex)

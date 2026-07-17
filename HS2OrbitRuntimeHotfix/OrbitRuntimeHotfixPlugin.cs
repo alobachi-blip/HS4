@@ -28,6 +28,7 @@ namespace HS2OrbitRuntimeHotfix
         private bool _cumflationPatchInstalled;
         private float _nextResolveAt;
         private ConfigEntry<bool>? _verifyFiveStepCumflation;
+        private ConfigEntry<bool>? _inflateOnInside;
         private ConfigEntry<bool>? _deflateOnPoseLanding;
 
         private void Awake()
@@ -39,11 +40,17 @@ namespace HS2OrbitRuntimeHotfix
                 "VerifyFiveStepCumflation",
                 false,
                 "One H-scene diagnostic: reset then verify five consecutive PregnancyPlus growth levels.");
+            _inflateOnInside = Config.Bind(
+                "Cumflation",
+                "InflateOnInside",
+                true,
+                "When true, every male finish grows the PregnancyPlus belly by one level.");
             _deflateOnPoseLanding = Config.Bind(
                 "Cumflation",
                 "DeflateOnPoseLanding",
                 true,
                 "When true, foreplay or female-female pose landing reduces the PregnancyPlus belly by one level.");
+            CumflationRuntime.SetInflateOnInsideConfig(_inflateOnInside);
             CumflationRuntime.SetDeflateOnPoseLandingConfig(_deflateOnPoseLanding);
             InvokeRepeating(nameof(TryInitialize), 0.5f, 1f);
         }
@@ -169,17 +176,26 @@ namespace HS2OrbitRuntimeHotfix
         private bool TryInstallCumflationDeflateFix()
         {
             var assistType = FindLoadedType("HS2OrbitAndExciter.PregnancyPlusAssist", OrbitAssembly);
-            var target = assistType == null ? null : AccessTools.Method(assistType, "TryDeflateOneLevel");
-            if (target == null)
+            var deflate = assistType == null ? null : AccessTools.Method(assistType, "TryDeflateOneLevel");
+            var inflate = assistType == null ? null : AccessTools.Method(assistType, "TryInflateOnInside");
+            var tick = assistType == null ? null : AccessTools.Method(assistType, "TickInsideFinish");
+            if (deflate == null || inflate == null || tick == null)
                 return false;
 
             try
             {
-                new Harmony(PluginGuid + ".cumflation").Patch(
-                    target,
+                var harmony = new Harmony(PluginGuid + ".cumflation");
+                harmony.Patch(
+                    deflate,
                     prefix: new HarmonyMethod(typeof(OrbitRuntimeHotfixPlugin), nameof(DeflateOneLevelPrefix)));
+                harmony.Patch(
+                    inflate,
+                    prefix: new HarmonyMethod(typeof(OrbitRuntimeHotfixPlugin), nameof(InflateOnInsidePrefix)));
+                harmony.Patch(
+                    tick,
+                    prefix: new HarmonyMethod(typeof(OrbitRuntimeHotfixPlugin), nameof(TickInsideFinishPrefix)));
                 CumflationRuntime.Initialize();
-                Logger.LogInfo("Installed PregnancyPlus one-level deflate fix.");
+                Logger.LogInfo("Installed orgasm-triggered PregnancyPlus growth and one-level deflate controls.");
                 return true;
             }
             catch (Exception ex)
@@ -209,6 +225,19 @@ namespace HS2OrbitRuntimeHotfix
             __result = CumflationRuntime.TryDecreaseOneLevel(__args.Length > 0 ? __args[0] : null);
             // The original build calls HS2Inflation(true), which is a full reset.
             // Always suppress it, including while PregnancyPlus is still loading.
+            return false;
+        }
+
+        private static bool InflateOnInsidePrefix(object[] __args, ref bool __result)
+        {
+            __result = CumflationRuntime.InflateOnInsideEnabled
+                && CumflationRuntime.TryIncreaseOneLevel(__args.Length > 0 ? __args[0] : null);
+            return false;
+        }
+
+        private static bool TickInsideFinishPrefix(object[] __args)
+        {
+            CumflationRuntime.TickInsideFinish(__args.Length > 0 ? __args[0] : null);
             return false;
         }
 
@@ -367,11 +396,25 @@ namespace HS2OrbitRuntimeHotfix
         private static bool _verificationStarted;
         private static bool _suppressDeflate;
         private static float _nextVerificationAt;
+        private static ConfigEntry<bool>? _inflateOnInside;
         private static ConfigEntry<bool>? _deflateOnPoseLanding;
+        private static FieldInfo? _orbitInflateOnInside;
+        private static bool _checkedOrbitInflateSetting;
+        private static FieldInfo? _orbitMaxLevel;
+        private static bool _checkedOrbitMaxLevel;
+        private static FieldInfo? _orbitInflateStep;
+        private static bool _checkedOrbitInflateStep;
         private static FieldInfo? _orbitDeflateOnPoseLanding;
         private static bool _checkedOrbitDeflateSetting;
+        private static object? _trackedHScene;
+        private static int _lastInsideCount = -1;
 
         internal static void SetLogger(ManualLogSource logger) => _log = logger;
+
+        internal static void SetInflateOnInsideConfig(ConfigEntry<bool> setting)
+        {
+            _inflateOnInside = setting;
+        }
 
         internal static void SetDeflateOnPoseLandingConfig(ConfigEntry<bool> setting)
         {
@@ -387,6 +430,32 @@ namespace HS2OrbitRuntimeHotfix
                 return _deflateOnPoseLanding?.Value ?? true;
             }
         }
+
+        internal static bool InflateOnInsideEnabled
+        {
+            get
+            {
+                if (TryReadOrbitInflateSetting(out bool value))
+                    return value;
+                return _inflateOnInside?.Value ?? true;
+            }
+        }
+
+        private static int AutomaticInflationMaxLevel => ReadOrbitIntSetting(
+            "CumflationMaxLevel",
+            ref _orbitMaxLevel,
+            ref _checkedOrbitMaxLevel,
+            18,
+            1,
+            60);
+
+        private static int InflationStep => ReadOrbitIntSetting(
+            "CumflationInflateStep",
+            ref _orbitInflateStep,
+            ref _checkedOrbitInflateStep,
+            1,
+            1,
+            10);
 
         internal static void Initialize()
         {
@@ -420,6 +489,73 @@ namespace HS2OrbitRuntimeHotfix
             }
 
             return changed;
+        }
+
+        internal static bool TryIncreaseOneLevel(object? hScene)
+        {
+            if (!Resolve() || hScene == null || !TryGetControllers(hScene, out var controllers))
+                return false;
+
+            int maxLevel = AutomaticInflationMaxLevel;
+            EnsurePregnancyPlusMaxLevel(maxLevel);
+            int requestedSteps = InflationStep;
+            bool changed = false;
+            int appliedSteps = 0;
+            for (int i = 0; i < controllers.Count; i++)
+            {
+                int current = GetLevel(controllers[i]);
+                if (current < 0)
+                    continue;
+
+                int steps = Math.Min(requestedSteps, Math.Max(0, maxLevel - current));
+                for (int step = 0; step < steps; step++)
+                {
+                    if (!TryInvokeInflation(controllers[i], false))
+                        break;
+                    changed = true;
+                    appliedSteps++;
+                }
+            }
+
+            if (changed)
+                _log?.LogInfo(
+                    "[Cumflation] orgasm increased belly by " + appliedSteps +
+                    " level(s); automatic cap=" + maxLevel + ".");
+            return changed;
+        }
+
+        internal static void TickInsideFinish(object? hScene)
+        {
+            if (hScene == null)
+            {
+                _trackedHScene = null;
+                _lastInsideCount = -1;
+                return;
+            }
+
+            if (!TryGetMaleFinishCount(hScene, out int maleFinishes))
+                return;
+
+            if (!ReferenceEquals(_trackedHScene, hScene))
+            {
+                _trackedHScene = hScene;
+                _lastInsideCount = maleFinishes;
+                return;
+            }
+
+            if (maleFinishes <= _lastInsideCount)
+            {
+                _lastInsideCount = maleFinishes;
+                return;
+            }
+
+            int delta = maleFinishes - _lastInsideCount;
+            _lastInsideCount = maleFinishes;
+            if (!InflateOnInsideEnabled)
+                return;
+
+            for (int i = 0; i < delta; i++)
+                TryIncreaseOneLevel(hScene);
         }
 
         internal static void TryStartFiveStepVerification(MonoBehaviour host, ConfigEntry<bool>? requested)
@@ -590,10 +726,132 @@ namespace HS2OrbitRuntimeHotfix
             return false;
         }
 
+        private static bool TryReadOrbitInflateSetting(out bool value)
+        {
+            value = false;
+            if (!_checkedOrbitInflateSetting)
+            {
+                var orbitPluginType = FindLoadedType("HS2OrbitAndExciter.HS2OrbitAndExciter", OrbitAssembly);
+                _orbitInflateOnInside = orbitPluginType?.GetField(
+                    "CumflationInflateOnInside",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                _checkedOrbitInflateSetting = true;
+            }
+
+            if (_orbitInflateOnInside == null)
+                return false;
+
+            try
+            {
+                object? entry = _orbitInflateOnInside.GetValue(null);
+                object? configured = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                if (configured is bool boolValue)
+                {
+                    value = boolValue;
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private static int ReadOrbitIntSetting(
+            string fieldName,
+            ref FieldInfo? field,
+            ref bool checkedSetting,
+            int fallback,
+            int min,
+            int max)
+        {
+            if (!checkedSetting)
+            {
+                var orbitPluginType = FindLoadedType("HS2OrbitAndExciter.HS2OrbitAndExciter", OrbitAssembly);
+                field = orbitPluginType?.GetField(
+                    fieldName,
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                checkedSetting = true;
+            }
+
+            try
+            {
+                object? entry = field?.GetValue(null);
+                object? configured = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                return configured == null
+                    ? fallback
+                    : Math.Max(min, Math.Min(max, Convert.ToInt32(configured)));
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static void EnsurePregnancyPlusMaxLevel(int requested)
+        {
+            try
+            {
+                object? entry = _maxLevelEntry?.GetValue(null, null) ?? _maxLevelEntryField?.GetValue(null);
+                var property = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public);
+                if (property == null || !property.CanRead || !property.CanWrite)
+                    return;
+
+                int current = Convert.ToInt32(property.GetValue(entry, null));
+                if (current < requested)
+                    property.SetValue(entry, requested, null);
+            }
+            catch { }
+        }
+
         private static object? GetHScene()
         {
             try { return _getHScene?.Invoke(null, null); }
             catch { return null; }
+        }
+
+        private static bool TryGetMaleFinishCount(object hScene, out int count)
+        {
+            count = 0;
+            try
+            {
+                var sceneType = hScene.GetType();
+                object? ctrlFlag = sceneType.GetField("ctrlFlag", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(hScene)
+                    ?? sceneType.GetProperty("ctrlFlag", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(hScene, null);
+                if (ctrlFlag == null)
+                    return false;
+
+                var flagType = ctrlFlag.GetType();
+                if (!TryReadCounter(flagType, ctrlFlag, "numInside", out int inside))
+                    return false;
+
+                TryReadCounter(flagType, ctrlFlag, "numOutSide", out int outside);
+                TryReadCounter(flagType, ctrlFlag, "numDrink", out int drink);
+                TryReadCounter(flagType, ctrlFlag, "numVomit", out int vomit);
+                count = inside + outside + drink + vomit;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadCounter(Type flagType, object ctrlFlag, string name, out int value)
+        {
+            value = 0;
+            try
+            {
+                object? raw = flagType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(ctrlFlag)
+                    ?? flagType.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(ctrlFlag, null);
+                if (raw == null)
+                    return false;
+                value = Convert.ToInt32(raw);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool TryGetControllers(object hScene, out List<Component> controllers)
