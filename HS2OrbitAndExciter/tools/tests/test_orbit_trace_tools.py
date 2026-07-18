@@ -555,6 +555,40 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("hScene.ctrlFlag.AddOrgasm()", smoke)
         self.assertIn('CaptureKeyframe("cumflation_after"', smoke)
 
+    def test_body_growth_is_session_only_across_save_and_quit_paths(self):
+        plugin_root = TOOLS.parent
+        plugin = (plugin_root / "HS2OrbitAndExciter.cs").read_text(encoding="utf-8-sig")
+        controller = (plugin_root / "OrbitController.cs").read_text(encoding="utf-8-sig")
+        director = (plugin_root / "OrbitManualDirector.cs").read_text(encoding="utf-8-sig")
+        lifecycle = (plugin_root / "Patches" / "BustGrowthLifecyclePatch.cs").read_text(
+            encoding="utf-8-sig"
+        )
+        bust_save = (plugin_root / "Patches" / "BustGrowthSavePatch.cs").read_text(
+            encoding="utf-8-sig"
+        )
+        belly_save = (plugin_root / "Patches" / "PregnancyPlusSavePatch.cs").read_text(
+            encoding="utf-8-sig"
+        )
+        assist = (plugin_root / "PregnancyPlusAssist.cs").read_text(encoding="utf-8-sig")
+
+        self.assertIn("PatchSafe(harmony, typeof(Patches.BustGrowthSavePatch))", plugin)
+        self.assertIn("PatchSafe(harmony, typeof(Patches.PregnancyPlusSavePatch))", plugin)
+        self.assertIn("Exception? __exception", bust_save)
+        self.assertIn("TryPrepareForSave(__instance", bust_save)
+        self.assertIn('AccessTools.Method(controller, "OnCardBeingSaved")', belly_save)
+        self.assertIn("TryPrepareBellyForSave(__instance", belly_save)
+        self.assertIn("RuntimeSnapshots", assist)
+        self.assertIn("belly save guard", assist)
+
+        for reason, source in (
+            ("application_quit", controller),
+            ("h_scene_exit", controller),
+            ("new_h_scene", director),
+            ("h_scene_destroy", lifecycle),
+        ):
+            self.assertIn(f'OrbitOrgasmBustGrowth.TryRestoreForLifecycle("{reason}")', source)
+            self.assertIn(f'PregnancyPlusAssist.TryRestoreForLifecycle("{reason}")', source)
+
     def test_character_array_cache_waits_for_hscene_start_replacement(self):
         plugin_root = TOOLS.parent
         helpers = (plugin_root / "OrbitHelpers.cs").read_text(encoding="utf-8-sig")

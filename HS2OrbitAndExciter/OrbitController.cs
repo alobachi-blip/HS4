@@ -132,10 +132,10 @@ namespace HS2OrbitAndExciter
 
         private void OnApplicationQuit()
         {
-            // Do not leave the temporary bust growth in ChaFile when the game
-            // closes directly from inside H, before the next Update can observe
-            // that HScene is gone.
+            // Do not leave temporary bust/belly changes in character data when
+            // Alt+F4 or another quit path closes the game directly from H.
             OrbitOrgasmBustGrowth.TryRestoreForLifecycle("application_quit");
+            PregnancyPlusAssist.TryRestoreForLifecycle("application_quit");
         }
 
         /// <summary>After G/H/J manual hotkey completes: restart motion and auto-advance assist.</summary>
@@ -225,6 +225,7 @@ namespace HS2OrbitAndExciter
                 {
                     OrbitHelpers.ResetSceneCaches();
                     OrbitOrgasmBustGrowth.TryRestoreForLifecycle("h_scene_exit");
+                    PregnancyPlusAssist.TryRestoreForLifecycle("h_scene_exit");
                     OrbitVoiceTour.OnHSceneExited();
                 }
                 _manualDirectorHSceneId = -1;

@@ -323,6 +323,7 @@ namespace HS2OrbitAndExciter
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
             PatchSafe(harmony, typeof(Patches.PregnancyPlusNativeCumflationPatch));
+            PatchSafe(harmony, typeof(Patches.PregnancyPlusSavePatch));
             PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
             PatchSafe(harmony, typeof(Patches.BustGrowthLifecyclePatch));
             PatchSafe(harmony, typeof(Patches.BustGrowthSavePatch));

@@ -35,6 +35,35 @@ namespace HS2OrbitAndExciter
         private static bool _unavailableLogged;
         private static bool _methodUnavailableLogged;
 
+        private sealed class BellyRuntimeSnapshot
+        {
+            internal BellyRuntimeSnapshot(
+                Component controller,
+                float inflationSize,
+                float inflationChange,
+                float targetSize,
+                int currentLevel)
+            {
+                Controller = controller;
+                InflationSize = inflationSize;
+                InflationChange = inflationChange;
+                TargetSize = targetSize;
+                CurrentLevel = currentLevel;
+            }
+
+            internal Component Controller { get; }
+            internal float InflationSize { get; }
+            internal float InflationChange { get; }
+            internal float TargetSize { get; }
+            internal int CurrentLevel { get; }
+        }
+
+        // Orbit belly changes are H-session effects. Keep the original
+        // PregnancyPlus runtime/card values so automatic grow/deflate/reset
+        // cannot leak into a character card or survive the H scene.
+        private static readonly Dictionary<int, BellyRuntimeSnapshot> RuntimeSnapshots =
+            new Dictionary<int, BellyRuntimeSnapshot>();
+
         private const int DefaultInflationMaxLevel = 18;
         private const int DefaultInflationStep = 1;
 
@@ -340,6 +369,9 @@ namespace HS2OrbitAndExciter
             if (ctrl == null)
                 return false;
 
+            if (!TryCaptureRuntimeBaseline(ctrl))
+                return false;
+
             bool ok = false;
 
             if (_currentInflationLevel != null)
@@ -476,6 +508,9 @@ namespace HS2OrbitAndExciter
                 _inflationChange == null || _targetPregPlusSize == null || maxLevel <= 0)
                 return false;
 
+            if (!(controller is Component component) || !TryCaptureRuntimeBaseline(component))
+                return false;
+
             try
             {
                 int clampedLevel = Mathf.Clamp(level, 0, maxLevel);
@@ -494,6 +529,144 @@ namespace HS2OrbitAndExciter
                 HS2OrbitAndExciter.Log?.LogWarning($"Orbit: PregnancyPlus visible belly update failed: {ex.Message}");
                 return false;
             }
+        }
+
+        private static bool TryCaptureRuntimeBaseline(Component controller)
+        {
+            int instanceId = controller.GetInstanceID();
+            if (RuntimeSnapshots.ContainsKey(instanceId))
+                return true;
+
+            if (_currentInflationLevel == null || _inflationChange == null ||
+                _infConfig == null || _inflationSize == null || _targetPregPlusSize == null)
+                return false;
+
+            try
+            {
+                object? config = _infConfig.GetValue(controller);
+                if (config == null)
+                    return false;
+
+                var snapshot = new BellyRuntimeSnapshot(
+                    controller,
+                    Convert.ToSingle(_inflationSize.GetValue(config)),
+                    Convert.ToSingle(_inflationChange.GetValue(controller)),
+                    Convert.ToSingle(_targetPregPlusSize.GetValue(controller, null)),
+                    Convert.ToInt32(_currentInflationLevel.GetValue(controller)));
+                RuntimeSnapshots.Add(instanceId, snapshot);
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: belly session baseline {snapshot.InflationSize:F2} " +
+                    $"(level {snapshot.CurrentLevel})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning(
+                    $"Orbit: belly session baseline capture failed; effect skipped: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Put the pre-H PregnancyPlus size into its serializable data just for
+        /// OnCardBeingSaved. The mesh and the rest of the runtime state remain
+        /// enlarged until the save callback completes.
+        /// </summary>
+        internal static bool TryPrepareBellyForSave(object controller, out float runtimeValue)
+        {
+            runtimeValue = 0f;
+            if (!(controller is Component component)
+                || !RuntimeSnapshots.TryGetValue(component.GetInstanceID(), out BellyRuntimeSnapshot snapshot)
+                || _infConfig == null
+                || _inflationSize == null)
+                return false;
+
+            try
+            {
+                object? config = _infConfig.GetValue(controller);
+                if (config == null)
+                    return false;
+
+                float current = Convert.ToSingle(_inflationSize.GetValue(config));
+                if (Mathf.Approximately(current, snapshot.InflationSize))
+                    return false;
+
+                runtimeValue = current;
+                _inflationSize.SetValue(config, snapshot.InflationSize);
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: belly save guard {current:F2} -> {snapshot.InflationSize:F2}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: belly save guard failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static void RestoreBellyAfterSave(object controller, float runtimeValue)
+        {
+            if (float.IsNaN(runtimeValue) || _infConfig == null || _inflationSize == null)
+                return;
+
+            try
+            {
+                object? config = _infConfig.GetValue(controller);
+                if (config != null)
+                    _inflationSize.SetValue(config, runtimeValue);
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning(
+                    $"Orbit: belly runtime restore after save failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Restore all Orbit-owned PregnancyPlus changes at H teardown.</summary>
+        internal static bool TryRestoreForLifecycle(string reason)
+        {
+            if (RuntimeSnapshots.Count == 0)
+                return false;
+
+            var snapshots = new List<BellyRuntimeSnapshot>(RuntimeSnapshots.Values);
+            RuntimeSnapshots.Clear();
+            bool any = false;
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                BellyRuntimeSnapshot snapshot = snapshots[i];
+                try
+                {
+                    Component controller = snapshot.Controller;
+                    object? config = _infConfig?.GetValue(controller);
+                    if (config != null && _inflationSize != null)
+                        _inflationSize.SetValue(config, snapshot.InflationSize);
+                    _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
+                    _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
+                    _inflationChange?.SetValue(controller, snapshot.InflationChange);
+
+                    // Rebuild the visible mesh at the original H-entry size.
+                    _meshInflateFloat?.Invoke(
+                        controller,
+                        new object?[] { snapshot.InflationSize, "OrbitLifecycleRestore", null });
+
+                    // MeshInflate owns inflationSize but not the HS2 runtime
+                    // counters; make those exact again after its synchronous setup.
+                    _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
+                    _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
+                    _inflationChange?.SetValue(controller, snapshot.InflationChange);
+                    any = true;
+                    HS2OrbitAndExciter.Log?.LogInfo(
+                        $"Orbit: belly lifecycle restore ({reason}) -> {snapshot.InflationSize:F2} " +
+                        $"(level {snapshot.CurrentLevel})");
+                }
+                catch (Exception ex)
+                {
+                    HS2OrbitAndExciter.Log?.LogWarning(
+                        $"Orbit: belly lifecycle restore ({reason}) failed: {ex.Message}");
+                }
+            }
+
+            return any;
         }
 
         private static int VisibleSizeToLevel(float size, int maxLevel)

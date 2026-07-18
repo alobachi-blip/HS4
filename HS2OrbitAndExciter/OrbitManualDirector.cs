@@ -68,6 +68,7 @@ namespace HS2OrbitAndExciter
             // Protect against a scene transition that skips the controller's
             // normal no-HScene frame (and therefore skips the usual cleanup).
             OrbitOrgasmBustGrowth.TryRestoreForLifecycle("new_h_scene");
+            PregnancyPlusAssist.TryRestoreForLifecycle("new_h_scene");
             OrbitOrgasmBustGrowth.ResetHud();
             OrbitOrgasmNippleSpray.Reset();
             HScene? scene = hScene ?? OrbitController.TryGetHScene();

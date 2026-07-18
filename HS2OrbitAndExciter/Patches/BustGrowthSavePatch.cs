@@ -13,9 +13,6 @@ namespace HS2OrbitAndExciter.Patches
     [HarmonyPatch]
     internal static class BustGrowthSavePatch
     {
-        private static readonly Dictionary<ChaFileControl, float> PendingRuntimeValues =
-            new Dictionary<ChaFileControl, float>();
-
         private static IEnumerable<MethodBase> TargetMethods()
         {
             return typeof(ChaFileControl)
@@ -24,31 +21,30 @@ namespace HS2OrbitAndExciter.Patches
         }
 
         [HarmonyPrefix]
-        private static void Prefix(ChaFileControl __instance)
+        private static void Prefix(ChaFileControl __instance, out float __state)
         {
+            __state = float.NaN;
             if (OrbitOrgasmBustGrowth.TryPrepareForSave(__instance, out float runtimeValue))
-                PendingRuntimeValues[__instance] = runtimeValue;
+                __state = runtimeValue;
         }
 
         [HarmonyPostfix]
-        private static void Postfix(ChaFileControl __instance)
+        private static void Postfix(float __state)
         {
-            Restore(__instance);
+            Restore(__state);
         }
 
         [HarmonyFinalizer]
-        private static System.Exception? Finalizer(ChaFileControl __instance, System.Exception? exception)
+        private static System.Exception? Finalizer(float __state, System.Exception? __exception)
         {
-            Restore(__instance);
-            return exception;
+            Restore(__state);
+            return __exception;
         }
 
-        private static void Restore(ChaFileControl instance)
+        private static void Restore(float runtimeValue)
         {
-            if (!PendingRuntimeValues.TryGetValue(instance, out float runtimeValue))
+            if (float.IsNaN(runtimeValue))
                 return;
-
-            PendingRuntimeValues.Remove(instance);
             OrbitOrgasmBustGrowth.RestoreAfterSave(runtimeValue);
         }
     }
