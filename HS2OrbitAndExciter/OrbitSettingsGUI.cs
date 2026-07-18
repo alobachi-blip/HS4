@@ -127,7 +127,7 @@ namespace HS2OrbitAndExciter
             if (_page == SettingsPage.Camera)
             {
             Section("環視相機");
-            GUILayout.Label("按 O 停轉並交還原版相機；流程協助仍繼續。再次按 O 從目前視角續轉。", label);
+            GUILayout.Label("按原版相機鍵會自動停轉；也可按 O 手動停轉。流程協助仍繼續，再按 O 從目前視角續轉。", label);
 
             DrawFloatControl(
                 "轉一圈要幾秒",
