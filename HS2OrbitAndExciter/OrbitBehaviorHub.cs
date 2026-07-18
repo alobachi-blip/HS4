@@ -203,6 +203,11 @@ namespace HS2OrbitAndExciter
         /// </summary>
         internal static bool CanAutoAdvance(HSceneFlagCtrl? ctrlFlag, out string reason)
         {
+            if (OrbitSettingsGUI.IsVisible)
+            {
+                reason = OrbitAssistReasons.PointerOverUi;
+                return false;
+            }
             if (OrbitManualDirector.IsBusy)
             {
                 reason = OrbitAssistReasons.ManualBusy;
@@ -286,6 +291,11 @@ namespace HS2OrbitAndExciter
         /// <summary>Cycle may write sel when UI/orgasm allow; PosePending does not block.</summary>
         internal static bool CanQueueCyclePose(HSceneFlagCtrl? ctrlFlag, out string reason)
         {
+            if (OrbitSettingsGUI.IsVisible)
+            {
+                reason = OrbitAssistReasons.PointerOverUi;
+                return false;
+            }
             if (OrbitManualDirector.IsBusy)
             {
                 reason = OrbitAssistReasons.ManualBusy;
@@ -805,7 +815,7 @@ namespace HS2OrbitAndExciter
         /// <summary>Real mouse wheel (not fake bypass) while orbit: arm escape from long waits.</summary>
         internal static void TickUserWheelEscape()
         {
-            if (!_orbitAssistActive)
+            if (!_orbitAssistActive || OrbitSettingsGUI.IsVisible)
                 return;
             float axis = Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Abs(axis) < 0.01f)

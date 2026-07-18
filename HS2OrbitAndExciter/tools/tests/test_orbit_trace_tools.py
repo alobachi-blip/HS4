@@ -84,7 +84,7 @@ class TraceRegressionTests(unittest.TestCase):
         rows = [
             row("female_orgasm", "add", ut=1.0),
             row("female_orgasm", "add", ut=2.0),
-            row("faint", "enter", ut=3.0),
+            row("faint", "isFaintness=1", ut=3.0, loc="enter"),
             row("female_orgasm", "add", ut=4.0),
         ]
         issues = reg.analyze_rows(rows, female_orgasm_target=3)
@@ -95,7 +95,7 @@ class TraceRegressionTests(unittest.TestCase):
             row("female_orgasm", "add", ut=1.0),
             row("female_orgasm", "add", ut=2.0),
             row("female_orgasm", "add", ut=3.0),
-            row("faint", "enter", ut=4.0),
+            row("faint", "isFaintness=1", ut=4.0, loc="enter"),
         ]
         issues = reg.analyze_rows(rows, female_orgasm_target=3)
         self.assertTrue(any(issue.code == "faint_stress_no_post_faint_progress" for issue in issues))
@@ -273,6 +273,14 @@ class TraceRegressionTests(unittest.TestCase):
         ]
         issues = reg.analyze_rows(rows)
         self.assertTrue(any(issue.code == "ina_resumed_loop" for issue in issues))
+
+    def test_ina_pull_closes_on_full_animator_pull_name(self):
+        rows = [
+            row("ina", "pull_click", ut=1.0),
+            row("framing", "ok", ut=2.0, data={"clip": "M_D_Pull"}),
+        ]
+        issues = reg.analyze_rows(rows)
+        self.assertFalse(any(issue.code == "ina_pull_not_observed" for issue in issues))
 
     def test_spanking_pulse_must_reach_action(self):
         rows = [
@@ -506,6 +514,46 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("VoiceTour 階段不變", patch)
         self.assertIn("[HarmonyFinalizer]", patch)
         self.assertIn("KeyNotFoundException", patch)
+
+    def test_cumflation_direct_visible_path_sets_weights_before_mesh_update(self):
+        plugin_root = TOOLS.parent
+        assist = (plugin_root / "PregnancyPlusAssist.cs").read_text(encoding="utf-8-sig")
+        helper = assist[assist.index("private static bool TryApplyDirectVisibleLevel"):]
+        target_set = helper.index("_targetPregPlusSize.SetValue(controller, size, null)")
+        current_set = helper.index("_inflationChange.SetValue(controller, size)")
+        mesh_call = helper.index("_meshInflateFloat.Invoke(controller")
+        self.assertLess(target_set, mesh_call)
+        self.assertLess(current_set, mesh_call)
+        self.assertNotIn("_hs2Inflation!.Invoke", assist)
+
+    def test_cumflation_deduplicates_scene_references_but_keeps_distinct_females(self):
+        plugin_root = TOOLS.parent
+        assist = (plugin_root / "PregnancyPlusAssist.cs").read_text(encoding="utf-8-sig")
+        inflate = assist[assist.index("internal static bool TryInflateOnOrgasm"):]
+        inflate = inflate[:inflate.index("internal static bool TryInflateOnInside")]
+        self.assertIn("new HashSet<int>()", inflate)
+        self.assertIn("seenFemaleIds.Add(cha.GetInstanceID())", inflate)
+        self.assertIn("TryInflateOnCha(cha)", inflate)
+
+    def test_cumflation_owns_native_finish_without_rewriting_pregnancy_config(self):
+        plugin_root = TOOLS.parent
+        assist = (plugin_root / "PregnancyPlusAssist.cs").read_text(encoding="utf-8-sig")
+        native_patch = (plugin_root / "Patches" / "PregnancyPlusNativeCumflationPatch.cs").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("Hooks_HS2_Inflation", native_patch)
+        self.assertIn("TriggerInflation", native_patch)
+        resolver = assist[assist.index("internal static bool TryRaiseMaxInflationLevel"):]
+        resolver = resolver[:resolver.index("internal static string InflationCapStatus")]
+        self.assertIn("return _resolved;", resolver)
+        self.assertNotIn("valueProperty.SetValue", resolver.split("return _resolved;", 1)[0])
+
+    def test_cumflation_smoke_uses_native_female_orgasm_and_before_after_shots(self):
+        plugin_root = TOOLS.parent
+        smoke = (plugin_root / "OrbitSmokeDriver.cs").read_text(encoding="utf-8-sig")
+        self.assertIn('CaptureKeyframe("cumflation_before"', smoke)
+        self.assertIn("hScene.ctrlFlag.AddOrgasm()", smoke)
+        self.assertIn('CaptureKeyframe("cumflation_after"', smoke)
 
 
 if __name__ == "__main__":

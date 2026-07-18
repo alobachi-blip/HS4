@@ -7,15 +7,26 @@ namespace HS2OrbitAndExciter
     /// </summary>
     public class OrbitSettingsGUI : MonoBehaviour
     {
+        private enum SettingsPage
+        {
+            Quick,
+            Camera,
+            Flow,
+            Voice,
+            Effects
+        }
+
         private const KeyCode MenuHotkey = KeyCode.P;
         /// <summary>上下限跨度超過此倍率時改用數值框（並顯示上下限）。</summary>
         private const float MaxSliderSpanRatio = 80f;
 
         private bool _visible;
         private Rect _windowRect = new Rect(80, 60, 520, 700);
-        private Vector2 _scroll;
+        private readonly Vector2[] _pageScroll = new Vector2[5];
+        private SettingsPage _page = SettingsPage.Quick;
         private GUIStyle? _labelStyle;
         private GUIStyle? _sectionStyle;
+        private GUIStyle? _hintStyle;
         private bool _stylesInitialized;
         private bool _lastOverrideFaintness;
 
@@ -36,7 +47,12 @@ namespace HS2OrbitAndExciter
             _labelStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
             _sectionStyle = new GUIStyle(GUI.skin.box)
             {
-                padding = new RectOffset(8, 8, 4, 4)
+                padding = new RectOffset(10, 8, 5, 5)
+            };
+            _hintStyle = new GUIStyle(GUI.skin.label)
+            {
+                wordWrap = true,
+                fontSize = Mathf.Max(10, GUI.skin.label.fontSize - 1)
             };
             _stylesInitialized = true;
         }
@@ -51,12 +67,20 @@ namespace HS2OrbitAndExciter
             }
             if (!_visible) return;
 
+            if (Event.current != null && Event.current.type == EventType.KeyDown
+                && Event.current.keyCode == KeyCode.Escape)
+            {
+                _visible = false;
+                Event.current.Use();
+                return;
+            }
+
             InitStyles();
             float maxH = Mathf.Max(280f, Screen.height - 48f);
-            if (_windowRect.height > maxH)
-                _windowRect.height = maxH;
-            if (_windowRect.width < 480f)
-                _windowRect.width = 520f;
+            _windowRect.height = Mathf.Min(700f, maxH);
+            _windowRect.width = Mathf.Min(520f, Mathf.Max(420f, Screen.width - 32f));
+            _windowRect.x = Mathf.Clamp(_windowRect.x, 8f, Mathf.Max(8f, Screen.width - _windowRect.width - 8f));
+            _windowRect.y = Mathf.Clamp(_windowRect.y, 8f, Mathf.Max(8f, Screen.height - _windowRect.height - 8f));
             _windowRect = GUILayout.Window(
                 9001,
                 _windowRect,
@@ -69,31 +93,41 @@ namespace HS2OrbitAndExciter
             var label = _labelStyle ?? GUI.skin.label;
             GUILayout.BeginVertical(GUILayout.ExpandWidth(true));
 
-            float scrollH = Mathf.Max(160f, _windowRect.height - 56f);
-            _scroll = GUILayout.BeginScrollView(_scroll, false, true, GUILayout.Height(scrollH));
+            DrawPageTabs();
+            GUILayout.Label(PageHint(), _hintStyle ?? label);
+
+            int pageIndex = (int)_page;
+            float scrollH = Mathf.Max(160f, _windowRect.height - 112f);
+            _pageScroll[pageIndex] = GUILayout.BeginScrollView(
+                _pageScroll[pageIndex], false, true, GUILayout.Height(scrollH));
 
             // ─── 熱鍵（開頭）───────────────────────────────────
-            Section("可用熱鍵");
-            GUILayout.Label(OrbitManualHotkeys.SettingsHotkeysBlock, label);
+            if (_page == SettingsPage.Quick)
+            {
+                Section("可用熱鍵");
+                GUILayout.Label(OrbitManualHotkeys.SettingsHotkeysBlock, label);
 
-            // ─── 狀態面板 ───────────────────────────────────────
-            Section("狀態面板（左下角）");
-            if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
-            {
-                HS2OrbitAndExciter.OrbitStatusHudEnabled.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.OrbitStatusHudEnabled.Value,
-                    " 顯示狀態面板（環視／語音巡禮進行中）");
-            }
-            if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == true)
-            {
-                bool pv = OrbitStatusHud.GetPanelVisible();
-                pv = GUILayout.Toggle(pv, " 目前正在顯示");
-                OrbitStatusHud.SetPanelVisible(pv);
+                // ─── 狀態面板 ───────────────────────────────────────
+                Section("狀態面板（左下角）");
+                if (HS2OrbitAndExciter.OrbitStatusHudEnabled != null)
+                {
+                    HS2OrbitAndExciter.OrbitStatusHudEnabled.Value = GUILayout.Toggle(
+                        HS2OrbitAndExciter.OrbitStatusHudEnabled.Value,
+                        " 顯示狀態面板（環視／語音巡禮進行中）");
+                }
+                if (HS2OrbitAndExciter.OrbitStatusHudEnabled?.Value == true)
+                {
+                    bool pv = OrbitStatusHud.GetPanelVisible();
+                    pv = GUILayout.Toggle(pv, " 目前正在顯示");
+                    OrbitStatusHud.SetPanelVisible(pv);
+                }
             }
 
             // ─── 環視相機 ───────────────────────────────────────
+            if (_page == SettingsPage.Camera)
+            {
             Section("環視相機");
-            GUILayout.Label("開啟協助後相機自動環繞；關掉協助才恢復手動調視角。", label);
+            GUILayout.Label("按 O 停轉並交還原版相機；流程協助仍繼續。再次按 O 從目前視角續轉。", label);
 
             DrawFloatControl(
                 "轉一圈要幾秒",
@@ -131,63 +165,11 @@ namespace HS2OrbitAndExciter
                 DrawFloatControl("拉近倍率", "0＝極近；與拉遠倒掛會自動對調", HS2OrbitAndExciter.OrbitZoomNearMult, 0f, 3f, 0.01f, "F2");
                 DrawFloatControl("拉遠倍率", "越大越遠；與拉近倒掛會自動對調", HS2OrbitAndExciter.OrbitZoomFarMult, 0f, 3f, 0.01f, "F2");
             }
-
-            Section("Storyboard Package v1");
-            GUILayout.Label("Optional local video-generation package output. Writes to HS4 output only; HS2 game folders are refused.", label);
-            if (HS2OrbitAndExciter.StoryboardPackageEnabled != null)
-            {
-                HS2OrbitAndExciter.StoryboardPackageEnabled.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.StoryboardPackageEnabled.Value,
-                    " Enable package recording during orbit");
             }
-            DrawFloatControl(
-                "Shot duration",
-                "3 to 6 seconds per shot",
-                HS2OrbitAndExciter.StoryboardShotDurationSeconds,
-                3f, 6f, 0.1f, "F1", "s");
-            DrawIntControl(
-                "Target FPS",
-                "Written to storyboard.ndjson and job files",
-                HS2OrbitAndExciter.StoryboardFps,
-                12, 60);
-            if (HS2OrbitAndExciter.StoryboardCaptureEndFrame != null)
-            {
-                HS2OrbitAndExciter.StoryboardCaptureEndFrame.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.StoryboardCaptureEndFrame.Value,
-                    " Capture end frame for each shot");
-            }
-            if (HS2OrbitAndExciter.StoryboardSafeCameraEnabled != null)
-            {
-                HS2OrbitAndExciter.StoryboardSafeCameraEnabled.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.StoryboardSafeCameraEnabled.Value,
-                    " Safe camera: horizon-locked small world-vertical orbit");
-            }
-            DrawFloatControl(
-                "Max deg/shot",
-                "Storyboard safe camera cap; lower is more stable for I2V",
-                HS2OrbitAndExciter.StoryboardMaxOrbitDegreesPerShot,
-                0f, 45f, 1f, "F0", "deg");
-            if (HS2OrbitAndExciter.StoryboardRawSequenceEnabled != null)
-            {
-                HS2OrbitAndExciter.StoryboardRawSequenceEnabled.Value = GUILayout.Toggle(
-                    HS2OrbitAndExciter.StoryboardRawSequenceEnabled.Value,
-                    " Capture raw PNG sequence to frames_raw/source_%04d.png");
-            }
-            DrawFloatControl(
-                "Raw sequence",
-                "Captured once per package session at Target FPS",
-                HS2OrbitAndExciter.StoryboardRawSequenceSeconds,
-                1f, 6f, 0.1f, "F1", "s");
-            if (HS2OrbitAndExciter.StoryboardPackageOutputRoot != null)
-            {
-                GUILayout.Label("Output root:", label);
-                string nextRoot = GUILayout.TextField(HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value ?? "", GUILayout.Width(460));
-                if (nextRoot != HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value)
-                    HS2OrbitAndExciter.StoryboardPackageOutputRoot.Value = nextRoot;
-            }
-            GUILayout.Label(StoryboardPackageRecorder.StatusText, label);
 
             // ─── 流程／肚子變化 ──────────────────────────────────
+            if (_page == SettingsPage.Flow)
+            {
             Section("流程／肚子變化");
             if (HS2OrbitAndExciter.CumflationInflateOnInside != null)
             {
@@ -241,8 +223,11 @@ namespace HS2OrbitAndExciter
                 HS2OrbitAndExciter.ExcitementTriggerDelaySeconds,
                 0f, 10f, 0.1f, "F1", "秒",
                 onChanged: v => Patches.ExciterState.DelaySecondsAtFull = v);
+            }
 
             // ─── 語音巡禮 ───────────────────────────────────────
+            if (_page == SettingsPage.Voice)
+            {
             Section("語音巡禮");
             GUILayout.Label("依高潮／射精依序切換音庫階段。", label);
             if (HS2OrbitAndExciter.VoiceTourEnabled != null)
@@ -287,8 +272,11 @@ namespace HS2OrbitAndExciter
                 $"現在：{OrbitVoiceTour.CurrentLabelZh}  {OrbitVoiceTour.StageIndex + 1}/{OrbitVoiceTour.StageCount}",
                 label);
             GUILayout.EndHorizontal();
+            }
 
             // ─── 高潮特效 ───────────────────────────────────────
+            if (_page == SettingsPage.Effects)
+            {
             Section("高潮特效");
 
             if (HS2OrbitAndExciter.OrgasmTattooEnabled != null)
@@ -353,13 +341,14 @@ namespace HS2OrbitAndExciter
                     GUILayout.EndHorizontal();
                 }
             }
+            }
 
             GUILayout.Space(10);
             GUILayout.Label("變更會自動儲存。", label);
 
             GUILayout.EndScrollView();
 
-            if (GUILayout.Button("關閉"))
+            if (GUILayout.Button("關閉（Esc）"))
                 _visible = false;
 
             GUILayout.EndVertical();
@@ -370,6 +359,43 @@ namespace HS2OrbitAndExciter
         {
             GUILayout.Space(8);
             GUILayout.Label(title, _sectionStyle ?? GUI.skin.box);
+        }
+
+        private void DrawPageTabs()
+        {
+            GUILayout.BeginHorizontal();
+            DrawPageTab(SettingsPage.Quick, "快速");
+            DrawPageTab(SettingsPage.Camera, "相機");
+            DrawPageTab(SettingsPage.Flow, "流程");
+            DrawPageTab(SettingsPage.Voice, "語音");
+            DrawPageTab(SettingsPage.Effects, "特效");
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawPageTab(SettingsPage page, string label)
+        {
+            string text = _page == page ? "● " + label : label;
+            if (!GUILayout.Button(text, GUILayout.Height(28f)))
+                return;
+            _page = page;
+            GUI.FocusControl(null);
+        }
+
+        private string PageHint()
+        {
+            switch (_page)
+            {
+                case SettingsPage.Camera:
+                    return "只調整環視速度、焦點距離與每圈鏡頭變化。";
+                case SettingsPage.Flow:
+                    return "調整自動流程、肚子變化、脫力與感度。";
+                case SettingsPage.Voice:
+                    return "管理語音階段的推進方式與角色進度。";
+                case SettingsPage.Effects:
+                    return "高潮時的視覺效果；只展開已啟用的細項。";
+                default:
+                    return "先看熱鍵與目前狀態；詳細設定依類別分頁。";
+            }
         }
 
         /// <summary>

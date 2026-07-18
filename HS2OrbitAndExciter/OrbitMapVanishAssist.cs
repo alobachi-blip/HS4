@@ -44,6 +44,149 @@ namespace HS2OrbitAndExciter
         private static bool _resolved;
         private static int _injectedMapInstanceId = -1;
         private static int _injectedCameraInstanceId = -1;
+        private static GameObject? _injectedMapRoot;
+        private static readonly HashSet<CameraControl_Ver2.VisibleObject> _injectedEntries =
+            new HashSet<CameraControl_Ver2.VisibleObject>();
+        private static readonly Dictionary<Renderer, HashSet<CameraControl_Ver2.VisibleObject>> _hiddenByRenderer =
+            new Dictionary<Renderer, HashSet<CameraControl_Ver2.VisibleObject>>();
+        private static readonly Dictionary<Renderer, bool> _originalRendererEnabled =
+            new Dictionary<Renderer, bool>();
+        private static readonly HashSet<Renderer> _directOccludersThisFrame =
+            new HashSet<Renderer>();
+        private static readonly Dictionary<Renderer, bool> _directOriginalRendererEnabled =
+            new Dictionary<Renderer, bool>();
+        private static readonly HashSet<CameraControl_Ver2.VisibleObject> _directEntries =
+            new HashSet<CameraControl_Ver2.VisibleObject>();
+        private static readonly HashSet<string> _directColliderNames =
+            new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<GameObject, bool> _directInactiveObjects =
+            new Dictionary<GameObject, bool>();
+
+        internal static bool IsDirectOccluderHidden(Collider col) =>
+            col != null && _directColliderNames.Contains(col.name);
+
+        internal static int HiddenRendererCount => _hiddenByRenderer.Count;
+
+        /// <summary>Hide the actual renderer hit between camera and character. This is
+        /// independent of vanilla's camera-trigger based vanish list.</summary>
+        internal static void BeginDirectOcclusionFrame()
+        {
+            foreach (var entry in _directEntries)
+                SetInjectedEntryVisibility(entry, true);
+            _directEntries.Clear();
+            _directColliderNames.Clear();
+            foreach (var pair in _directInactiveObjects)
+                if (pair.Key != null) pair.Key.SetActive(pair.Value);
+            _directInactiveObjects.Clear();
+            foreach (var pair in _directOriginalRendererEnabled)
+            {
+                if (pair.Key != null && !_directOccludersThisFrame.Contains(pair.Key))
+                    pair.Key.enabled = pair.Value;
+            }
+            _directOccludersThisFrame.Clear();
+        }
+
+        internal static void HideDirectOccluder(Collider col)
+        {
+            if (col == null) return;
+            foreach (var entry in _injectedEntries)
+            {
+                if (entry != null && string.Equals(entry.nameCollider, col.name, StringComparison.Ordinal))
+                {
+                    SetInjectedEntryVisibility(entry, false);
+                    _directEntries.Add(entry);
+                    if (entry.listObj != null)
+                    {
+                        foreach (var go in entry.listObj)
+                        {
+                            if (go == null || go.name.EndsWith("_col", StringComparison.OrdinalIgnoreCase) ||
+                                go.name.EndsWith("_meta", StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            if (!_directInactiveObjects.ContainsKey(go))
+                                _directInactiveObjects[go] = go.activeSelf;
+                            go.SetActive(false);
+                        }
+                    }
+                    _directColliderNames.Add(col.name);
+                    return;
+                }
+            }
+            if (_injectedMapRoot != null)
+            {
+                string visualName = col.name;
+                if (visualName.EndsWith("_col", StringComparison.OrdinalIgnoreCase))
+                    visualName = visualName.Substring(0, visualName.Length - 4);
+                else if (visualName.EndsWith("_meta", StringComparison.OrdinalIgnoreCase))
+                    visualName = visualName.Substring(0, visualName.Length - 5);
+                var visual = FindNamedTransform(_injectedMapRoot, visualName);
+                if (visual != null)
+                {
+                    var renderers = visual.GetComponentsInChildren<Renderer>(true);
+                    for (int i = 0; i < renderers.Length; i++)
+                    {
+                        var r = renderers[i];
+                        if (r == null || r.GetComponentInParent<AIChara.ChaControl>() != null)
+                            continue;
+                        if (!_directOriginalRendererEnabled.ContainsKey(r))
+                            _directOriginalRendererEnabled[r] = r.enabled;
+                        _directOccludersThisFrame.Add(r);
+                        r.enabled = false;
+                    }
+                    if (renderers.Length > 0)
+                        _directColliderNames.Add(col.name);
+                    return;
+                }
+            }
+            Transform node = col.transform;
+            for (int depth = 0; depth < 8 && node != null; depth++, node = node.parent)
+            {
+                var candidates = node.GetComponentsInChildren<Renderer>(true);
+                int usable = 0;
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    var r = candidates[i];
+                    if (r != null && !(r is ParticleSystemRenderer) &&
+                        !(r is TrailRenderer) && !(r is LineRenderer) &&
+                        r.GetComponentInParent<AIChara.ChaControl>() == null)
+                        usable++;
+                }
+                if (usable == 0 || usable > 64)
+                    continue;
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    var r = candidates[i];
+                    if (r == null || r is ParticleSystemRenderer || r is TrailRenderer ||
+                        r is LineRenderer || r.GetComponentInParent<AIChara.ChaControl>() != null)
+                        continue;
+                    if (!_directOriginalRendererEnabled.ContainsKey(r))
+                        _directOriginalRendererEnabled[r] = r.enabled;
+                    _directOccludersThisFrame.Add(r);
+                    r.enabled = false;
+                }
+                _directColliderNames.Add(col.name);
+                return;
+            }
+        }
+
+        internal static void ApplyDirectLineOfSight(Vector3 origin, Vector3 target)
+        {
+            BeginDirectOcclusionFrame();
+            OrbitOcclusionSurvey.CaptureBeforeAssist(origin, target);
+            Vector3 delta = target - origin;
+            float distance = delta.magnitude;
+            if (distance <= 0.05f) return;
+            var hits = Physics.RaycastAll(origin, delta / distance, distance - 0.05f,
+                ~0, QueryTriggerInteraction.Ignore);
+            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            for (int i = 0; i < hits.Length; i++)
+            {
+                var col = hits[i].collider;
+                if (col == null || col.GetComponentInParent<AIChara.ChaControl>() != null)
+                    continue;
+                HideDirectOccluder(col);
+                break;
+            }
+        }
 
         /// <summary>地圖就緒後：有快取則只套用；無則掃描一次並落盤（含 0 筆）。</summary>
         internal static void EnsureInjected(HScene? hScene)
@@ -61,8 +204,7 @@ namespace HS2OrbitAndExciter
 
             int mapGoId = map.GetInstanceID();
             int camId = ctrl.GetInstanceID();
-            if (mapGoId == _injectedMapInstanceId && camId == _injectedCameraInstanceId)
-                return;
+            _injectedMapRoot = map;
 
             EnsureResolved();
             if (_lstMapVanishField == null)
@@ -70,6 +212,11 @@ namespace HS2OrbitAndExciter
 
             if (!(_lstMapVanishField.GetValue(ctrl) is List<CameraControl_Ver2.VisibleObject> list))
                 return;
+
+            bool sameCamera = mapGoId == _injectedMapInstanceId && camId == _injectedCameraInstanceId;
+            if (sameCamera && IsInjectionStillPresent(list))
+                return;
+            ResetInjectedState();
 
             int gameMapId = -1;
             try
@@ -86,6 +233,9 @@ namespace HS2OrbitAndExciter
                 var existing = list[i];
                 if (existing == null || string.IsNullOrEmpty(existing.nameCollider))
                     continue;
+                // Existing vanilla map entries must also use the orbit-safe
+                // renderer-only path when direct line-of-sight finds them.
+                RegisterInjectedEntry(existing);
                 seen.Add(existing.nameCollider);
                 if (!voByName.ContainsKey(existing.nameCollider))
                     voByName[existing.nameCollider] = existing;
@@ -199,6 +349,7 @@ namespace HS2OrbitAndExciter
                 built.Add(entry);
                 builtByName[col.name] = entry;
                 voByName[col.name] = vo;
+                RegisterInjectedEntry(vo);
                 list.Add(vo);
                 added++;
             }
@@ -354,6 +505,7 @@ namespace HS2OrbitAndExciter
 
                 if (voByName.TryGetValue(e.collider, out var existing))
                 {
+                    RegisterInjectedEntry(existing);
                     MergeNamedObjects(map, existing.listObj, e.objects);
                     continue;
                 }
@@ -380,6 +532,7 @@ namespace HS2OrbitAndExciter
                     continue;
 
                 list.Add(vo);
+                RegisterInjectedEntry(vo);
                 voByName[e.collider] = vo;
                 added++;
             }
@@ -741,6 +894,125 @@ namespace HS2OrbitAndExciter
             _lstMapVanishField = AccessTools.Field(typeof(CameraControl_Ver2), "lstMapVanish");
             if (_lstMapVanishField == null)
                 HS2OrbitAndExciter.Log?.LogWarning("Orbit: 找不到 CameraControl_Ver2.lstMapVanish，穿牆補齊略過");
+        }
+
+        private static bool IsInjectionStillPresent(List<CameraControl_Ver2.VisibleObject> list)
+        {
+            if (_injectedEntries.Count == 0)
+                return true;
+
+            foreach (var entry in _injectedEntries)
+            {
+                if (entry == null || !list.Contains(entry))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static void RegisterInjectedEntry(CameraControl_Ver2.VisibleObject entry)
+        {
+            if (entry != null)
+                _injectedEntries.Add(entry);
+        }
+
+        /// <summary>
+        /// Orbit-only vanish state. Keep map colliders alive while hiding only their
+        /// renderers; otherwise SetActive(false) causes the camera trigger to exit
+        /// and the vanilla camera immediately shows the object again.
+        /// </summary>
+        internal static bool IsInjectedEntry(CameraControl_Ver2.VisibleObject? entry) =>
+            entry != null && _injectedEntries.Contains(entry);
+
+        internal static void SetInjectedEntryVisibility(CameraControl_Ver2.VisibleObject entry, bool visible)
+        {
+            if (entry == null)
+                return;
+
+            if (visible)
+            {
+                foreach (var pair in _hiddenByRenderer)
+                    pair.Value.Remove(entry);
+            }
+
+            if (!visible)
+            {
+                foreach (var go in entry.listObj)
+                {
+                    if (go == null)
+                        continue;
+
+                    var renderers = go.GetComponentsInChildren<Renderer>(true);
+                    for (int i = 0; i < renderers.Length; i++)
+                    {
+                        var renderer = renderers[i];
+                        if (renderer == null)
+                            continue;
+
+                        if (!_originalRendererEnabled.ContainsKey(renderer))
+                            _originalRendererEnabled[renderer] = renderer.enabled;
+                        if (!_hiddenByRenderer.TryGetValue(renderer, out var owners))
+                        {
+                            owners = new HashSet<CameraControl_Ver2.VisibleObject>();
+                            _hiddenByRenderer[renderer] = owners;
+                        }
+
+                        owners.Add(entry);
+                    }
+                }
+            }
+
+            var empty = new List<Renderer?>();
+            foreach (var pair in _hiddenByRenderer)
+            {
+                var renderer = pair.Key;
+                pair.Value.RemoveWhere(owner => owner == null || !_injectedEntries.Contains(owner));
+                if (pair.Value.Count > 0)
+                {
+                    if (renderer != null)
+                        renderer.enabled = false;
+                    continue;
+                }
+
+                if (renderer != null && _originalRendererEnabled.TryGetValue(renderer, out bool wasEnabled))
+                    renderer.enabled = wasEnabled;
+                empty.Add(renderer);
+            }
+
+            for (int i = 0; i < empty.Count; i++)
+            {
+                var renderer = empty[i];
+                if (renderer == null)
+                    continue;
+                _hiddenByRenderer.Remove(renderer);
+                _originalRendererEnabled.Remove(renderer);
+            }
+
+            entry.delay = visible ? 0.3f : 0f;
+            entry.isVisible = visible;
+        }
+
+        internal static void ResetInjectedState()
+        {
+            foreach (var pair in _originalRendererEnabled)
+            {
+                if (pair.Key != null)
+                    pair.Key.enabled = pair.Value;
+            }
+
+            _hiddenByRenderer.Clear();
+            _originalRendererEnabled.Clear();
+            _directOccludersThisFrame.Clear();
+            _directOriginalRendererEnabled.Clear();
+            _directEntries.Clear();
+            _directColliderNames.Clear();
+            foreach (var pair in _directInactiveObjects)
+                if (pair.Key != null) pair.Key.SetActive(pair.Value);
+            _directInactiveObjects.Clear();
+            _injectedEntries.Clear();
+            _injectedMapInstanceId = -1;
+            _injectedCameraInstanceId = -1;
+            _injectedMapRoot = null;
         }
 
         private static List<Transform> CollectCharacterRoots(HScene hScene)

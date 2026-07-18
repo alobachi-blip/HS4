@@ -111,6 +111,8 @@ namespace HS2OrbitAndExciter
         /// <summary>Write detailed NDJSON state-machine traces for smoke/regression runs.</summary>
         internal static ConfigEntry<bool>? EnableStateMachineTrace;
         internal static ConfigEntry<bool>? EnableOcclusion20CircleTest;
+        /// <summary>Collects classified center-line occlusion evidence without changing camera behavior.</summary>
+        internal static ConfigEntry<bool>? EnableOcclusionSurvey;
         /// <summary>Smoke-only shortcut: jump directly into HScene after startup.</summary>
         internal static ConfigEntry<bool>? EnableDirectHSmokeDriver;
         internal static ConfigEntry<float>? DirectHSmokeDelaySeconds;
@@ -122,6 +124,8 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<bool>? EnableDirectHSmokeOrbitAssist;
         internal static ConfigEntry<bool>? EnableSmokeKeyframeScreenshots;
         internal static ConfigEntry<string>? SmokeKeyframeDirectory;
+        internal static ConfigEntry<bool>? EnableCumflationScreenshotVerification;
+        internal static ConfigEntry<float>? CumflationScreenshotSettleSeconds;
         internal static ConfigEntry<bool>? EnableSmokeFamilyCoverage;
         internal static ConfigEntry<string>? SmokeFamilyCoverageSequence;
         /// <summary>When true, orbit records a local Storyboard Package v1 under the configured HS4 output root.</summary>
@@ -260,6 +264,8 @@ namespace HS2OrbitAndExciter
                 "Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.");
             EnableOcclusion20CircleTest = Config.Bind("Diagnostics", "EnableOcclusion20CircleTest", false,
                 "Run exactly 20 orbit rotations, log visual occlusion evidence, then stop the camera. Requires state trace logging.");
+            EnableOcclusionSurvey = Config.Bind("Diagnostics", "EnableOcclusionSurvey", false,
+                "Collect classified camera-transition and map-occlusion samples. Diagnostic only; does not change camera behavior.");
             EnableDirectHSmokeDriver = Config.Bind("Smoke", "EnableDirectHSmokeDriver", false,
                 "Smoke test only: jump directly into HScene after startup. Default false.");
             DirectHSmokeDelaySeconds = Config.Bind("Smoke", "DirectHSmokeDelaySeconds", 8f,
@@ -280,6 +286,10 @@ namespace HS2OrbitAndExciter
                 "Smoke test only: capture keyframe screenshots during DirectH smoke runs.");
             SmokeKeyframeDirectory = Config.Bind("Smoke", "SmokeKeyframeDirectory", "",
                 "Directory for smoke keyframe screenshots. Empty uses BepInEx/LogOutput/OrbitSmokeKeyframes.");
+            EnableCumflationScreenshotVerification = Config.Bind("Smoke", "EnableCumflationScreenshotVerification", false,
+                "Smoke test only: capture before/after screenshots around one native female-orgasm callback.");
+            CumflationScreenshotSettleSeconds = Config.Bind("Smoke", "CumflationScreenshotSettleSeconds", 8f,
+                new ConfigDescription("Seconds to wait for PregnancyPlus mesh work before the after screenshot.", new AcceptableValueRange<float>(2f, 30f)));
             EnableSmokeFamilyCoverage = Config.Bind("Smoke", "EnableSmokeFamilyCoverage", false,
                 "Smoke test only: make Orbit pose selection cycle through configured H-loop families for coverage.");
             SmokeFamilyCoverageSequence = Config.Bind("Smoke", "SmokeFamilyCoverageSequence",
@@ -312,6 +322,7 @@ namespace HS2OrbitAndExciter
 
             var harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             PatchSafe(harmony, typeof(Patches.PregnancyPlusInflationStepPatch));
+            PatchSafe(harmony, typeof(Patches.PregnancyPlusNativeCumflationPatch));
             PatchSafe(harmony, typeof(Patches.OrgasmEffectsPatch));
             PatchSafe(harmony, typeof(Patches.BustGrowthLifecyclePatch));
             PatchSafe(harmony, typeof(Patches.BustGrowthSavePatch));
@@ -361,6 +372,9 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitBypass1v1_Houshi_AutoStartProc));
             PatchSafe(harmony, typeof(Patches.OrbitPoseUnlockPatches));
             PatchSafe(harmony, typeof(Patches.OrbitAutoActionAfterProcPatches));
+            PatchSafe(harmony, typeof(Patches.OrbitSettingsSpriteInputPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitSettingsShortcutInputPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitSettingsCameraInputPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerEnterPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerStayPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerExitPatch));

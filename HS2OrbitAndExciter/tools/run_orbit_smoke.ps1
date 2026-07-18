@@ -6,6 +6,8 @@ param(
     [switch]$DirectH,
     [switch]$Coverage,
     [switch]$FaintnessStress,
+    [switch]$OcclusionSurvey,
+    [switch]$SkipAssertions,
     [ValidateRange(1, 100)]
     [int]$FemaleOrgasmTarget = 10,
     [ValidateRange(0.01, 20)]
@@ -115,6 +117,17 @@ function Set-OrbitTraceConfig {
         -Description "## Write detailed NDJSON state-machine traces. Default false; enable only for automated diagnosis runs.`r`n# Setting type: Boolean`r`n# Default value: false"
 }
 
+function Set-OrbitOcclusionSurveyConfig {
+    param([bool]$Enabled)
+
+    $value = if ($Enabled) { "true" } else { "false" }
+    Set-OrbitConfigValue `
+        -Section "Diagnostics" `
+        -Key "EnableOcclusionSurvey" `
+        -Value $value `
+        -Description "## Diagnostic-only center-line survey for non-character occluders.`r`n# Setting type: Boolean`r`n# Default value: false"
+}
+
 function Set-OrbitDirectHConfig {
     param([bool]$Enabled)
 
@@ -172,6 +185,7 @@ Get-ChildItem -LiteralPath $keyframeDir -File -Filter "*.png" -ErrorAction Silen
 Get-ChildItem -Path $logDir -File -Filter "debug-*.log" -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 Set-OrbitTraceConfig -Enabled $true
+Set-OrbitOcclusionSurveyConfig -Enabled ([bool]$OcclusionSurvey)
 Set-OrbitDirectHConfig -Enabled ([bool]$DirectH)
 $originalFeelAddPerSecond = Get-OrbitConfigValue -Section "Exciter" -Key "FeelAddPerSecondWhenOrbit"
 if ($FaintnessStress) {
@@ -206,6 +220,7 @@ finally {
         Write-Host "Stopped HoneySelect2 pid=$($proc.Id)."
     }
     Set-OrbitTraceConfig -Enabled $false
+    Set-OrbitOcclusionSurveyConfig -Enabled $false
     Set-OrbitDirectHConfig -Enabled $false
     if ($FaintnessStress) {
         $restoreFeel = if ($null -ne $originalFeelAddPerSecond) { $originalFeelAddPerSecond } else { "0.1" }
@@ -214,6 +229,10 @@ finally {
 }
 
 if (Test-Path -LiteralPath $tracePath) {
+    if ($SkipAssertions) {
+        Write-Host "Trace: $tracePath"
+        exit 0
+    }
     $closureSeconds = if ($ValidationProfile -eq "Full") { 20 } else { 8 }
     $directHSeconds = if ($ValidationProfile -eq "Full") { 180 } else { 120 }
     $assertArgs = @(

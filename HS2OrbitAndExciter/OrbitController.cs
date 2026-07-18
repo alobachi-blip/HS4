@@ -53,6 +53,7 @@ namespace HS2OrbitAndExciter
 
         private bool _hudSnapshotValid;
         private OrbitHudSnapshot _hudSnapshot;
+        private bool _wasOrbitCameraSpinning;
 
         /// <summary>§11 1A：上一有效骨焦點（世界座標），失敗時回退。</summary>
         private Vector3? _lastValidFocusWorld;
@@ -273,7 +274,7 @@ namespace HS2OrbitAndExciter
 
         private void TryManualHotkeys(HScene? hScene)
         {
-            if (hScene == null)
+            if (hScene == null || !OrbitBehaviorHub.IsOrbitAssistActive())
                 return;
             // Block Ctrl/Alt chords (orbit uses Ctrl+Shift+O). Shift alone is reserved for Shift+T tattoo off.
             if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
@@ -417,7 +418,10 @@ namespace HS2OrbitAndExciter
                 return;
             }
 
-            ApplyOrbitFocusHotkeys(hScene, ctrl);
+            bool orbitCameraRequested = OrbitBehaviorHub.IsOrbitCameraSpinning();
+            bool cameraPausedForUi = OrbitBehaviorHub.ShouldPauseOrbitCameraForUi();
+            if (orbitCameraRequested && !cameraPausedForUi)
+                ApplyOrbitFocusHotkeys(hScene, ctrl);
 
             OrbitPoseDirector.Tick(hScene, this, ctrl);
 
@@ -454,8 +458,17 @@ namespace HS2OrbitAndExciter
 
             // ApplyOrbitAutoAction / TryAutoAdvancePastCheckpoint: see OrbitHSceneLateAssist (runs after H proc)
 
-            // Re-apply camera takeover every frame (e.g. after ChangeAnimation sets camera flag)
-            ctrl.NoCtrlCondition = NoCtrlOrbit;
+            bool cameraPausedForDirector = OrbitManualDirector.IsCameraPaused;
+            bool userOwnsCamera = !orbitCameraRequested
+                                  && !cameraPausedForDirector
+                                  && !cameraPausedForUi;
+
+            // O 停轉後完整交還原版相機；設定窗／換姿過場仍保持輸入隔離。
+            ctrl.NoCtrlCondition = userOwnsCamera ? NoCtrlUser : NoCtrlOrbit;
+
+            if (orbitCameraRequested && !_wasOrbitCameraSpinning)
+                RebaseOrbitFromCurrentCamera(hScene, ctrl);
+            _wasOrbitCameraSpinning = orbitCameraRequested;
 
             // When pose changes (UI manual / game), defer rebind to Director instead of immediate ApplyCurrentViewOption
             var nowInfo = hScene.ctrlFlag?.nowAnimationInfo;
@@ -463,7 +476,7 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.NotifyExternalPoseChange(hScene);
 
             // After faintness toggle or other state change: reapply view once
-            if (_requestViewReapplyNextFrame)
+            if (_requestViewReapplyNextFrame && !userOwnsCamera)
             {
                 _requestViewReapplyNextFrame = false;
                 ApplyCurrentViewOption(hScene, ctrl);
@@ -482,9 +495,9 @@ namespace HS2OrbitAndExciter
                 speedDegPerSec = Mathf.Min(speedDegPerSec, GetStoryboardSafeSpeedDegPerSec());
             float dt = Time.deltaTime;
 
-            bool spinning = OrbitBehaviorHub.IsOrbitCameraSpinning()
-                            && !OrbitManualDirector.IsCameraPaused
-                            && !OrbitBehaviorHub.ShouldPauseOrbitCameraForUi();
+            bool spinning = orbitCameraRequested
+                            && !cameraPausedForDirector
+                            && !cameraPausedForUi;
 
             if (spinning)
             {
@@ -536,9 +549,9 @@ namespace HS2OrbitAndExciter
                 MaybeDetectFocusJump(hScene, ctrl);
                 MaybeLogFramingDiag(hScene, ctrl);
             }
-            else
+            else if (!userOwnsCamera)
             {
-                // 停轉：仍用鎖定骨焦點，保留看部位與距離（不改 Rot，避免搶手控）
+                // 設定窗／換姿過場暫停：保留焦點，但不改 Rot。
                 if (OrbitPoseDirector.IsPoseChangeInFlight)
                     ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");
                 else
@@ -721,6 +734,35 @@ namespace HS2OrbitAndExciter
             ctrl.Rot = look.eulerAngles;
 
             SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+        }
+
+        /// <summary>O 恢復轉動時沿用使用者目前視角，避免跳回停轉前方位。</summary>
+        private void RebaseOrbitFromCurrentCamera(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            if (chaFemales == null || !TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
+                return;
+
+            bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+            if (storyboardSafeCamera)
+                _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
+
+            Vector3 camForward = ctrl.thisCamera != null
+                ? ctrl.thisCamera.transform.forward
+                : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
+            Vector3 axis = storyboardSafeCamera
+                ? OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld)
+                : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
+
+            _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(basis, axis, camForward);
+            _orbitPhase = 0;
+            _orbitAccumulatedDegrees = 0f;
+            _plannedAxisMode = null;
+            _plannedStartAzimuth = null;
+            _plannedZoomMult = null;
+            _previousCameraUpWorld = null;
+            InvalidateLockedBasis("user_camera_resume");
+            OrbitStateMachineLog.Event("環視", "從使用者視角恢復轉動");
         }
 
         private void ApplyBoneFocusOnly(HScene hScene, CameraControl_Ver2 ctrl)
@@ -1466,6 +1508,7 @@ namespace HS2OrbitAndExciter
 
             if (active)
             {
+                _wasOrbitCameraSpinning = true;
                 // true = 擋原版滑鼠／鍵盤相機；環視寫入 Rot
                 ctrl.NoCtrlCondition = NoCtrlOrbit;
                 try { ctrl.ConfigVanish = true; } catch { /* ignore */ }
@@ -1518,6 +1561,7 @@ namespace HS2OrbitAndExciter
             }
             else
             {
+                _wasOrbitCameraSpinning = false;
                 _waitingForPrepStart = false;
                 _prepFrozenElapsed = -1f;
                 OrbitPoseDirector.Reset();

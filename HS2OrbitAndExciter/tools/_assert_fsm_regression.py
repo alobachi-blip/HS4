@@ -259,7 +259,9 @@ def analyze_rows(
             index
             for index, row in enumerate(materialized)
             if _as_text(row.get("id")) == "faint"
-            and _as_text(row.get("msg")) == "enter"
+            # State-machine events use loc for the transition and msg for the
+            # human-readable payload (for example, isFaintness=1).
+            and _as_text(row.get("loc")) == "enter"
         ]
         if len(female_orgasm_rows) < female_orgasm_target:
             issues.append(
@@ -456,7 +458,9 @@ def analyze_rows(
         elif pending_pull is not None:
             start_index, started_at = pending_pull
             clip = _clip(row)
-            if clip in {"Pull", "Drop", "OrgasmM_OUT_A"} or "Drop" in clip:
+            # session/state can see the short state name (Pull/D_Pull), while
+            # framing records the full animator name (M_Pull/M_D_Pull).
+            if "Pull" in clip or "Drop" in clip or clip == "OrgasmM_OUT_A":
                 pending_pull = None
             elif clip in {"WLoop", "SLoop", "OLoop"}:
                 issues.append(

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -31,6 +32,7 @@ namespace HS2OrbitAndExciter
         private float _nextOrbitAssistAttemptUnscaled;
         private readonly HashSet<string> _stageKeyframes = new HashSet<string>();
         private float _nextStageKeyframeUnscaled;
+        private bool _cumflationVerificationStarted;
         private const int MaxStageKeyframes = 32;
 
         private void Update()
@@ -44,6 +46,7 @@ namespace HS2OrbitAndExciter
                 TryLogDirectHActive();
                 TryLogDirectHKeyframe();
                 TryLogStageKeyframe();
+                TryStartCumflationScreenshotVerification();
                 return;
             }
 
@@ -264,6 +267,51 @@ namespace HS2OrbitAndExciter
                 + ",\"poseName\":\"" + Esc(ctrl.nowAnimationInfo.nameAnimation) + "\""
                 + ",\"screenshot\":\"" + Esc(screenshot) + "\""
                 + ",\"screenshotError\":\"" + Esc(screenshotError) + "\"}");
+        }
+
+        private void TryStartCumflationScreenshotVerification()
+        {
+            if (_cumflationVerificationStarted || !_activeLogged || Scene.IsFadeNow)
+                return;
+            if (HS2OrbitAndExciter.EnableCumflationScreenshotVerification?.Value != true)
+                return;
+            if (Time.unscaledTime < _activeSinceUnscaled + 4f)
+                return;
+
+            _cumflationVerificationStarted = true;
+            StartCoroutine(CaptureCumflationBeforeAfter());
+        }
+
+        private IEnumerator CaptureCumflationBeforeAfter()
+        {
+            var hScene = OrbitController.TryGetHScene();
+            if (hScene?.ctrlFlag == null)
+                yield break;
+
+            string before = CaptureKeyframe("cumflation_before", out string beforeError);
+            yield return new WaitForEndOfFrame();
+            yield return new WaitForSecondsRealtime(1f);
+
+            // Use the native female-orgasm entry point so the screenshot test
+            // covers the same Harmony postfix used by real gameplay.
+            hScene.ctrlFlag.AddOrgasm();
+            OrbitStateMachineLog.Event("smoke", "cumflation_trigger",
+                "{\"source\":\"HSceneFlagCtrl.AddOrgasm\"}");
+
+            float settle = Mathf.Clamp(
+                HS2OrbitAndExciter.CumflationScreenshotSettleSeconds?.Value ?? 8f,
+                2f,
+                30f);
+            yield return new WaitForSecondsRealtime(settle);
+            yield return new WaitForEndOfFrame();
+
+            string after = CaptureKeyframe("cumflation_after", out string afterError);
+            OrbitStateMachineLog.Event("smoke", "cumflation_screenshots",
+                "{\"before\":\"" + Esc(before) + "\""
+                + ",\"after\":\"" + Esc(after) + "\""
+                + ",\"beforeError\":\"" + Esc(beforeError) + "\""
+                + ",\"afterError\":\"" + Esc(afterError) + "\""
+                + ",\"settleSeconds\":" + settle.ToString("R", CultureInfo.InvariantCulture) + "}");
         }
 
         private static string CaptureKeyframe(string marker, out string error)

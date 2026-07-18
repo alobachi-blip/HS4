@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using AIChara;
 using HarmonyLib;
@@ -19,8 +20,11 @@ namespace HS2OrbitAndExciter
         private static MethodInfo? _meshInflateFloat;
         private static MethodInfo? _onInflationChanged;
         private static FieldInfo? _currentInflationLevel;
+        private static FieldInfo? _inflationChange;
         private static FieldInfo? _infConfig;
         private static FieldInfo? _inflationSize;
+        private static PropertyInfo? _targetPregPlusSize;
+        private static PropertyInfo? _currentInflationChange;
         private static Type? _pluginType;
         private static PropertyInfo? _maxLevelEntryProperty;
         private static FieldInfo? _maxLevelEntryField;
@@ -43,23 +47,19 @@ namespace HS2OrbitAndExciter
                 return false;
 
             EnsureResolved();
-            if (_controllerType == null || _hs2Inflation == null)
+            if (_controllerType == null || _meshInflateFloat == null)
                 return false;
-
-            // PregnancyPlus clips HS2Inflation(false) before it animates the mesh.
-            // Raise its cap when necessary, while retaining a separate cap for
-            // automatic inside-finish growth.
-            TryRaiseMaxInflationLevel();
 
             var females = OrbitHelpers.GetChaFemales(hScene);
             if (females == null || females.Length == 0)
                 return false;
 
             bool any = false;
+            var seenFemaleIds = new HashSet<int>();
             for (int i = 0; i < females.Length; i++)
             {
                 var cha = females[i];
-                if (cha == null)
+                if (cha == null || !seenFemaleIds.Add(cha.GetInstanceID()))
                     continue;
                 if (TryInflateOnCha(cha))
                     any = true;
@@ -126,6 +126,11 @@ namespace HS2OrbitAndExciter
         internal static bool TryRaiseMaxInflationLevel()
         {
             EnsureResolved();
+            // Automatic growth now uses a private visible-size cap.  Do not
+            // assign PregnancyPlus' ConfigEntry here: ConfigEntry.Value saves
+            // KK_PregnancyPlus.cfg immediately.
+            return _resolved;
+#pragma warning disable CS0162
             if (_pluginType == null)
                 return false;
 
@@ -172,6 +177,11 @@ namespace HS2OrbitAndExciter
         {
             get
             {
+                EnsureResolved();
+                return _resolved
+                    ? $"Auto belly cap: {InflationMaxLevel} levels (direct visible update)"
+                    : "PregnancyPlus unavailable; automatic belly growth disabled";
+#pragma warning disable CS0162
                 TryRaiseMaxInflationLevel();
                 int level = GetInflationMaxLevel();
                 return level > 0
@@ -225,7 +235,7 @@ namespace HS2OrbitAndExciter
                 return false;
 
             EnsureResolved();
-            if (_controllerType == null || _hs2Inflation == null)
+            if (_controllerType == null || _meshInflateFloat == null)
                 return false;
 
             var females = OrbitHelpers.GetChaFemales(hScene);
@@ -233,10 +243,11 @@ namespace HS2OrbitAndExciter
                 return false;
 
             bool any = false;
+            var seenFemaleIds = new HashSet<int>();
             for (int i = 0; i < females.Length; i++)
             {
                 var cha = females[i];
-                if (cha == null)
+                if (cha == null || !seenFemaleIds.Add(cha.GetInstanceID()))
                     continue;
                 if (TryDeflateOnCha(cha))
                     any = true;
@@ -250,28 +261,22 @@ namespace HS2OrbitAndExciter
         private static bool TryDeflateOnCha(ChaControl cha)
         {
             var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
-            if (ctrl == null || _currentInflationLevel == null || _onInflationChanged == null)
+            if (ctrl == null || _currentInflationLevel == null || _meshInflateFloat == null)
                 return false;
             try
             {
-                // PregnancyPlus interprets HS2Inflation(true) as a full reset,
-                // not a one-level decrease.  Update its level and notify the
-                // controller directly so the mesh transitions to the prior step.
-                int current = Math.Max(0, Convert.ToInt32(_currentInflationLevel.GetValue(ctrl)));
-                if (current == 0)
-                    return false;
-
-                int maxLevel = Math.Max(current, GetInflationMaxLevel());
-                if (maxLevel == 0)
+                float before = ReadVisibleInflation(ctrl);
+                int maxLevel = InflationMaxLevel;
+                int current = VisibleSizeToLevel(before, maxLevel);
+                if (current <= 0)
                     return false;
 
                 int next = current - 1;
-                _currentInflationLevel.SetValue(ctrl, next);
-                _onInflationChanged.Invoke(ctrl, new object[] { (float)next, maxLevel, 0 });
-                return true;
+                return TryApplyDirectVisibleLevel(ctrl, next, maxLevel, "OrbitPoseDeflate", before);
             }
-            catch
+            catch (Exception ex)
             {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: PregnancyPlus visible deflate failed: {ex.Message}");
                 return false;
             }
         }
@@ -290,10 +295,11 @@ namespace HS2OrbitAndExciter
                 return false;
 
             bool any = false;
+            var seenFemaleIds = new HashSet<int>();
             for (int i = 0; i < females.Length; i++)
             {
                 var cha = females[i];
-                if (cha == null)
+                if (cha == null || !seenFemaleIds.Add(cha.GetInstanceID()))
                     continue;
                 if (TryResetOnCha(cha))
                     any = true;
@@ -307,20 +313,19 @@ namespace HS2OrbitAndExciter
         private static bool TryInflateOnCha(ChaControl cha)
         {
             var ctrl = cha.GetComponent(_controllerType!) ?? cha.GetComponentInChildren(_controllerType!, true);
-            if (ctrl == null || _currentInflationLevel == null)
+            if (ctrl == null || _currentInflationLevel == null || _meshInflateFloat == null)
                 return false;
 
             try
             {
-                int current = Math.Max(0, Convert.ToInt32(_currentInflationLevel.GetValue(ctrl)));
-                int steps = Math.Min(InflationStep, Math.Max(0, InflationMaxLevel - current));
+                int maxLevel = InflationMaxLevel;
+                float before = ReadVisibleInflation(ctrl);
+                int current = VisibleSizeToLevel(before, maxLevel);
+                int steps = Math.Min(InflationStep, Math.Max(0, maxLevel - current));
                 if (steps == 0)
                     return false;
 
-                // HS2Inflation(false) = +1 level (same as Preg+ Allow cumflation).
-                for (int i = 0; i < steps; i++)
-                    _hs2Inflation!.Invoke(ctrl, new object[] { false });
-                return true;
+                return TryApplyDirectVisibleLevel(ctrl, current + steps, maxLevel, "OrbitOrgasm", before);
             }
             catch (Exception ex)
             {
@@ -366,9 +371,12 @@ namespace HS2OrbitAndExciter
             }
             else if (_meshInflateFloat != null)
             {
-                _meshInflateFloat.Invoke(ctrl, new object[] { 0f, "OrbitRReset" });
+                _meshInflateFloat.Invoke(ctrl, new object?[] { 0f, "OrbitRReset", null });
                 ok = true;
             }
+
+            _targetPregPlusSize?.SetValue(ctrl, 0f, null);
+            _inflationChange?.SetValue(ctrl, 0f);
 
             return ok;
         }
@@ -389,7 +397,8 @@ namespace HS2OrbitAndExciter
             if (_pluginType != null)
             {
                 _maxLevelEntryProperty = AccessTools.Property(_pluginType, "HS2InflationMaxLevel");
-                _maxLevelEntryField = AccessTools.Field(_pluginType, "HS2InflationMaxLevel");
+                if (_maxLevelEntryProperty == null)
+                    _maxLevelEntryField = AccessTools.Field(_pluginType, "HS2InflationMaxLevel");
             }
             if (_controllerType == null)
             {
@@ -403,17 +412,22 @@ namespace HS2OrbitAndExciter
 
             _hs2Inflation = AccessTools.Method(_controllerType, "HS2Inflation", new[] { typeof(bool) });
             _resetInflation = AccessTools.Method(_controllerType, "ResetInflation");
-            _meshInflateFloat = AccessTools.Method(_controllerType, "MeshInflate", new[] { typeof(float), typeof(string) });
+            _meshInflateFloat = FindMeshInflateFloatMethod(_controllerType);
             _onInflationChanged = AccessTools.Method(
                 _controllerType,
                 "OnInflationChanged",
                 new[] { typeof(float), typeof(int), typeof(int) });
             _currentInflationLevel = AccessTools.Field(_controllerType, "_currentInflationLevel");
+            _inflationChange = AccessTools.Field(_controllerType, "_inflationChange");
             _infConfig = AccessTools.Field(_controllerType, "infConfig");
             if (_infConfig != null)
                 _inflationSize = AccessTools.Field(_infConfig.FieldType, "inflationSize");
+            _targetPregPlusSize = AccessTools.Property(_controllerType, "TargetPregPlusSize");
+            _currentInflationChange = AccessTools.Property(_controllerType, "CurrentInflationChange");
 
-            _resolved = _hs2Inflation != null;
+            _resolved = _meshInflateFloat != null && _currentInflationLevel != null &&
+                        _inflationChange != null && _infConfig != null && _inflationSize != null &&
+                        _targetPregPlusSize != null;
             if (_resolved)
             {
                 _unavailableLogged = false;
@@ -423,8 +437,103 @@ namespace HS2OrbitAndExciter
             else if (!_methodUnavailableLogged)
             {
                 _methodUnavailableLogged = true;
-                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus loaded but HS2Inflation was not found; will retry.");
+                HS2OrbitAndExciter.Log?.LogWarning("Orbit: PregnancyPlus loaded but direct visible inflation API was not found; will retry.");
             }
+        }
+
+        private static MethodInfo? FindMeshInflateFloatMethod(Type controllerType)
+        {
+            var methods = controllerType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                var method = methods[i];
+                if (method.Name != "MeshInflate")
+                    continue;
+
+                var parameters = method.GetParameters();
+                if (parameters.Length == 3 &&
+                    parameters[0].ParameterType == typeof(float) &&
+                    parameters[1].ParameterType == typeof(string))
+                    return method;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Mirrors the known-good PregnancyPlus Y/U path: synchronize its
+        /// target and current weights before requesting one mesh update.
+        /// OrbitRuntimeHotfix also uses this method name as a capability marker.
+        /// </summary>
+        private static bool TryApplyDirectVisibleLevel(
+            object controller,
+            int level,
+            int maxLevel,
+            string reason,
+            float before)
+        {
+            if (_meshInflateFloat == null || _currentInflationLevel == null ||
+                _inflationChange == null || _targetPregPlusSize == null || maxLevel <= 0)
+                return false;
+
+            try
+            {
+                int clampedLevel = Mathf.Clamp(level, 0, maxLevel);
+                float size = Mathf.Clamp(clampedLevel * 40f / maxLevel, 0f, 40f);
+                _currentInflationLevel.SetValue(controller, clampedLevel);
+                _targetPregPlusSize.SetValue(controller, size, null);
+                _inflationChange.SetValue(controller, size);
+                _meshInflateFloat.Invoke(controller, new object?[] { size, reason, null });
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: PregnancyPlus visible belly {before:F2} -> {size:F2} " +
+                    $"(level {clampedLevel}/{maxLevel}, {reason})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning($"Orbit: PregnancyPlus visible belly update failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static int VisibleSizeToLevel(float size, int maxLevel)
+        {
+            if (maxLevel <= 0)
+                return 0;
+            return Mathf.Clamp(
+                Mathf.FloorToInt(Mathf.Clamp(size, 0f, 40f) * maxLevel / 40f + 0.0001f),
+                0,
+                maxLevel);
+        }
+
+        private static float ReadVisibleInflation(object controller)
+        {
+            float visible = 0f;
+            try
+            {
+                object? config = _infConfig?.GetValue(controller);
+                if (config != null && _inflationSize != null)
+                    visible = Math.Max(visible, Convert.ToSingle(_inflationSize.GetValue(config)));
+            }
+            catch { }
+
+            try
+            {
+                object? target = _targetPregPlusSize?.GetValue(controller, null);
+                if (target != null)
+                    visible = Math.Max(visible, Convert.ToSingle(target));
+            }
+            catch { }
+
+            try
+            {
+                object? current = _currentInflationChange?.GetValue(controller, null);
+                if (current != null)
+                    visible = Math.Max(visible, Convert.ToSingle(current));
+            }
+            catch { }
+
+            return Mathf.Clamp(visible, 0f, 40f);
         }
 
         private static Type? FindLoadedType(string fullName)
