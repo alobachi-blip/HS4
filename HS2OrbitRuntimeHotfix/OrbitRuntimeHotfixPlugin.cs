@@ -120,9 +120,31 @@ namespace HS2OrbitRuntimeHotfix
         private bool TryInstallRendererFallback()
         {
             var vanishType = FindLoadedType("HS2OrbitAndExciter.OrbitMapVanishAssist", OrbitAssembly);
-            var target = vanishType == null
-                ? null
-                : AccessTools.Method(vanishType, "ApplyDirectLineOfSight", new[] { typeof(Vector3), typeof(Vector3) });
+            if (vanishType == null)
+                return false;
+
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            var cameraAwareTarget = vanishType.GetMethod(
+                "ApplyDirectLineOfSight",
+                flags,
+                null,
+                new[] { typeof(Vector3), typeof(Vector3), typeof(Camera) },
+                null);
+            if (cameraAwareTarget != null)
+            {
+                // Current Orbit already performs collider and renderer line-of-sight
+                // handling in this overload. The legacy two-argument postfix would be
+                // redundant; treating it as complete also stops repeated failed lookups.
+                Logger.LogInfo("Orbit source already includes camera-aware map occlusion; legacy hotfix skipped.");
+                return true;
+            }
+
+            var target = vanishType.GetMethod(
+                "ApplyDirectLineOfSight",
+                flags,
+                null,
+                new[] { typeof(Vector3), typeof(Vector3) },
+                null);
             if (target == null)
                 return false;
 
@@ -376,6 +398,221 @@ namespace HS2OrbitRuntimeHotfix
     }
 
     /// <summary>
+    /// Keeps the currently deployed Orbit DLL compatible with separate zoom-in
+    /// and zoom-out switches.  A later source build exposes the same switches
+    /// in its own menu; those source settings take precedence when available.
+    /// </summary>
+    internal static class OrbitZoomRuntime
+    {
+        private const string OrbitAssembly = "HS2OrbitAndExciter";
+
+        private static ConfigEntry<bool>? _zoomInEnabled;
+        private static ConfigEntry<bool>? _zoomOutEnabled;
+        private static FieldInfo? _circleZoomMult;
+        private static FieldInfo? _plannedZoomMult;
+        private static MethodInfo? _isStoryboardSafeCameraEnabled;
+        private static FieldInfo? _sourceLegacyZoom;
+        private static FieldInfo? _sourceZoomIn;
+        private static FieldInfo? _sourceZoomOut;
+        private static FieldInfo? _sourceNear;
+        private static FieldInfo? _sourceFar;
+        private static FieldInfo? _sourceStoryboardPackage;
+        private static FieldInfo? _sourceStoryboardSafeCamera;
+
+        internal static void SetConfig(ConfigEntry<bool> zoomInEnabled, ConfigEntry<bool> zoomOutEnabled)
+        {
+            _zoomInEnabled = zoomInEnabled;
+            _zoomOutEnabled = zoomOutEnabled;
+        }
+
+        internal static void Initialize(Type controllerType)
+        {
+            _circleZoomMult = AccessTools.Field(controllerType, "_circleZoomMult");
+            _plannedZoomMult = AccessTools.Field(controllerType, "_plannedZoomMult");
+            _isStoryboardSafeCameraEnabled = AccessTools.Method(controllerType, "IsStoryboardSafeCameraEnabled");
+
+            var pluginType = FindLoadedType("HS2OrbitAndExciter.HS2OrbitAndExciter", OrbitAssembly);
+            if (pluginType == null)
+                return;
+
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            _sourceLegacyZoom = pluginType.GetField("OrbitCircleZoomEnabled", flags);
+            _sourceZoomIn = pluginType.GetField("OrbitZoomInEnabled", flags);
+            _sourceZoomOut = pluginType.GetField("OrbitZoomOutEnabled", flags);
+            _sourceNear = pluginType.GetField("OrbitZoomNearMult", flags);
+            _sourceFar = pluginType.GetField("OrbitZoomFarMult", flags);
+            _sourceStoryboardPackage = pluginType.GetField("StoryboardPackageEnabled", flags);
+            _sourceStoryboardSafeCamera = pluginType.GetField("StoryboardSafeCameraEnabled", flags);
+        }
+
+        internal static void Apply(object controller)
+        {
+            if (controller == null || _circleZoomMult == null || IsStoryboardSafeCameraEnabled())
+                return;
+
+            try
+            {
+                _plannedZoomMult?.SetValue(controller, null);
+                _circleZoomMult.SetValue(controller, RollZoomMultiplier());
+            }
+            catch
+            {
+                // The original camera behavior stays in control if a later
+                // Orbit build changes the internal field layout.
+            }
+        }
+
+        internal static void DrawLegacySettingsOverlay()
+        {
+            if (_sourceZoomIn != null || !IsOrbitSettingsVisible())
+                return;
+
+            float width = 250f;
+            var panel = new Rect(Mathf.Max(8f, Screen.width - width - 28f), 64f, width, 82f);
+            GUI.Box(panel, "鏡頭縮放");
+            bool zoomIn = GUI.Toggle(
+                new Rect(panel.x + 12f, panel.y + 26f, panel.width - 24f, 22f),
+                ReadZoomInEnabled(),
+                " 每圈隨機拉近");
+            bool zoomOut = GUI.Toggle(
+                new Rect(panel.x + 12f, panel.y + 50f, panel.width - 24f, 22f),
+                ReadZoomOutEnabled(),
+                " 每圈隨機拉遠");
+            SetZoomInEnabled(zoomIn);
+            SetZoomOutEnabled(zoomOut);
+        }
+
+        private static bool IsStoryboardSafeCameraEnabled()
+        {
+            try
+            {
+                if (_isStoryboardSafeCameraEnabled?.Invoke(null, null) is bool enabled)
+                    return enabled;
+            }
+            catch { }
+
+            return ReadBool(_sourceStoryboardPackage, false) && ReadBool(_sourceStoryboardSafeCamera, true);
+        }
+
+        private static float RollZoomMultiplier()
+        {
+            bool zoomIn = ReadZoomInEnabled();
+            bool zoomOut = ReadZoomOutEnabled();
+            if (!zoomIn && !zoomOut)
+                return 1f;
+
+            float near = Mathf.Clamp(ReadFloat(_sourceNear, 0.65f), 0f, 1f);
+            float far = Mathf.Max(1f, ReadFloat(_sourceFar, 1.75f));
+            if (zoomIn && zoomOut)
+                return UnityEngine.Random.value < 0.5f
+                    ? UnityEngine.Random.Range(near, 1f)
+                    : UnityEngine.Random.Range(1f, far);
+            if (zoomIn)
+                return UnityEngine.Random.Range(near, 1f);
+            return UnityEngine.Random.Range(1f, far);
+        }
+
+        private static bool ReadZoomInEnabled()
+        {
+            if (_sourceZoomIn != null)
+                return ReadBool(_sourceZoomIn, true);
+            if (_sourceLegacyZoom != null && !ReadBool(_sourceLegacyZoom, true))
+                return false;
+            return _zoomInEnabled?.Value ?? true;
+        }
+
+        private static bool ReadZoomOutEnabled()
+        {
+            if (_sourceZoomOut != null)
+                return ReadBool(_sourceZoomOut, true);
+            if (_sourceLegacyZoom != null && !ReadBool(_sourceLegacyZoom, true))
+                return false;
+            return _zoomOutEnabled?.Value ?? true;
+        }
+
+        private static bool IsOrbitSettingsVisible()
+        {
+            try
+            {
+                var settingsType = FindLoadedType("HS2OrbitAndExciter.OrbitSettingsGUI", OrbitAssembly);
+                var visible = settingsType?.GetProperty("IsVisible", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                return visible?.GetValue(null, null) is bool isVisible && isVisible;
+            }
+            catch { return false; }
+        }
+
+        private static void SetZoomInEnabled(bool value)
+        {
+            SetBool(_sourceZoomIn, _zoomInEnabled, value);
+        }
+
+        private static void SetZoomOutEnabled(bool value)
+        {
+            SetBool(_sourceZoomOut, _zoomOutEnabled, value);
+        }
+
+        private static bool ReadBool(FieldInfo? field, bool fallback)
+        {
+            try
+            {
+                object? entry = field?.GetValue(null);
+                object? value = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                return value is bool configured ? configured : fallback;
+            }
+            catch { return fallback; }
+        }
+
+        private static float ReadFloat(FieldInfo? field, float fallback)
+        {
+            try
+            {
+                object? entry = field?.GetValue(null);
+                object? value = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)?.GetValue(entry, null);
+                return value == null ? fallback : Convert.ToSingle(value);
+            }
+            catch { return fallback; }
+        }
+
+        private static void SetBool(FieldInfo? sourceField, ConfigEntry<bool>? fallback, bool value)
+        {
+            try
+            {
+                object? entry = sourceField?.GetValue(null);
+                var property = entry?.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public);
+                if (property != null && property.CanWrite)
+                {
+                    property.SetValue(entry, value, null);
+                    return;
+                }
+            }
+            catch { }
+
+            if (fallback != null)
+                fallback.Value = value;
+        }
+
+        private static Type? FindLoadedType(string fullName, string? assemblyName = null)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                var assembly = assemblies[i];
+                if (assemblyName != null && !string.Equals(assembly.GetName().Name, assemblyName, StringComparison.Ordinal))
+                    continue;
+                try
+                {
+                    var type = assembly.GetType(fullName, throwOnError: false);
+                    if (type != null)
+                        return type;
+                }
+                catch { }
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Adapts the deployed Orbit build to the actual PregnancyPlus HS2 API.
     /// HS2Inflation(true) means reset, so a one-level deflate must notify the
     /// controller at the preceding level instead.  It also owns the opt-in
@@ -390,6 +627,7 @@ namespace HS2OrbitRuntimeHotfix
         private static Type? _controllerType;
         private static MethodInfo? _hs2Inflation;
         private static MethodInfo? _onInflationChanged;
+        private static MethodInfo? _meshInflateFloat;
         private static FieldInfo? _currentInflationLevel;
         private static FieldInfo? _initialized;
         private static MethodInfo? _getHScene;
@@ -490,6 +728,7 @@ namespace HS2OrbitRuntimeHotfix
 
                 int next = current - 1;
                 SetLevelAndNotify(controller, next, Math.Max(max, current));
+                TryApplyVisibleInflation(controller, next, Math.Max(max, current));
                 changed = true;
                 _log?.LogInfo("[Cumflation] deflate level " + current + " -> " + next + ".");
             }
@@ -514,13 +753,18 @@ namespace HS2OrbitRuntimeHotfix
                     continue;
 
                 int steps = Math.Min(requestedSteps, Math.Max(0, maxLevel - current));
+                int appliedForController = 0;
                 for (int step = 0; step < steps; step++)
                 {
                     if (!TryInvokeInflation(controllers[i], false))
                         break;
                     changed = true;
                     appliedSteps++;
+                    appliedForController++;
                 }
+
+                if (appliedForController > 0)
+                    TryApplyVisibleInflation(controllers[i], GetLevel(controllers[i]), GetMaxLevel());
             }
 
             if (changed)
@@ -681,6 +925,7 @@ namespace HS2OrbitRuntimeHotfix
                 _controllerType,
                 "OnInflationChanged",
                 new[] { typeof(float), typeof(int), typeof(int) });
+            _meshInflateFloat ??= FindMeshInflateFloatMethod(_controllerType);
             _currentInflationLevel ??= AccessTools.Field(_controllerType, "_currentInflationLevel");
             _initialized ??= AccessTools.Field(_controllerType, "initialized");
             _targetPregPlusSize ??= _controllerType.GetProperty("TargetPregPlusSize", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -910,6 +1155,43 @@ namespace HS2OrbitRuntimeHotfix
             catch (Exception ex)
             {
                 _log?.LogWarning("[CumflationVerify] HS2Inflation failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static MethodInfo? FindMeshInflateFloatMethod(Type controllerType)
+        {
+            var methods = controllerType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                var method = methods[i];
+                if (method.Name != "MeshInflate")
+                    continue;
+
+                var parameters = method.GetParameters();
+                if (parameters.Length == 3 &&
+                    parameters[0].ParameterType == typeof(float) &&
+                    parameters[1].ParameterType == typeof(string))
+                    return method;
+            }
+
+            return null;
+        }
+
+        private static bool TryApplyVisibleInflation(Component controller, int level, int maxLevel)
+        {
+            if (_meshInflateFloat == null || maxLevel <= 0)
+                return false;
+
+            try
+            {
+                float size = Mathf.Clamp(level * 40f / maxLevel, 0f, 40f);
+                _meshInflateFloat.Invoke(controller, new object?[] { size, "OrbitOrgasm", null });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.LogWarning("[Cumflation] visible belly update failed: " + ex.Message);
                 return false;
             }
         }

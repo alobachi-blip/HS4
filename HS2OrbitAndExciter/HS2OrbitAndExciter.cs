@@ -126,6 +126,7 @@ namespace HS2OrbitAndExciter
         internal static ConfigEntry<string>? SmokeKeyframeDirectory;
         internal static ConfigEntry<bool>? EnableCumflationScreenshotVerification;
         internal static ConfigEntry<float>? CumflationScreenshotSettleSeconds;
+        internal static ConfigEntry<bool>? EnableSessionOnlySaveVerification;
         internal static ConfigEntry<bool>? EnableSmokeFamilyCoverage;
         internal static ConfigEntry<string>? SmokeFamilyCoverageSequence;
         /// <summary>When true, orbit records a local Storyboard Package v1 under the configured HS4 output root.</summary>
@@ -290,6 +291,8 @@ namespace HS2OrbitAndExciter
                 "Smoke test only: capture before/after screenshots around one native female-orgasm callback.");
             CumflationScreenshotSettleSeconds = Config.Bind("Smoke", "CumflationScreenshotSettleSeconds", 8f,
                 new ConfigDescription("Seconds to wait for PregnancyPlus mesh work before the after screenshot.", new AcceptableValueRange<float>(2f, 30f)));
+            EnableSessionOnlySaveVerification = Config.Bind("Smoke", "EnableSessionOnlySaveVerification", false,
+                "Smoke test only: end H after body-growth capture so a disposable __codex_session_only_card_test card exercises native save guards.");
             EnableSmokeFamilyCoverage = Config.Bind("Smoke", "EnableSmokeFamilyCoverage", false,
                 "Smoke test only: make Orbit pose selection cycle through configured H-loop families for coverage.");
             SmokeFamilyCoverageSequence = Config.Bind("Smoke", "SmokeFamilyCoverageSequence",

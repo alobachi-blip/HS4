@@ -555,6 +555,32 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("hScene.ctrlFlag.AddOrgasm()", smoke)
         self.assertIn('CaptureKeyframe("cumflation_after"', smoke)
 
+    def test_session_only_save_smoke_refuses_normal_cards(self):
+        plugin_root = TOOLS.parent
+        plugin = (plugin_root / "HS2OrbitAndExciter.cs").read_text(encoding="utf-8-sig")
+        smoke = (plugin_root / "OrbitSmokeDriver.cs").read_text(encoding="utf-8-sig")
+
+        self.assertIn('Config.Bind("Smoke", "EnableSessionOnlySaveVerification", false', plugin)
+        prefix_guard = 'cardName.StartsWith("__codex_session_only_card_test"'
+        self.assertIn(prefix_guard, smoke)
+        self.assertIn('"session_only_save_refused"', smoke)
+        self.assertIn('"session_only_save_request"', smoke)
+        self.assertLess(smoke.index(prefix_guard), smoke.index("HSceneFlagCtrl.ClickKind.SceneEnd"))
+
+    def test_runtime_hotfix_skips_legacy_vanish_patch_for_camera_aware_source(self):
+        hotfix = (TOOLS.parent.parent / "HS2OrbitRuntimeHotfix" / "OrbitRuntimeHotfixPlugin.cs").read_text(
+            encoding="utf-8-sig"
+        )
+        install = hotfix[hotfix.index("private bool TryInstallRendererFallback") :]
+        install = install[: install.index("private bool TryInstallCameraStabilizer")]
+
+        camera_signature = "new[] { typeof(Vector3), typeof(Vector3), typeof(Camera) }"
+        legacy_signature = "new[] { typeof(Vector3), typeof(Vector3) }"
+        self.assertIn(camera_signature, install)
+        self.assertIn("legacy hotfix skipped", install)
+        self.assertLess(install.index(camera_signature), install.index(legacy_signature))
+        self.assertNotIn("AccessTools.Method(vanishType", install)
+
     def test_body_growth_is_session_only_across_save_and_quit_paths(self):
         plugin_root = TOOLS.parent
         plugin = (plugin_root / "HS2OrbitAndExciter.cs").read_text(encoding="utf-8-sig")

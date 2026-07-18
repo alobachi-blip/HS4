@@ -312,6 +312,27 @@ namespace HS2OrbitAndExciter
                 + ",\"beforeError\":\"" + Esc(beforeError) + "\""
                 + ",\"afterError\":\"" + Esc(afterError) + "\""
                 + ",\"settleSeconds\":" + settle.ToString("R", CultureInfo.InvariantCulture) + "}");
+
+            if (HS2OrbitAndExciter.EnableSessionOnlySaveVerification?.Value == true)
+            {
+                // HScene.EndProcADV saves its live character card in place. Never let
+                // this diagnostic touch a normal card: the caller must first make an
+                // explicitly named disposable copy under UserData/chara/female.
+                string cardName = OrbitHelpers.GetChaFemales(hScene)?[0]?.chaFile?.charaFileName ?? "";
+                if (!cardName.StartsWith("__codex_session_only_card_test", StringComparison.OrdinalIgnoreCase))
+                {
+                    OrbitStateMachineLog.Event("smoke", "session_only_save_refused",
+                        "{\"card\":\"" + Esc(cardName) + "\"}");
+                    yield break;
+                }
+
+                // CaptureScreenshot writes asynchronously. Give the after frame time to
+                // reach disk before asking vanilla HScene to run its ordinary save/exit.
+                yield return new WaitForSecondsRealtime(1f);
+                OrbitStateMachineLog.Event("smoke", "session_only_save_request",
+                    "{\"card\":\"" + Esc(cardName) + "\"}");
+                hScene.ctrlFlag.click = HSceneFlagCtrl.ClickKind.SceneEnd;
+            }
         }
 
         private static string CaptureKeyframe(string marker, out string error)

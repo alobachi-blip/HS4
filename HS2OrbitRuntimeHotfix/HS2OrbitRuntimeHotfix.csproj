@@ -22,6 +22,9 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(HS2Managed)\UnityEngine.CoreModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(HS2Managed)\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>$(HS2Managed)\UnityEngine.PhysicsModule.dll</HintPath>
     </Reference>
