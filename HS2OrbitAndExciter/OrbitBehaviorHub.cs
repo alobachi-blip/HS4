@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Reflection;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
@@ -31,11 +30,6 @@ namespace HS2OrbitAndExciter
         /// <summary>§11：相機是否在轉。協助開時預設 true；停止環視鍵只關此旗標。</summary>
         private static bool _orbitCameraSpinning;
 
-        private static float _checkpointIdleTime;
-        private static MethodInfo? _getAutoAnimationMethod;
-        private static FieldInfo? _isAutoActionChangeField;
-        private static PropertyInfo? _isAutoActionChangeProp;
-        private static float _wheelBypassStartUnscaled = -1f;
         private static float _afterIdleAutoEscapeSinceUnscaled = -1f;
         private static float _idleAutoEscapeSinceUnscaled = -1f;
 
@@ -98,7 +92,6 @@ namespace HS2OrbitAndExciter
         {
             ResetNullSelectionTracking();
             _autoActionNullSelectionSinceUnscaled = Time.unscaledTime - AutoActionNullSelectionMinSeconds;
-            _checkpointIdleTime = 0f;
             ResetCheckpointInvokeCooldown();
 
             if (hScene?.ctrlFlag == null)
@@ -150,14 +143,11 @@ namespace HS2OrbitAndExciter
         private static void BeginOrgasmAssistQuiet()
         {
             _orgasmAssistQuietUntilUnscaled = Time.unscaledTime + OrgasmAssistQuietSeconds;
-            _checkpointIdleTime = 0f;
         }
 
         internal static void NotifyOrbitToggled(bool active)
         {
             _orbitAssistActive = active;
-            _checkpointIdleTime = 0f;
-            _wheelBypassStartUnscaled = -1f;
             _afterIdleAutoEscapeSinceUnscaled = -1f;
             _idleAutoEscapeSinceUnscaled = -1f;
             _orgasmAssistQuietUntilUnscaled = -1f;

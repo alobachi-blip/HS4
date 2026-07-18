@@ -60,6 +60,9 @@ namespace HS2OrbitAndExciter
         private static int _hitsInStage;
         private static int _lastHoushiMaleSum = -1;
         private static int _lastInsideSum = -1;
+        private static string _observedCharaFileName = "";
+        private static string _observedFullName = "";
+        private static int _observedPersonality = -1;
         private static string _lastTrigger = "—";
 
         private static ChaFileDefine.State[]? _snapStates;
@@ -119,6 +122,7 @@ namespace HS2OrbitAndExciter
                 RestoreSnapshot();
 
             _charKey = key;
+            CaptureCharacterIdentity(cha);
             if (ResetOnNewH)
                 _stageIndex = 0;
             else if (ProgressByKey.TryGetValue(key, out int saved))
@@ -181,11 +185,15 @@ namespace HS2OrbitAndExciter
 
             // Character swap mid-H (G): rebind progress.
             var cha = OrbitHelpers.GetChaFemales(hScene)?[0];
-            string key = ResolveCharKey(cha);
-            if (!string.IsNullOrEmpty(key) && !string.Equals(key, _charKey, StringComparison.OrdinalIgnoreCase))
+            if (HasCharacterIdentityChanged(cha))
             {
-                OnHSceneEntered(hScene);
-                return;
+                string key = ResolveCharKey(cha);
+                CaptureCharacterIdentity(cha);
+                if (!string.IsNullOrEmpty(key) && !string.Equals(key, _charKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    OnHSceneEntered(hScene);
+                    return;
+                }
             }
 
             EnsureStageAppliedIfDrifted();
@@ -393,6 +401,9 @@ namespace HS2OrbitAndExciter
             _snapStates = null;
             _lastHoushiMaleSum = -1;
             _lastInsideSum = -1;
+            _observedCharaFileName = "";
+            _observedFullName = "";
+            _observedPersonality = -1;
         }
 
         private static void SaveProgressForCurrent()
@@ -431,6 +442,49 @@ namespace HS2OrbitAndExciter
             }
             catch { /* ignore */ }
             return "unknown";
+        }
+
+        private static bool HasCharacterIdentityChanged(ChaControl? cha)
+        {
+            ReadCharacterIdentity(cha, out string fileName, out string fullName, out int personality);
+            if (!string.Equals(fileName, _observedCharaFileName, StringComparison.Ordinal))
+                return true;
+            if (!string.IsNullOrEmpty(fileName))
+                return false;
+            return !string.Equals(fullName, _observedFullName, StringComparison.Ordinal)
+                || personality != _observedPersonality;
+        }
+
+        private static void CaptureCharacterIdentity(ChaControl? cha)
+        {
+            ReadCharacterIdentity(
+                cha,
+                out _observedCharaFileName,
+                out _observedFullName,
+                out _observedPersonality);
+        }
+
+        private static void ReadCharacterIdentity(
+            ChaControl? cha,
+            out string fileName,
+            out string fullName,
+            out int personality)
+        {
+            fileName = "";
+            fullName = "";
+            personality = -1;
+            if (cha == null)
+                return;
+            try { fileName = cha.chaFile?.charaFileName ?? ""; }
+            catch { /* ignore */ }
+            if (!string.IsNullOrEmpty(fileName))
+                return;
+            try
+            {
+                fullName = cha.chaFile?.parameter?.fullname ?? "";
+                personality = cha.fileParam2 != null ? cha.fileParam2.personality : -1;
+            }
+            catch { /* ignore */ }
         }
 
         private static void EnsureFields()

@@ -1,7 +1,4 @@
-using System.Collections.Generic;
-using System.Reflection;
 using AIChara;
-using HarmonyLib;
 using Manager;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -45,7 +42,6 @@ namespace HS2OrbitAndExciter
         private static bool _requestViewReapplyNextFrame;
         private static OrbitController? _activeInstance;
 
-        private static FieldInfo? _feelFField;
         private bool _waitingForPrepStart;
         private float _prepCountdownStart;
         private float _prepFrozenElapsed = -1f;
@@ -157,16 +153,12 @@ namespace HS2OrbitAndExciter
             if (ctrlFlag == null)
                 return;
 
-            var speedField = Traverse.Create(ctrlFlag).Field("speed");
-            if (!speedField.FieldExists())
-                return;
-
-            float speed = (float)(speedField.GetValue() ?? 0f);
+            float speed = ctrlFlag.speed;
             if (IsInPreparationState(hScene) || (speed <= 0.01f && !OrbitHelpers.IsFirstFemaleInActionLoop(hScene)))
             {
                 _waitingForPrepStart = false;
                 _prepFrozenElapsed = -1f;
-                speedField.SetValue(1f);
+                ctrlFlag.speed = 1f;
             }
         }
 
@@ -176,7 +168,7 @@ namespace HS2OrbitAndExciter
             if (hScene == null) return false;
             var ctrlFlag = hScene.ctrlFlag;
             if (ctrlFlag == null) return false;
-            float speed = (float)(Traverse.Create(ctrlFlag).Field("speed").GetValue() ?? 0f);
+            float speed = ctrlFlag.speed;
             if (speed > 0.01f) return false;
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             if (chaFemales == null || chaFemales.Length == 0) return false;
@@ -197,23 +189,15 @@ namespace HS2OrbitAndExciter
             float addPerSec = GetOrbitFeelAddPerSecond();
             if (addPerSec > 0f)
             {
-                if (_feelFField == null)
-                {
-                    _feelFField = ctrlFlag.GetType().GetField("feel_f", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (_feelFField == null) return;
-                }
-                float current = (float)(_feelFField.GetValue(ctrlFlag) ?? 0f);
+                float current = ctrlFlag.feel_f;
                 float next = Mathf.Clamp01(current + addPerSec * Time.deltaTime);
                 if (next > current)
-                    _feelFField.SetValue(ctrlFlag, next);
+                    ctrlFlag.feel_f = next;
             }
-            var speedField = Traverse.Create(ctrlFlag).Field("speed");
-            if (speedField.FieldExists())
-            {
-                float speed = (float)(speedField.GetValue() ?? 0f);
-                speed = Mathf.Clamp(speed + OrbitSpeedAddPerSecond * Time.deltaTime, 0f, 2f);
-                speedField.SetValue(speed);
-            }
+            ctrlFlag.speed = Mathf.Clamp(
+                ctrlFlag.speed + OrbitSpeedAddPerSecond * Time.deltaTime,
+                0f,
+                2f);
         }
 
         private void Update()
@@ -239,6 +223,7 @@ namespace HS2OrbitAndExciter
                 PregnancyPlusAssist.ResetInsideTracking();
                 if (_manualDirectorHSceneId != -1)
                 {
+                    OrbitHelpers.ResetSceneCaches();
                     OrbitOrgasmBustGrowth.TryRestoreForLifecycle("h_scene_exit");
                     OrbitVoiceTour.OnHSceneExited();
                 }
@@ -447,7 +432,7 @@ namespace HS2OrbitAndExciter
                         _prepFrozenElapsed = -1f;
                         var ctrlFlag = hScene.ctrlFlag;
                         if (ctrlFlag != null)
-                            Traverse.Create(ctrlFlag).Field("speed").SetValue(1f);
+                            ctrlFlag.speed = 1f;
                     }
                 }
             }
@@ -1084,24 +1069,8 @@ namespace HS2OrbitAndExciter
             {
                 Clip = "?",
                 NowAnim = "",
-                Director = OrbitPoseDirector.DebugStateName ?? ""
+                Director = ""
             };
-            try
-            {
-                var flag = hScene.ctrlFlag;
-                if (flag?.nowAnimationInfo != null)
-                    r.NowAnim = flag.nowAnimationInfo.nameAnimation + "#id" + flag.nowAnimationInfo.id
-                                + ";down" + flag.nowAnimationInfo.nDownPtn;
-                var cha0 = OrbitHelpers.GetChaFemales(hScene);
-                var c0 = cha0 != null && cha0.Length > 0 ? cha0[0] : null;
-                if (c0?.animBody != null)
-                {
-                    var st = c0.animBody.GetCurrentAnimatorStateInfo(0);
-                    // 與 FSM SNAP 相同：優先用 shortNameHash 對不到就退 hash
-                    r.Clip = "h=" + st.fullPathHash;
-                }
-            }
-            catch { /* ignore */ }
 
             int femaleIdx = focusIdx < 3 ? 0 : 1;
             var cha = OrbitHelpers.GetChaFemales(hScene);
@@ -1119,7 +1088,24 @@ namespace HS2OrbitAndExciter
                 r.Pelvis = OrbitHelpers.GetBonePosition(cha, femaleIdx, OrbitHelpers.BonePelvis);
             }
 
-            // 補 clip 名稱（與 SNAP 一致）
+            return r;
+        }
+
+        private static void PopulateFramingLabels(HScene hScene, int femaleIdx, ref FramingBones r)
+        {
+            r.Director = OrbitPoseDirector.DebugStateName ?? "";
+            try
+            {
+                var flag = hScene.ctrlFlag;
+                if (flag?.nowAnimationInfo != null)
+                    r.NowAnim = flag.nowAnimationInfo.nameAnimation + "#id" + flag.nowAnimationInfo.id
+                                + ";down" + flag.nowAnimationInfo.nDownPtn;
+                var cha0 = OrbitHelpers.GetChaFemales(hScene);
+                var c0 = cha0 != null && cha0.Length > 0 ? cha0[0] : null;
+                if (c0?.animBody != null)
+                    r.Clip = "h=" + c0.animBody.GetCurrentAnimatorStateInfo(0).fullPathHash;
+            }
+            catch { /* ignore */ }
             try
             {
                 var cArr = OrbitHelpers.GetChaFemales(hScene);
@@ -1139,8 +1125,6 @@ namespace HS2OrbitAndExciter
                 }
             }
             catch { /* ignore */ }
-
-            return r;
         }
 
         private static string V3(Vector3 v) =>
@@ -1186,6 +1170,7 @@ namespace HS2OrbitAndExciter
             bool jumped = dFocus >= FocusJumpWarnMeters || dRoot >= FocusJumpWarnMeters;
             if (jumped)
             {
+                PopulateFramingLabels(hScene, focusIdx < 3 ? 0 : 1, ref bones);
                 string json =
                     "{"
                     + "\"t\":" + Time.unscaledTime.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
@@ -1268,6 +1253,12 @@ namespace HS2OrbitAndExciter
                     ? Vector3.Distance(focusWorld, bones.Head.Value)
                     : -1f;
 
+                bool warning = !approxInView || !inFront || errChest > FocusJumpWarnMeters;
+                bool trace = OrbitStateMachineLog.Enabled;
+                if (!trace && !warning)
+                    return;
+                PopulateFramingLabels(hScene, focusIdx < 3 ? 0 : 1, ref bones);
+
                 string json =
                     "{"
                     + "\"t\":" + now.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
@@ -1305,8 +1296,9 @@ namespace HS2OrbitAndExciter
                     + ",\"director\":\"" + EscJson(bones.Director) + "\""
                     + "}";
 
-                OrbitStateMachineLog.Event("framing", approxInView ? "ok" : "out", json);
-                if (!approxInView || !inFront || errChest > FocusJumpWarnMeters)
+                if (trace)
+                    OrbitStateMachineLog.Event("framing", approxInView ? "ok" : "out", json);
+                if (warning)
                     HS2OrbitAndExciter.Log?.LogWarning("[OrbitFraming] " + json);
             }
             catch (System.Exception ex)
@@ -1415,13 +1407,12 @@ namespace HS2OrbitAndExciter
                 return;
             int current = _currentViewOption;
             if (current < 0 || current >= maxFocus) current = 0;
-            var candidates = new List<int>();
-            for (int i = 0; i < maxFocus; i++)
-                if (i != current)
-                    candidates.Add(i);
             // §11：幾乎只用骨焦點；極低機率才碰姿預設（且立即被 Apply 改回骨）
-            if (candidates.Count > 0)
-                _currentViewOption = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+            if (maxFocus > 1)
+            {
+                int next = UnityEngine.Random.Range(0, maxFocus - 1);
+                _currentViewOption = next >= current ? next + 1 : next;
+            }
             else
                 _currentViewOption = current;
             InvalidateLockedBasis("randomize_view");
@@ -1470,7 +1461,7 @@ namespace HS2OrbitAndExciter
             _plannedStartAzimuth = null;
             _framingHavePrev = false;
             _previousCameraUpWorld = null;
-            if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
+            if (chaFemales != null && TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
             {
                 bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
                 if (storyboardSafeCamera)
@@ -1537,7 +1528,7 @@ namespace HS2OrbitAndExciter
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
                 OrbitOcclusion20Test.Arm(hScene, (CameraControl_Ver2)ctrl, BoneFocusIndex());
                 // 初始軸＋傾斜；方位角對齊目前相機朝向
-                if (TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
+                if (chaFemales != null && TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
                 {
                     Vector3 camFwd = ctrl.thisCamera != null
                         ? ctrl.thisCamera.transform.forward

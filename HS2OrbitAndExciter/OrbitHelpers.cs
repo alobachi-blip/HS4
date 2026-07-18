@@ -21,12 +21,34 @@ namespace HS2OrbitAndExciter
         public const string BoneChest = "cf_J_Mune00";
         public const string BonePelvis = "cf_J_Kokan";
 
+        private static readonly FieldInfo? ChaFemalesField =
+            AccessTools.Field(typeof(HScene), "chaFemales");
+        private static readonly FieldInfo? ChaMalesField =
+            AccessTools.Field(typeof(HScene), "chaMales");
+        private static readonly FieldInfo? HSceneMapField =
+            AccessTools.Field(typeof(HScene), "objMap");
+        private static readonly int[] ClothesSequence = { 0, 1, 2, 3, 2, 1 };
+
+        private sealed class BoneCache
+        {
+            internal ChaControl? Character;
+            internal Transform? Root;
+            internal Transform? Head;
+            internal Transform? Chest;
+            internal Transform? Pelvis;
+        }
+
+        private static ChaControl[]? _boneCacheCharacters;
+        private static BoneCache?[] _boneCaches = Array.Empty<BoneCache?>();
+        private static HScene? _cachedCharacterHScene;
+        private static ChaControl[]? _cachedFemales;
+        private static ChaControl[]? _cachedMales;
+
         public static ChaControl[]? GetChaFemales(HScene hScene)
         {
             if (hScene == null) return null;
-            var t = Traverse.Create(hScene);
-            var arr = t.Field("chaFemales").GetValue();
-            return arr as ChaControl[];
+            EnsureCharacterArrays(hScene);
+            return _cachedFemales;
         }
 
         /// <summary>
@@ -59,7 +81,11 @@ namespace HS2OrbitAndExciter
             if (cha == null) return false;
             var animBody = TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
-            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            return IsActionLoopState(animBody.GetCurrentAnimatorStateInfo(0));
+        }
+
+        internal static bool IsActionLoopState(AnimatorStateInfo stateInfo)
+        {
             foreach (string name in ActionLoopStateNames)
             {
                 if (stateInfo.IsName(name))
@@ -108,7 +134,11 @@ namespace HS2OrbitAndExciter
             if (cha == null) return false;
             var animBody = TryGetFemaleAnimBody(cha);
             if (animBody == null) return false;
-            var stateInfo = animBody.GetCurrentAnimatorStateInfo(0);
+            return IsAfterIdleState(animBody.GetCurrentAnimatorStateInfo(0));
+        }
+
+        internal static bool IsAfterIdleState(AnimatorStateInfo stateInfo)
+        {
             foreach (string name in AfterIdleStateNames)
             {
                 if (stateInfo.IsName(name))
@@ -123,9 +153,55 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || femaleIndex < 0 || femaleIndex >= chaFemales.Length) return null;
             var cha = chaFemales[femaleIndex];
             if (cha == null || cha.objBodyBone == null) return null;
-            var tr = cha.objBodyBone.transform.FindLoop(boneName);
+            Transform root = cha.objBodyBone.transform;
+            var cache = GetBoneCache(chaFemales, femaleIndex, cha, root);
+            Transform? tr;
+            if (string.Equals(boneName, BoneHead, StringComparison.Ordinal))
+                tr = GetCachedBone(root, boneName, ref cache.Head);
+            else if (string.Equals(boneName, BoneChest, StringComparison.Ordinal))
+                tr = GetCachedBone(root, boneName, ref cache.Chest);
+            else if (string.Equals(boneName, BonePelvis, StringComparison.Ordinal))
+                tr = GetCachedBone(root, boneName, ref cache.Pelvis);
+            else
+                tr = root.FindLoop(boneName);
             if (tr == null) return null;
             return tr.position;
+        }
+
+        private static BoneCache GetBoneCache(
+            ChaControl[] chaFemales,
+            int femaleIndex,
+            ChaControl cha,
+            Transform root)
+        {
+            if (!ReferenceEquals(_boneCacheCharacters, chaFemales))
+            {
+                _boneCacheCharacters = chaFemales;
+                _boneCaches = new BoneCache?[chaFemales.Length];
+            }
+
+            var cache = _boneCaches[femaleIndex];
+            if (cache == null)
+            {
+                cache = new BoneCache();
+                _boneCaches[femaleIndex] = cache;
+            }
+            if (!ReferenceEquals(cache.Character, cha) || !ReferenceEquals(cache.Root, root))
+            {
+                cache.Character = cha;
+                cache.Root = root;
+                cache.Head = null;
+                cache.Chest = null;
+                cache.Pelvis = null;
+            }
+            return cache;
+        }
+
+        private static Transform? GetCachedBone(Transform root, string boneName, ref Transform? cached)
+        {
+            if (cached == null || (cached != root && !cached.IsChildOf(root)))
+                cached = root.FindLoop(boneName);
+            return cached;
         }
 
         /// <summary>Six focus indices: 0=Head, 1=Chest, 2=Pelvis (female0), 3=Head2, 4=Chest2, 5=Pelvis2 (female1).</summary>
@@ -182,8 +258,7 @@ namespace HS2OrbitAndExciter
         /// <summary>Sequence 0,1,2,3,2,1 (index 0..5). Returns stage 0..3 for given index.</summary>
         public static int ClothesSequenceStage(int index)
         {
-            int[] seq = { 0, 1, 2, 3, 2, 1 };
-            return seq[((index % 6) + 6) % 6];
+            return ClothesSequence[((index % ClothesSequence.Length) + ClothesSequence.Length) % ClothesSequence.Length];
         }
 
         /// <summary>Infer current clothes stage 0..3 from first character; return sequence index (0..5) so next step is from current state.</summary>
@@ -257,9 +332,29 @@ namespace HS2OrbitAndExciter
         public static ChaControl[]? GetChaMales(HScene hScene)
         {
             if (hScene == null) return null;
-            var t = Traverse.Create(hScene);
-            var arr = t.Field("chaMales").GetValue();
-            return arr as ChaControl[];
+            EnsureCharacterArrays(hScene);
+            return _cachedMales;
+        }
+
+        private static void EnsureCharacterArrays(HScene hScene)
+        {
+            if (ReferenceEquals(_cachedCharacterHScene, hScene))
+                return;
+            _cachedCharacterHScene = hScene;
+            _cachedFemales = ChaFemalesField?.GetValue(hScene) as ChaControl[];
+            _cachedMales = ChaMalesField?.GetValue(hScene) as ChaControl[];
+        }
+
+        internal static GameObject? GetMapObject(HScene? hScene) =>
+            hScene == null ? null : HSceneMapField?.GetValue(hScene) as GameObject;
+
+        internal static void ResetSceneCaches()
+        {
+            _boneCacheCharacters = null;
+            _boneCaches = Array.Empty<BoneCache?>();
+            _cachedCharacterHScene = null;
+            _cachedFemales = null;
+            _cachedMales = null;
         }
 
         /// <summary>Collect all AnimationListInfo from lstAnimInfo (all categories).</summary>

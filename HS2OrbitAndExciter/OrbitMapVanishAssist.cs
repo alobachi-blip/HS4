@@ -72,6 +72,10 @@ namespace HS2OrbitAndExciter
         private static GameObject? _injectedMapRoot;
         private static readonly HashSet<CameraControl_Ver2.VisibleObject> _injectedEntries =
             new HashSet<CameraControl_Ver2.VisibleObject>();
+        private static readonly HashSet<CameraControl_Ver2.VisibleObject> InjectionPresenceScratch =
+            new HashSet<CameraControl_Ver2.VisibleObject>();
+        private static readonly Dictionary<string, CameraControl_Ver2.VisibleObject> InjectedEntryByColliderName =
+            new Dictionary<string, CameraControl_Ver2.VisibleObject>(StringComparer.Ordinal);
         private static readonly Dictionary<Renderer, HashSet<CameraControl_Ver2.VisibleObject>> _hiddenByRenderer =
             new Dictionary<Renderer, HashSet<CameraControl_Ver2.VisibleObject>>();
         private static readonly Dictionary<Renderer, bool> _originalRendererEnabled =
@@ -125,27 +129,36 @@ namespace HS2OrbitAndExciter
         internal static void HideDirectOccluder(Collider col)
         {
             if (col == null || IsNonOccludingVisualName(col.name)) return;
-            foreach (var entry in _injectedEntries)
+            if (!InjectedEntryByColliderName.TryGetValue(col.name, out var entry))
             {
-                if (entry != null && string.Equals(entry.nameCollider, col.name, StringComparison.Ordinal))
+                foreach (var candidate in _injectedEntries)
                 {
-                    SetInjectedEntryVisibility(entry, false);
-                    _directEntries.Add(entry);
-                    if (entry.listObj != null)
+                    if (candidate != null && string.Equals(candidate.nameCollider, col.name, StringComparison.Ordinal))
                     {
-                        foreach (var go in entry.listObj)
-                        {
-                            if (go == null || go.name.EndsWith("_col", StringComparison.OrdinalIgnoreCase) ||
-                                go.name.EndsWith("_meta", StringComparison.OrdinalIgnoreCase))
-                                continue;
-                            if (!_directInactiveObjects.ContainsKey(go))
-                                _directInactiveObjects[go] = go.activeSelf;
-                            go.SetActive(false);
-                        }
+                        entry = candidate;
+                        InjectedEntryByColliderName[col.name] = candidate;
+                        break;
                     }
-                    _directColliderNames.Add(col.name);
-                    return;
                 }
+            }
+            if (entry != null)
+            {
+                SetInjectedEntryVisibility(entry, false);
+                _directEntries.Add(entry);
+                if (entry.listObj != null)
+                {
+                    foreach (var go in entry.listObj)
+                    {
+                        if (go == null || go.name.EndsWith("_col", StringComparison.OrdinalIgnoreCase) ||
+                            go.name.EndsWith("_meta", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (!_directInactiveObjects.ContainsKey(go))
+                            _directInactiveObjects[go] = go.activeSelf;
+                        go.SetActive(false);
+                    }
+                }
+                _directColliderNames.Add(col.name);
+                return;
             }
             if (_injectedMapRoot != null)
             {
@@ -1089,9 +1102,16 @@ namespace HS2OrbitAndExciter
             if (_injectedEntries.Count == 0)
                 return true;
 
+            InjectionPresenceScratch.Clear();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var entry = list[i];
+                if (entry != null)
+                    InjectionPresenceScratch.Add(entry);
+            }
             foreach (var entry in _injectedEntries)
             {
-                if (entry == null || !list.Contains(entry))
+                if (entry == null || !InjectionPresenceScratch.Contains(entry))
                     return false;
             }
 
@@ -1100,8 +1120,14 @@ namespace HS2OrbitAndExciter
 
         private static void RegisterInjectedEntry(CameraControl_Ver2.VisibleObject entry)
         {
-            if (entry != null)
-                _injectedEntries.Add(entry);
+            if (entry == null)
+                return;
+            _injectedEntries.Add(entry);
+            if (!string.IsNullOrEmpty(entry.nameCollider)
+                && !InjectedEntryByColliderName.ContainsKey(entry.nameCollider))
+            {
+                InjectedEntryByColliderName.Add(entry.nameCollider, entry);
+            }
         }
 
         /// <summary>
@@ -1204,6 +1230,8 @@ namespace HS2OrbitAndExciter
                 if (pair.Key != null) pair.Key.SetActive(pair.Value);
             _directInactiveObjects.Clear();
             _injectedEntries.Clear();
+            InjectionPresenceScratch.Clear();
+            InjectedEntryByColliderName.Clear();
             _injectedMapInstanceId = -1;
             _injectedCameraInstanceId = -1;
             _injectedMapRoot = null;

@@ -101,8 +101,20 @@ namespace HS2OrbitAndExciter
 
             // Capture whether a physical map blocker existed before the direct
             // occlusion assist changes its visual state.
-            bool rawOccluder = TryFindBlocker(camera.transform.position, focus.Value,
-                out string rawBlocker, out _);
+            bool rawOccluder = false;
+            string rawBlocker = "";
+            bool rawSampleDue = Enabled
+                && !_finished
+                && Time.unscaledTime >= _nextSample
+                && (!_running || _searchingForOccluder);
+            if (rawSampleDue)
+            {
+                rawOccluder = TryFindBlocker(
+                    camera.transform.position,
+                    focus.Value,
+                    out rawBlocker,
+                    out _);
+            }
             TickProduction(hScene, ctrl, focusIndex);
             OrbitOcclusionSurvey.Finish();
 

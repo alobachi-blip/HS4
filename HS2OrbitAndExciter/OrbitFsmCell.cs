@@ -56,7 +56,9 @@ namespace HS2OrbitAndExciter
 
             var state = anim.GetCurrentAnimatorStateInfo(0);
 
-            if (OrbitHelpers.IsFirstFemaleInAfterIdle(hScene))
+            // Reuse the state captured above. The old helper calls repeated the
+            // HScene reflection lookup, animator lookup, and state query.
+            if (OrbitHelpers.IsAfterIdleState(state))
                 return OrbitFsmCell.AfterIdle;
 
             // Drink／Vomit 進場鏈（尚未到 *_A）仍屬高潮後收尾
@@ -78,7 +80,7 @@ namespace HS2OrbitAndExciter
                     return OrbitFsmCell.ActionBridge;
             }
 
-            if (OrbitHelpers.IsFirstFemaleInActionLoop(hScene))
+            if (OrbitHelpers.IsActionLoopState(state))
                 return OrbitFsmCell.ActionBridge;
 
             return OrbitFsmCell.Unknown;

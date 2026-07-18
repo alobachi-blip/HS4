@@ -12,6 +12,7 @@ namespace HS2OrbitAndExciter
         private static int _cachedMapId = int.MinValue;
         private static float _nextSampleUnscaled;
         private static readonly RaycastHit[] Hits = new RaycastHit[24];
+        private static readonly Vector3[] SampleOrigins = new Vector3[6];
 
         /// <summary>朝天空的地板法線（單位向量）。</summary>
         internal static Vector3 GetSkyward(HScene? hScene, Vector3 nearWorld)
@@ -37,7 +38,7 @@ namespace HS2OrbitAndExciter
             {
                 try
                 {
-                    mapGo = HarmonyLib.Traverse.Create(hScene).Field("objMap").GetValue<GameObject>();
+                    mapGo = OrbitHelpers.GetMapObject(hScene);
                 }
                 catch { /* ignore */ }
             }
@@ -61,20 +62,17 @@ namespace HS2OrbitAndExciter
             float bestScore = -1f;
 
             // 多點向下打，找最像「地板」（法線朝上、距離合理）
-            Vector3[] origins =
-            {
-                nearWorld + Vector3.up * 2.5f,
-                nearWorld + Vector3.up * 6f,
-                nearWorld + new Vector3(0.8f, 3f, 0f),
-                nearWorld + new Vector3(-0.8f, 3f, 0f),
-                nearWorld + new Vector3(0f, 3f, 0.8f),
-                nearWorld + new Vector3(0f, 3f, -0.8f),
-            };
+            SampleOrigins[0] = nearWorld + Vector3.up * 2.5f;
+            SampleOrigins[1] = nearWorld + Vector3.up * 6f;
+            SampleOrigins[2] = nearWorld + new Vector3(0.8f, 3f, 0f);
+            SampleOrigins[3] = nearWorld + new Vector3(-0.8f, 3f, 0f);
+            SampleOrigins[4] = nearWorld + new Vector3(0f, 3f, 0.8f);
+            SampleOrigins[5] = nearWorld + new Vector3(0f, 3f, -0.8f);
 
-            for (int o = 0; o < origins.Length; o++)
+            for (int o = 0; o < SampleOrigins.Length; o++)
             {
                 int count = Physics.RaycastNonAlloc(
-                    origins[o], Vector3.down, Hits, 40f, ~0, QueryTriggerInteraction.Ignore);
+                    SampleOrigins[o], Vector3.down, Hits, 40f, ~0, QueryTriggerInteraction.Ignore);
                 for (int i = 0; i < count; i++)
                 {
                     var hit = Hits[i];
