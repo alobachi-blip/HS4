@@ -37,7 +37,22 @@ namespace HS2OrbitAndExciter
             Camera? camera = ctrl.thisCamera != null ? ctrl.thisCamera : Camera.main;
             var focus = GetFocusWorld(OrbitHelpers.GetChaFemales(hScene), focusIndex);
             if (camera != null && focus.HasValue)
-                OrbitMapVanishAssist.ApplyDirectLineOfSight(camera.transform.position, focus.Value);
+                OrbitMapVanishAssist.ApplyDirectLineOfSight(
+                    PredictFinalCameraPosition(ctrl),
+                    focus.Value,
+                    camera);
+        }
+
+        private static Vector3 PredictFinalCameraPosition(CameraControl_Ver2 control)
+        {
+            Quaternion rotation = Quaternion.Euler(control.CameraAngle);
+            Vector3 targetWorld = control.TargetPos;
+            if (control.transBase != null)
+            {
+                rotation = control.transBase.rotation * rotation;
+                targetWorld = control.transBase.TransformPoint(control.TargetPos);
+            }
+            return rotation * control.CameraDir + targetWorld;
         }
 
         internal static void Arm(HScene hScene, CameraControl_Ver2 ctrl, int focusIndex)

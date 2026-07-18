@@ -63,6 +63,12 @@ try {
         if (!(Test-Path -LiteralPath $tracePath)) {
             throw "Survey trace missing for map $mapId."
         }
+        if (!(Select-String -LiteralPath $tracePath -SimpleMatch '"msg":"direct_h_orbit_on"' -Quiet)) {
+            throw "Map $mapId never reached an active automated orbit. Increase DurationSeconds or inspect the smoke trace."
+        }
+        if (!(Select-String -LiteralPath $tracePath -SimpleMatch '"id":"occlusion_survey"' -Quiet)) {
+            throw "Map $mapId produced no occlusion survey samples."
+        }
 
         $mapDir = Join-Path $runDir "map_$mapId"
         New-Item -ItemType Directory -Force -Path $mapDir | Out-Null

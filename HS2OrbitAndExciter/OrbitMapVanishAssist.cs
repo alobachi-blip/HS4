@@ -39,6 +39,31 @@ namespace HS2OrbitAndExciter
         /// 就把整棟建築或整張地圖背景一起 vanish（v3 的 bug：一路爬到大容器節點）。
         /// </summary>
         private const int CacheVersion = 4;
+        private const int MaxDirectPhysicalOccluders = 8;
+        private const int MaxDirectRendererOccluders = 8;
+        private const float DirectInsideProbeRadius = 0.02f;
+        private const float DirectRayPadding = 0.05f;
+        private const float MinimumViewportSpan = 0.015f;
+        private const int DirectRaycastBufferSize = 128;
+        private const int DirectOverlapBufferSize = 64;
+
+        private struct DirectRendererHit
+        {
+            internal Renderer Renderer;
+            internal float Distance;
+        }
+
+        private sealed class RaycastDistanceComparer : IComparer<RaycastHit>
+        {
+            internal static readonly RaycastDistanceComparer Instance = new RaycastDistanceComparer();
+            public int Compare(RaycastHit x, RaycastHit y) => x.distance.CompareTo(y.distance);
+        }
+
+        private sealed class DirectRendererDistanceComparer : IComparer<DirectRendererHit>
+        {
+            internal static readonly DirectRendererDistanceComparer Instance = new DirectRendererDistanceComparer();
+            public int Compare(DirectRendererHit x, DirectRendererHit y) => x.Distance.CompareTo(y.Distance);
+        }
 
         private static FieldInfo? _lstMapVanishField;
         private static bool _resolved;
@@ -61,6 +86,17 @@ namespace HS2OrbitAndExciter
             new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<GameObject, bool> _directInactiveObjects =
             new Dictionary<GameObject, bool>();
+        private static int _directMapRendererRootId = -1;
+        private static Renderer[] _directMapRenderers = Array.Empty<Renderer>();
+        private static readonly RaycastHit[] DirectRaycastHits = new RaycastHit[DirectRaycastBufferSize];
+        private static readonly Collider[] DirectOverlapColliders = new Collider[DirectOverlapBufferSize];
+        private static readonly HashSet<int> DirectSeenColliderIds = new HashSet<int>();
+        private static readonly List<DirectRendererHit> DirectRendererCandidates =
+            new List<DirectRendererHit>(32);
+        private static readonly List<Renderer> DirectHierarchyRenderers = new List<Renderer>(64);
+        private static readonly List<Renderer> DirectUsableRenderers = new List<Renderer>(64);
+        private static readonly List<Renderer> VisibilityRenderers = new List<Renderer>(64);
+        private static readonly List<Renderer?> EmptyRenderers = new List<Renderer?>();
 
         internal static bool IsDirectOccluderHidden(Collider col) =>
             col != null && _directColliderNames.Contains(col.name);
@@ -78,17 +114,17 @@ namespace HS2OrbitAndExciter
             foreach (var pair in _directInactiveObjects)
                 if (pair.Key != null) pair.Key.SetActive(pair.Value);
             _directInactiveObjects.Clear();
-            foreach (var pair in _directOriginalRendererEnabled)
+            foreach (var renderer in _directOccludersThisFrame)
             {
-                if (pair.Key != null && !_directOccludersThisFrame.Contains(pair.Key))
-                    pair.Key.enabled = pair.Value;
+                if (renderer != null && _directOriginalRendererEnabled.TryGetValue(renderer, out bool wasEnabled))
+                    renderer.enabled = wasEnabled;
             }
             _directOccludersThisFrame.Clear();
         }
 
         internal static void HideDirectOccluder(Collider col)
         {
-            if (col == null) return;
+            if (col == null || IsNonOccludingVisualName(col.name)) return;
             foreach (var entry in _injectedEntries)
             {
                 if (entry != null && string.Equals(entry.nameCollider, col.name, StringComparison.Ordinal))
@@ -121,18 +157,16 @@ namespace HS2OrbitAndExciter
                 var visual = FindNamedTransform(_injectedMapRoot, visualName);
                 if (visual != null)
                 {
-                    var renderers = visual.GetComponentsInChildren<Renderer>(true);
-                    for (int i = 0; i < renderers.Length; i++)
+                    DirectHierarchyRenderers.Clear();
+                    visual.GetComponentsInChildren(true, DirectHierarchyRenderers);
+                    for (int i = 0; i < DirectHierarchyRenderers.Count; i++)
                     {
-                        var r = renderers[i];
+                        var r = DirectHierarchyRenderers[i];
                         if (r == null || r.GetComponentInParent<AIChara.ChaControl>() != null)
                             continue;
-                        if (!_directOriginalRendererEnabled.ContainsKey(r))
-                            _directOriginalRendererEnabled[r] = r.enabled;
-                        _directOccludersThisFrame.Add(r);
-                        r.enabled = false;
+                        HideDirectRenderer(r);
                     }
-                    if (renderers.Length > 0)
+                    if (DirectHierarchyRenderers.Count > 0)
                         _directColliderNames.Add(col.name);
                     return;
                 }
@@ -140,52 +174,206 @@ namespace HS2OrbitAndExciter
             Transform node = col.transform;
             for (int depth = 0; depth < 8 && node != null; depth++, node = node.parent)
             {
-                var candidates = node.GetComponentsInChildren<Renderer>(true);
-                int usable = 0;
-                for (int i = 0; i < candidates.Length; i++)
+                DirectHierarchyRenderers.Clear();
+                DirectUsableRenderers.Clear();
+                node.GetComponentsInChildren(true, DirectHierarchyRenderers);
+                for (int i = 0; i < DirectHierarchyRenderers.Count; i++)
                 {
-                    var r = candidates[i];
+                    var r = DirectHierarchyRenderers[i];
                     if (r != null && !(r is ParticleSystemRenderer) &&
                         !(r is TrailRenderer) && !(r is LineRenderer) &&
                         r.GetComponentInParent<AIChara.ChaControl>() == null)
-                        usable++;
+                    {
+                        DirectUsableRenderers.Add(r);
+                        if (DirectUsableRenderers.Count > 64)
+                            break;
+                    }
                 }
-                if (usable == 0 || usable > 64)
+                if (DirectUsableRenderers.Count == 0 || DirectUsableRenderers.Count > 64)
                     continue;
-                for (int i = 0; i < candidates.Length; i++)
-                {
-                    var r = candidates[i];
-                    if (r == null || r is ParticleSystemRenderer || r is TrailRenderer ||
-                        r is LineRenderer || r.GetComponentInParent<AIChara.ChaControl>() != null)
-                        continue;
-                    if (!_directOriginalRendererEnabled.ContainsKey(r))
-                        _directOriginalRendererEnabled[r] = r.enabled;
-                    _directOccludersThisFrame.Add(r);
-                    r.enabled = false;
-                }
+                for (int i = 0; i < DirectUsableRenderers.Count; i++)
+                    HideDirectRenderer(DirectUsableRenderers[i]);
                 _directColliderNames.Add(col.name);
                 return;
             }
         }
 
-        internal static void ApplyDirectLineOfSight(Vector3 origin, Vector3 target)
+        internal static void ApplyDirectLineOfSight(Vector3 origin, Vector3 target, Camera? camera = null)
         {
             BeginDirectOcclusionFrame();
             OrbitOcclusionSurvey.CaptureBeforeAssist(origin, target);
             Vector3 delta = target - origin;
             float distance = delta.magnitude;
-            if (distance <= 0.05f) return;
-            var hits = Physics.RaycastAll(origin, delta / distance, distance - 0.05f,
-                ~0, QueryTriggerInteraction.Ignore);
-            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-            for (int i = 0; i < hits.Length; i++)
+            if (distance <= DirectRayPadding) return;
+
+            HideContainingGeometry(origin);
+
+            var direction = delta / distance;
+            RaycastHit[] hits = DirectRaycastHits;
+            int hitCount = Physics.RaycastNonAlloc(
+                origin,
+                direction,
+                hits,
+                distance - DirectRayPadding,
+                ~0,
+                QueryTriggerInteraction.Collide);
+            if (hitCount >= hits.Length)
+            {
+                hits = Physics.RaycastAll(
+                    origin,
+                    direction,
+                    distance - DirectRayPadding,
+                    ~0,
+                    QueryTriggerInteraction.Collide);
+                hitCount = hits.Length;
+            }
+            Array.Sort(hits, 0, hitCount, RaycastDistanceComparer.Instance);
+            DirectSeenColliderIds.Clear();
+            int physicalHidden = 0;
+            for (int i = 0; i < hitCount; i++)
             {
                 var col = hits[i].collider;
                 if (col == null || col.GetComponentInParent<AIChara.ChaControl>() != null)
                     continue;
+                if (!DirectSeenColliderIds.Add(col.GetInstanceID()))
+                    continue;
                 HideDirectOccluder(col);
-                break;
+                physicalHidden++;
+                if (physicalHidden >= MaxDirectPhysicalOccluders)
+                    break;
             }
+
+            HideDirectRendererOccluders(origin, direction, distance, camera ?? Camera.main);
+        }
+
+        private static void HideContainingGeometry(Vector3 origin)
+        {
+            Collider[] colliders = DirectOverlapColliders;
+            int colliderCount = Physics.OverlapSphereNonAlloc(
+                origin,
+                DirectInsideProbeRadius,
+                colliders,
+                ~0,
+                QueryTriggerInteraction.Collide);
+            if (colliderCount >= colliders.Length)
+            {
+                colliders = Physics.OverlapSphere(
+                    origin,
+                    DirectInsideProbeRadius,
+                    ~0,
+                    QueryTriggerInteraction.Collide);
+                colliderCount = colliders.Length;
+            }
+            int hidden = 0;
+            for (int i = 0; i < colliderCount && hidden < MaxDirectPhysicalOccluders; i++)
+            {
+                var collider = colliders[i];
+                if (collider == null || IsNonOccludingVisualName(collider.name) ||
+                    collider.GetComponentInParent<AIChara.ChaControl>() != null)
+                {
+                    continue;
+                }
+                HideDirectOccluder(collider);
+                hidden++;
+            }
+        }
+
+        private static void HideDirectRendererOccluders(
+            Vector3 origin,
+            Vector3 direction,
+            float distance,
+            Camera? camera)
+        {
+            EnsureDirectMapRendererCache();
+            if (_directMapRenderers.Length == 0)
+                return;
+
+            var ray = new Ray(origin, direction);
+            DirectRendererCandidates.Clear();
+            for (int i = 0; i < _directMapRenderers.Length; i++)
+            {
+                var renderer = _directMapRenderers[i];
+                if (!IsDirectRendererEligible(renderer))
+                    continue;
+                Bounds bounds = renderer.bounds;
+                if (!bounds.IntersectRay(ray, out float hitDistance) ||
+                    hitDistance <= DirectRayPadding ||
+                    hitDistance >= distance - DirectRayPadding ||
+                    !HasMeaningfulCoverage(bounds, ray, camera))
+                {
+                    continue;
+                }
+                DirectRendererCandidates.Add(new DirectRendererHit
+                {
+                    Renderer = renderer,
+                    Distance = hitDistance
+                });
+            }
+
+            DirectRendererCandidates.Sort(DirectRendererDistanceComparer.Instance);
+            int count = Mathf.Min(DirectRendererCandidates.Count, MaxDirectRendererOccluders);
+            for (int i = 0; i < count; i++)
+                HideDirectRenderer(DirectRendererCandidates[i].Renderer);
+        }
+
+        private static void EnsureDirectMapRendererCache()
+        {
+            int rootId = _injectedMapRoot != null ? _injectedMapRoot.GetInstanceID() : -1;
+            if (rootId == _directMapRendererRootId)
+                return;
+            _directMapRendererRootId = rootId;
+            _directMapRenderers = _injectedMapRoot != null
+                ? _injectedMapRoot.GetComponentsInChildren<Renderer>(true)
+                : Array.Empty<Renderer>();
+        }
+
+        private static bool IsDirectRendererEligible(Renderer? renderer)
+        {
+            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy ||
+                renderer is ParticleSystemRenderer || renderer is TrailRenderer ||
+                renderer is LineRenderer || IsNonOccludingVisualName(renderer.name))
+            {
+                return false;
+            }
+            return renderer.GetComponentInParent<AIChara.ChaControl>() == null;
+        }
+
+        private static bool IsNonOccludingVisualName(string? name) =>
+            !string.IsNullOrEmpty(name) &&
+            name!.IndexOf("shadow", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static void HideDirectRenderer(Renderer renderer)
+        {
+            if (!_directOriginalRendererEnabled.ContainsKey(renderer))
+                _directOriginalRendererEnabled[renderer] = renderer.enabled;
+            _directOccludersThisFrame.Add(renderer);
+            renderer.enabled = false;
+        }
+
+        private static bool HasMeaningfulCoverage(Bounds bounds, Ray ray, Camera? camera)
+        {
+            if (camera == null)
+                return true;
+            Vector3 toCenter = bounds.center - ray.origin;
+            float depth = Mathf.Max(Vector3.Dot(toCenter, ray.direction), 0.05f);
+            Vector3 right = Vector3.Cross(ray.direction, Vector3.up);
+            if (right.sqrMagnitude < 1e-5f)
+                right = Vector3.Cross(ray.direction, Vector3.forward);
+            right.Normalize();
+            Vector3 up = Vector3.Cross(right, ray.direction).normalized;
+            Vector3 extents = bounds.extents;
+            float halfWidth = Mathf.Abs(right.x) * extents.x
+                + Mathf.Abs(right.y) * extents.y
+                + Mathf.Abs(right.z) * extents.z;
+            float halfHeight = Mathf.Abs(up.x) * extents.x
+                + Mathf.Abs(up.y) * extents.y
+                + Mathf.Abs(up.z) * extents.z;
+            float verticalTan = Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            if (verticalTan <= 1e-5f)
+                return true;
+            float heightSpan = halfHeight / (depth * verticalTan);
+            float widthSpan = halfWidth / (depth * verticalTan * Mathf.Max(camera.aspect, 0.1f));
+            return Mathf.Min(widthSpan, heightSpan) >= MinimumViewportSpan;
         }
 
         /// <summary>地圖就緒後：有快取則只套用；無則掃描一次並落盤（含 0 筆）。</summary>
@@ -194,7 +382,7 @@ namespace HS2OrbitAndExciter
             if (hScene == null)
                 return;
 
-            var map = Traverse.Create(hScene).Field("objMap").GetValue<GameObject>();
+            var map = OrbitHelpers.GetMapObject(hScene);
             if (map == null)
                 return;
 
@@ -942,10 +1130,11 @@ namespace HS2OrbitAndExciter
                     if (go == null)
                         continue;
 
-                    var renderers = go.GetComponentsInChildren<Renderer>(true);
-                    for (int i = 0; i < renderers.Length; i++)
+                    VisibilityRenderers.Clear();
+                    go.GetComponentsInChildren(true, VisibilityRenderers);
+                    for (int i = 0; i < VisibilityRenderers.Count; i++)
                     {
-                        var renderer = renderers[i];
+                        var renderer = VisibilityRenderers[i];
                         if (renderer == null)
                             continue;
 
@@ -962,7 +1151,7 @@ namespace HS2OrbitAndExciter
                 }
             }
 
-            var empty = new List<Renderer?>();
+            EmptyRenderers.Clear();
             foreach (var pair in _hiddenByRenderer)
             {
                 var renderer = pair.Key;
@@ -976,12 +1165,12 @@ namespace HS2OrbitAndExciter
 
                 if (renderer != null && _originalRendererEnabled.TryGetValue(renderer, out bool wasEnabled))
                     renderer.enabled = wasEnabled;
-                empty.Add(renderer);
+                EmptyRenderers.Add(renderer);
             }
 
-            for (int i = 0; i < empty.Count; i++)
+            for (int i = 0; i < EmptyRenderers.Count; i++)
             {
-                var renderer = empty[i];
+                var renderer = EmptyRenderers[i];
                 if (renderer == null)
                     continue;
                 _hiddenByRenderer.Remove(renderer);
@@ -1002,6 +1191,11 @@ namespace HS2OrbitAndExciter
 
             _hiddenByRenderer.Clear();
             _originalRendererEnabled.Clear();
+            foreach (var pair in _directOriginalRendererEnabled)
+            {
+                if (pair.Key != null)
+                    pair.Key.enabled = pair.Value;
+            }
             _directOccludersThisFrame.Clear();
             _directOriginalRendererEnabled.Clear();
             _directEntries.Clear();
@@ -1013,6 +1207,16 @@ namespace HS2OrbitAndExciter
             _injectedMapInstanceId = -1;
             _injectedCameraInstanceId = -1;
             _injectedMapRoot = null;
+            _directMapRendererRootId = -1;
+            _directMapRenderers = Array.Empty<Renderer>();
+            DirectSeenColliderIds.Clear();
+            DirectRendererCandidates.Clear();
+            DirectHierarchyRenderers.Clear();
+            DirectUsableRenderers.Clear();
+            VisibilityRenderers.Clear();
+            EmptyRenderers.Clear();
+            Array.Clear(DirectRaycastHits, 0, DirectRaycastHits.Length);
+            Array.Clear(DirectOverlapColliders, 0, DirectOverlapColliders.Length);
         }
 
         private static List<Transform> CollectCharacterRoots(HScene hScene)

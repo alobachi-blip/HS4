@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+NON_OCCLUDING_NAME_PARTS = ("shadow",)
+
+
 def load_rows(paths: Iterable[Path]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in paths:
@@ -19,8 +22,11 @@ def load_rows(paths: Iterable[Path]) -> list[dict[str, Any]]:
                     continue
                 try:
                     row = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(f"{path}:{line_no}: invalid JSON: {exc}") from exc
+                except json.JSONDecodeError:
+                    # The shared FSM trace has a few legacy non-JSON diagnostic
+                    # events. They are unrelated to this survey and must not
+                    # invalidate otherwise complete occlusion evidence.
+                    continue
                 if row.get("id") == "occlusion_survey":
                     data = row.get("data", {})
                     if isinstance(data, str):
@@ -33,11 +39,13 @@ def load_rows(paths: Iterable[Path]) -> list[dict[str, Any]]:
 def analyze_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows = list(rows)
     sample_rows = [row for row in rows if row.get("msg") == "sample"]
-    categories: Counter[str] = Counter()
+    primary_categories: Counter[str] = Counter()
+    signals: Counter[str] = Counter()
     maps: dict[int, Counter[str]] = defaultdict(Counter)
     blockers: dict[str, Counter[str]] = defaultdict(Counter)
     issue_samples_by_map: Counter[int] = Counter()
     origin_deltas: list[float] = []
+    included_samples = 0
 
     total_samples_by_trace: Counter[str] = Counter()
     for row in rows:
@@ -55,37 +63,43 @@ def analyze_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     for row in sample_rows:
         data = row.get("data") or {}
         map_id = int(data.get("mapId", -1))
+        row_categories = [str(value) for value in data.get("categories", [])]
+        primary = str(data.get("primary") or (row_categories[0] if row_categories else "unknown"))
+        if primary == "camera_inside_geometry":
+            name = data.get("insideFirst") or "unknown"
+        elif primary == "renderer_without_collider":
+            name = data.get("rendererOnly") or "unknown"
+        else:
+            name = data.get("afterFirst") or data.get("finalFirst") or "unknown"
+        if any(part in str(name).lower() for part in NON_OCCLUDING_NAME_PARTS):
+            continue
+
+        included_samples += 1
         issue_samples_by_map[map_id] += 1
         try:
             origin_deltas.append(float(data.get("originDelta", 0)))
         except (TypeError, ValueError):
             pass
-        for category in data.get("categories", []):
-            category = str(category)
-            categories[category] += 1
-            maps[map_id][category] += 1
-            name = (
-                data.get("afterFirst")
-                or data.get("finalFirst")
-                or data.get("insideFirst")
-                or data.get("rendererOnly")
-                or "unknown"
-            )
-            blockers[category][str(name)] += 1
+        for category in row_categories:
+            signals[category] += 1
+        if primary != "unknown":
+            primary_categories[primary] += 1
+            maps[map_id][primary] += 1
+            blockers[primary][str(name)] += 1
 
     ranking = [
         {
             "rank": rank,
             "category": category,
             "samples": count,
-            "shareOfIssueSamples": round(count / len(sample_rows), 6) if sample_rows else 0.0,
+            "shareOfIssueSamples": round(count / included_samples, 6) if included_samples else 0.0,
             "mapsAffected": sum(1 for value in maps.values() if value[category]),
             "topBlockers": [
                 {"name": name, "samples": blocker_count}
                 for name, blocker_count in blockers[category].most_common(10)
             ],
         }
-        for rank, (category, count) in enumerate(categories.most_common(), 1)
+        for rank, (category, count) in enumerate(primary_categories.most_common(), 1)
     ]
     return {
         "scope": {
@@ -94,10 +108,11 @@ def analyze_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             "method": "single center ray from camera to focus",
         },
         "totalSamples": sum(total_samples_by_trace.values()) or len(sample_rows),
-        "issueSamples": len(sample_rows),
+        "issueSamples": included_samples,
         "issueRate": round(
-            len(sample_rows) / (sum(total_samples_by_trace.values()) or len(sample_rows)), 6
-        ) if sample_rows else 0.0,
+            included_samples / (sum(total_samples_by_trace.values()) or included_samples), 6
+        ) if included_samples else 0.0,
+        "signalCounts": dict(signals.most_common()),
         "maps": {
             str(map_id): {
                 "issueSamples": issue_samples_by_map[map_id],

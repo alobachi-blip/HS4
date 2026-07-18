@@ -18,6 +18,7 @@ namespace HS2OrbitAndExciter
         private const float TransitionOriginDeltaMeters = 0.25f;
         private const float RayEndPaddingMeters = 0.05f;
         private const float InsideProbeRadiusMeters = 0.02f;
+        private const float MinimumViewportSpan = 0.015f;
         private const int MaxRendererSearchDepth = 8;
         private const int MaxRenderersPerSearchNode = 256;
 
@@ -37,6 +38,7 @@ namespace HS2OrbitAndExciter
             internal HScene? HScene;
             internal CameraControl_Ver2? Control;
             internal Transform? CameraTransform;
+            internal Camera? Camera;
             internal Vector3 ActualOrigin;
             internal Vector3 FinalOrigin;
             internal Vector3 Target;
@@ -97,6 +99,7 @@ namespace HS2OrbitAndExciter
                 HScene = hScene,
                 Control = control,
                 CameraTransform = camera.transform,
+                Camera = camera,
                 ActualOrigin = camera.transform.position,
                 FinalOrigin = PredictFinalCameraPosition(control),
                 Target = target,
@@ -112,18 +115,17 @@ namespace HS2OrbitAndExciter
             if (frame == null)
                 return;
 
-            frame.ActualOrigin = productionOrigin;
             frame.Target = productionTarget;
             frame.BeforeActual = TraceVisibleObjects(
-                frame.ActualOrigin, frame.Target, frame.CameraTransform,
+                frame.ActualOrigin, frame.Target, frame.Camera,
                 QueryTriggerInteraction.Ignore);
             frame.BeforeFinal = TraceVisibleObjects(
-                frame.FinalOrigin, frame.Target, frame.CameraTransform,
+                frame.FinalOrigin, frame.Target, frame.Camera,
                 QueryTriggerInteraction.Ignore);
             frame.BeforeTriggers = TraceVisibleObjects(
-                frame.FinalOrigin, frame.Target, frame.CameraTransform,
+                frame.FinalOrigin, frame.Target, frame.Camera,
                 QueryTriggerInteraction.Collide);
-            frame.Inside = FindContainingVisuals(frame.FinalOrigin, frame.Target, frame.CameraTransform);
+            frame.Inside = FindContainingVisuals(frame.FinalOrigin, frame.Target, frame.Camera);
 
             if (CountVisible(frame.BeforeFinal) == 0)
                 frame.RendererOnlyBefore = FindRendererOnlyBlocker(frame);
@@ -139,11 +141,13 @@ namespace HS2OrbitAndExciter
 
             _samples++;
             var afterFinal = TraceVisibleObjects(
-                frame.FinalOrigin, frame.Target, frame.CameraTransform,
+                frame.FinalOrigin, frame.Target, frame.Camera,
                 QueryTriggerInteraction.Ignore);
             var afterTriggers = TraceVisibleObjects(
-                frame.FinalOrigin, frame.Target, frame.CameraTransform,
+                frame.FinalOrigin, frame.Target, frame.Camera,
                 QueryTriggerInteraction.Collide);
+            var afterInside = FindContainingVisuals(
+                frame.FinalOrigin, frame.Target, frame.Camera);
             VisualHit? rendererOnlyAfter = CountVisible(afterFinal) == 0
                 ? FindRendererOnlyBlocker(frame)
                 : null;
@@ -173,7 +177,7 @@ namespace HS2OrbitAndExciter
                 }
             }
 
-            if (HasVisible(frame.Inside))
+            if (HasVisible(afterInside))
                 AddCategory(categories, "camera_inside_geometry");
 
             if (HasVisibleTriggerMissingFromIgnore(afterTriggers, afterFinal))
@@ -188,6 +192,7 @@ namespace HS2OrbitAndExciter
 
             if (categories.Count > 0)
             {
+                string primary = ChoosePrimaryCategory(categories);
                 _issueSamples++;
                 for (int i = 0; i < categories.Count; i++)
                 {
@@ -208,8 +213,9 @@ namespace HS2OrbitAndExciter
                     + ",\"oldFirst\":\"" + Esc(NameOf(oldFirst)) + "\""
                     + ",\"finalFirst\":\"" + Esc(NameOf(finalFirst)) + "\""
                     + ",\"afterFirst\":\"" + Esc(NameOf(afterFirst)) + "\""
-                    + ",\"insideFirst\":\"" + Esc(NameOf(FirstVisible(frame.Inside))) + "\""
+                    + ",\"insideFirst\":\"" + Esc(NameOf(FirstVisible(afterInside))) + "\""
                     + ",\"rendererOnly\":\"" + Esc(NameOf(rendererOnlyAfter)) + "\""
+                    + ",\"primary\":\"" + Esc(primary) + "\""
                     + ",\"categories\":[" + JsonStringList(categories) + "]}");
             }
 
@@ -235,7 +241,7 @@ namespace HS2OrbitAndExciter
         private static List<VisualHit> TraceVisibleObjects(
             Vector3 origin,
             Vector3 target,
-            Transform? cameraTransform,
+            Camera? camera,
             QueryTriggerInteraction triggerMode)
         {
             var result = new List<VisualHit>(8);
@@ -253,9 +259,9 @@ namespace HS2OrbitAndExciter
             for (int i = 0; i < hits.Length; i++)
             {
                 var collider = hits[i].collider;
-                if (ShouldIgnoreCollider(collider, cameraTransform))
+                if (ShouldIgnoreCollider(collider, camera?.transform))
                     continue;
-                var visual = ResolveVisual(collider, ray, distance, hits[i].distance);
+                var visual = ResolveVisual(collider, ray, distance, hits[i].distance, camera);
                 if (visual == null || !seen.Add(visual.Signature))
                     continue;
                 visual.Collider = collider;
@@ -269,7 +275,7 @@ namespace HS2OrbitAndExciter
         private static List<VisualHit> FindContainingVisuals(
             Vector3 origin,
             Vector3 target,
-            Transform? cameraTransform)
+            Camera? camera)
         {
             var result = new List<VisualHit>(4);
             var colliders = Physics.OverlapSphere(
@@ -281,9 +287,9 @@ namespace HS2OrbitAndExciter
             for (int i = 0; i < colliders.Length; i++)
             {
                 var collider = colliders[i];
-                if (ShouldIgnoreCollider(collider, cameraTransform))
+                if (ShouldIgnoreCollider(collider, camera?.transform))
                     continue;
-                var visual = ResolveVisual(collider, ray, distance, 0f);
+                var visual = ResolveVisual(collider, ray, distance, 0f, camera);
                 if (visual == null || !seen.Add(visual.Signature))
                     continue;
                 visual.Collider = collider;
@@ -297,7 +303,8 @@ namespace HS2OrbitAndExciter
             Collider collider,
             Ray ray,
             float maxDistance,
-            float colliderHitDistance)
+            float colliderHitDistance,
+            Camera? camera)
         {
             Transform? node = collider.transform;
             Renderer? best = null;
@@ -314,6 +321,8 @@ namespace HS2OrbitAndExciter
                 {
                     var renderer = renderers[i];
                     if (!IsSurveyRenderer(renderer))
+                        continue;
+                    if (!HasMeaningfulCoverage(renderer, ray, camera))
                         continue;
                     if (!renderer.bounds.IntersectRay(ray, out float rayDistance) ||
                         rayDistance > maxDistance - RayEndPaddingMeters)
@@ -366,6 +375,8 @@ namespace HS2OrbitAndExciter
                 {
                     continue;
                 }
+                if (!HasMeaningfulCoverage(renderer, ray, frame.Camera))
+                    continue;
                 if (!renderer.bounds.IntersectRay(ray, out float hitDistance) ||
                     hitDistance <= RayEndPaddingMeters ||
                     hitDistance >= distance - RayEndPaddingMeters ||
@@ -432,11 +443,41 @@ namespace HS2OrbitAndExciter
             {
                 return false;
             }
+            if ((renderer.name ?? "").IndexOf("shadow", StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
             try
             {
                 return renderer.GetComponentInParent<AIChara.ChaControl>() == null;
             }
             catch { return true; }
+        }
+
+        private static bool HasMeaningfulCoverage(Renderer renderer, Ray ray, Camera? camera)
+        {
+            if (camera == null)
+                return true;
+
+            Bounds bounds = renderer.bounds;
+            Vector3 toCenter = bounds.center - ray.origin;
+            float depth = Mathf.Max(Vector3.Dot(toCenter, ray.direction), 0.05f);
+            Vector3 right = Vector3.Cross(ray.direction, Vector3.up);
+            if (right.sqrMagnitude < 1e-5f)
+                right = Vector3.Cross(ray.direction, Vector3.forward);
+            right.Normalize();
+            Vector3 up = Vector3.Cross(right, ray.direction).normalized;
+            Vector3 extents = bounds.extents;
+            float halfWidth = Mathf.Abs(right.x) * extents.x
+                + Mathf.Abs(right.y) * extents.y
+                + Mathf.Abs(right.z) * extents.z;
+            float halfHeight = Mathf.Abs(up.x) * extents.x
+                + Mathf.Abs(up.y) * extents.y
+                + Mathf.Abs(up.z) * extents.z;
+            float verticalTan = Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            if (verticalTan <= 1e-5f)
+                return true;
+            float heightSpan = halfHeight / (depth * verticalTan);
+            float widthSpan = halfWidth / (depth * verticalTan * Mathf.Max(camera.aspect, 0.1f));
+            return Mathf.Min(widthSpan, heightSpan) >= MinimumViewportSpan;
         }
 
         private static bool HasVisibleTriggerMissingFromIgnore(
@@ -459,6 +500,23 @@ namespace HS2OrbitAndExciter
         {
             if (!categories.Contains(category))
                 categories.Add(category);
+        }
+
+        private static string ChoosePrimaryCategory(List<string> categories)
+        {
+            string[] precedence =
+            {
+                "camera_inside_geometry",
+                "transition_stale_origin",
+                "false_hidden_mapping",
+                "multi_layer_remaining",
+                "trigger_only_blocker",
+                "renderer_without_collider",
+                "first_blocker_remained"
+            };
+            for (int i = 0; i < precedence.Length; i++)
+                if (categories.Contains(precedence[i])) return precedence[i];
+            return categories.Count > 0 ? categories[0] : "unknown";
         }
 
         private static int CountVisible(List<VisualHit> hits)
