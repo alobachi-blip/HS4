@@ -555,6 +555,22 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("hScene.ctrlFlag.AddOrgasm()", smoke)
         self.assertIn('CaptureKeyframe("cumflation_after"', smoke)
 
+    def test_character_array_cache_waits_for_hscene_start_replacement(self):
+        plugin_root = TOOLS.parent
+        helpers = (plugin_root / "OrbitHelpers.cs").read_text(encoding="utf-8-sig")
+        ensure = helpers[helpers.index("private static void EnsureCharacterArrays") :]
+        ensure = ensure[: ensure.index("internal static GameObject? GetMapObject")]
+
+        self.assertIn("bool primaryFemaleReady", ensure)
+        self.assertIn("_cachedFemales[0] != null", ensure)
+        self.assertIn("if (sameScene && primaryFemaleReady)", ensure)
+        self.assertIn("HScene.Start()", ensure)
+        self.assertIn("do not optimize", ensure.lower())
+        self.assertNotIn(
+            "if (ReferenceEquals(_cachedCharacterHScene, hScene))\n                return;",
+            ensure,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

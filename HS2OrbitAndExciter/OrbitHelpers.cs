@@ -338,8 +338,19 @@ namespace HS2OrbitAndExciter
 
         private static void EnsureCharacterArrays(HScene hScene)
         {
-            if (ReferenceEquals(_cachedCharacterHScene, hScene))
+            bool sameScene = ReferenceEquals(_cachedCharacterHScene, hScene);
+            bool primaryFemaleReady =
+                _cachedFemales != null &&
+                _cachedFemales.Length > 0 &&
+                _cachedFemales[0] != null;
+            if (sameScene && primaryFemaleReady)
                 return;
+
+            // IMPORTANT: HScene.Start() publishes the HScene reference before its loading yields,
+            // then replaces chaFemales/chaMales with new arrays. Orbit can query during that gap;
+            // caching by scene reference alone would permanently retain the discarded empty arrays
+            // and break belly, bust, and multi-female effects. Keep refreshing until female slot 0
+            // is populated; do not optimize this guard back to ReferenceEquals-only caching.
             _cachedCharacterHScene = hScene;
             _cachedFemales = ChaFemalesField?.GetValue(hScene) as ChaControl[];
             _cachedMales = ChaMalesField?.GetValue(hScene) as ChaControl[];
