@@ -176,6 +176,12 @@ namespace HS2OrbitRuntimeHotfix
         private bool TryInstallCumflationDeflateFix()
         {
             var assistType = FindLoadedType("HS2OrbitAndExciter.PregnancyPlusAssist", OrbitAssembly);
+            if (assistType != null && AccessTools.Method(assistType, "TryApplyDirectVisibleLevel") != null)
+            {
+                Logger.LogInfo("Orbit source already includes direct visible cumflation; legacy hotfix skipped.");
+                return true;
+            }
+
             var deflate = assistType == null ? null : AccessTools.Method(assistType, "TryDeflateOneLevel");
             var inflate = assistType == null ? null : AccessTools.Method(assistType, "TryInflateOnInside");
             var tick = assistType == null ? null : AccessTools.Method(assistType, "TickInsideFinish");
