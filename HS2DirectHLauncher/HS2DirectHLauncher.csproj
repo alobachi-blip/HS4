@@ -25,6 +25,12 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(HS2Managed)\UnityEngine.CoreModule.dll</HintPath>
     </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(HS2Managed)\UnityEngine.UIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(HS2Managed)\UnityEngine.AudioModule.dll</HintPath>
+    </Reference>
     <Reference Include="IL">
       <HintPath>$(HS2Managed)\IL.dll</HintPath>
     </Reference>

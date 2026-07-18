@@ -1,0 +1,80 @@
+# Direct-H lean profile. Paths are relative to BepInEx\plugins.
+# Keep this dependency-oriented: card decoding/appearance, H runtime, physics,
+# custom maps, stability fixes, and the local Direct-H/Orbit integration.
+
+# Core card and mod loading
+ConfigurationManager\ConfigurationManager.dll
+HS2_BepisPlugins\HS2_ExtensibleSaveFormat.dll
+HS2_BepisPlugins\HS2_Screencap.dll
+HS2_BepisPlugins\HS2_Sideloader.dll
+HS2_BepisPlugins\HS2_SliderUnlocker.dll
+HS2_BepisPlugins\ICSharpCode.SharpZipLib.dll
+XUnity.ResourceRedirector\XUnity.ResourceRedirector.BepInEx.dll
+XUnity.ResourceRedirector\XUnity.ResourceRedirector.dll
+HS2API.dll
+HS2API.NativeHelper.dll
+HS2ABMX.dll
+MoreAccessories.dll
+OverlayMods\HS2_OverlayMods.dll
+HS2_Plugins\HS2_UncensorSelector.dll
+HS2_Plugins\HS2_MaterialEditor.dll
+HS2_Plugins\HS2_ShaderSwapper.dll
+HS2_Plugins\libwebp.lib
+ModBoneImplantor.dll
+HeadBundleRedirect.dll
+HS2_CharacterReplacer.dll
+HS2_CopyChaBodyMat.dll
+RendererEditor.dll
+RendererEditor\Textures\ReplaceMe.png
+
+# H-scene, character appearance, physics, and custom maps
+Aura2_Core.dll
+BonesFramework.dll
+Deformers.dll
+HS2_AdditionalAccessoryControls.dll
+HS2_AdvIKPlugin.dll
+HS2_AllowBottom.dll
+HS2_AnimationPairing.dll
+HS2_Bulge.dll
+HS2_ChicksDigMapModdersPlugin.dll
+HS2_ClothColliders.dll
+HS2_EyeLookAdjuster.dll
+HS2_Heelz.dll
+HS2_PovX.dll
+HS2_PregnancyPlus.dll
+HS2_ProjectorUtils.dll
+HS2TakeChargePlugin.dll
+HS2US.dll
+MdgqBodyChange.dll
+BeaverAI.dll
+GravureAI.dll
+PushUpAI.dll
+BetterPenetration\HS2_BetterPenetration.dll
+2155X\HS2_BetterHScenes.dll
+2155X\HS2_ExtraGroups.dll
+2155X\HS2_HCharaSwitcher.dll
+2155X\HS2_HLightControl.dll
+2155X\HS2_RandomHPicker.dll
+2155X\HS2_UnlockPlayerHClothes.dll
+2155X\HS2_UnlockPlayerHeight.dll
+
+# Runtime stability fixes used outside Maker/Studio
+BepInEx.CatchUnityEventExceptions.dll
+IllusionFixes\HS2_Fix_CameraTarget.dll
+IllusionFixes\HS2_Fix_DataCorruptionFixes.dll
+IllusionFixes\HS2_Fix_DynamicBones.dll
+IllusionFixes\HS2_Fix_GarbageTruck.dll
+IllusionFixes\HS2_Fix_GravityAdjust.dll
+IllusionFixes\HS2_Fix_ManifestCorrector.dll
+IllusionFixes\HS2_Fix_NullChecks.dll
+IllusionFixes\HS2_Fix_PersonalityCorrector.dll
+IllusionFixes\HS2_Fix_ResourceUnloadOptimizations.dll
+IllusionFixes\HS2_Fix_SettingsVerifier.dll
+IllusionFixes\HS2_Fix_UpdateWet.dll
+IllusionFixes\HS2_Fix_WetAccessories.dll
+
+# Local direct-launch runtime
+HS2DirectHLauncher*.dll
+HS2AfterimageBridge.dll
+HS2OrbitAndExciter*.dll
+HS2OrbitRuntimeHotfix*.dll

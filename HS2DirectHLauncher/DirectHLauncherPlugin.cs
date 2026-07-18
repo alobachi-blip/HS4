@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Actor;
@@ -41,8 +43,11 @@ namespace HS2DirectHLauncher
         private bool _bootstrapTakenOver;
         private bool _orbitAssistEnabled;
         private bool _initialClothesRandomized;
+        private bool _logoVisualsSuppressed;
+        private bool _startupReadyLogged;
         private float _nextPoll;
         private float _nextOrbitAssistPoll;
+        private DateTime _launchStartedUtc;
 
         private void Awake()
         {
@@ -73,10 +78,39 @@ namespace HS2DirectHLauncher
                 return;
             }
 
+            _launchStartedUtc = ReadLaunchStartUtc();
             DisableLegacyDirectHDriver();
+            PatchLogoStartup();
             PatchMoreAccessoriesStartupGuard();
             PatchHResourceTablePacing();
-            Logger.LogInfo("Direct-H launcher armed; waiting only for required game singletons.");
+            SuppressLogoSceneVisuals();
+            Logger.LogInfo($"Direct-H launcher armed after {LaunchElapsedMilliseconds():F0} ms; waiting only for required game singletons.");
+        }
+
+        private DateTime ReadLaunchStartUtc()
+        {
+            try
+            {
+                if (File.Exists(_runMarkerPath) &&
+                    DateTime.TryParse(
+                        File.ReadAllText(_runMarkerPath).Trim(),
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind,
+                        out DateTime started))
+                {
+                    return started.ToUniversalTime();
+                }
+            }
+            catch
+            {
+                // Timing is diagnostic only; launch behavior must not depend on it.
+            }
+            return DateTime.UtcNow;
+        }
+
+        private double LaunchElapsedMilliseconds()
+        {
+            return Math.Max(0d, (DateTime.UtcNow - _launchStartedUtc).TotalMilliseconds);
         }
 
         private void DisableLegacyDirectHDriver()
@@ -146,6 +180,83 @@ namespace HS2DirectHLauncher
             catch
             {
                 return false;
+            }
+        }
+
+        private void PatchLogoStartup()
+        {
+            try
+            {
+                var method = AccessTools.Method(typeof(LogoScene), "Start");
+                if (method == null)
+                    return;
+
+                var harmony = new Harmony(PluginInfo.Guid + ".logo");
+                harmony.Patch(
+                    method,
+                    prefix: new HarmonyMethod(typeof(DirectHLauncherPlugin), nameof(LogoSceneStartPrefix)));
+                Logger.LogInfo("Installed direct-launch Logo startup bypass.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Could not bypass Logo startup routine: " + ex.Message);
+            }
+        }
+
+        private static bool LogoSceneStartPrefix(LogoScene __instance, ref IEnumerator __result)
+        {
+            __instance.StopAllCoroutines();
+            __instance.enabled = false;
+            __result = EmptyRoutine();
+            return false;
+        }
+
+        private static IEnumerator EmptyRoutine()
+        {
+            yield break;
+        }
+
+        private void SuppressLogoSceneVisuals()
+        {
+            var activeScene = UnitySceneManager.GetActiveScene();
+            if (!activeScene.IsValid() ||
+                !string.Equals(activeScene.name, "Logo", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            int canvases = 0;
+            int renderers = 0;
+            int audioSources = 0;
+            foreach (GameObject root in activeScene.GetRootGameObjects())
+            {
+                foreach (Canvas canvas in root.GetComponentsInChildren<Canvas>(includeInactive: true))
+                {
+                    if (!canvas.enabled)
+                        continue;
+                    canvas.enabled = false;
+                    canvases++;
+                }
+                foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(includeInactive: true))
+                {
+                    if (!renderer.enabled)
+                        continue;
+                    renderer.enabled = false;
+                    renderers++;
+                }
+                foreach (AudioSource audio in root.GetComponentsInChildren<AudioSource>(includeInactive: true))
+                {
+                    if (!audio.enabled)
+                        continue;
+                    audio.enabled = false;
+                    audioSources++;
+                }
+            }
+
+            if (!_logoVisualsSuppressed)
+            {
+                _logoVisualsSuppressed = true;
+                Logger.LogInfo($"Suppressed Logo scene output: canvases={canvases}, renderers={renderers}, audio={audioSources}.");
             }
         }
 
@@ -226,8 +337,10 @@ namespace HS2DirectHLauncher
         {
             if (!_armed)
                 return;
+            SuppressLogoSceneVisuals();
             if (_requested)
             {
+                TryLogStartupReady();
                 if (TryRandomizeInitialClothes())
                     TryEnableOrbitAssist();
                 return;
@@ -260,6 +373,24 @@ namespace HS2DirectHLauncher
                 _nextPoll = Time.unscaledTime + 1f;
                 Logger.LogError("Direct-H request failed; will retry: " + ex);
             }
+        }
+
+        private void TryLogStartupReady()
+        {
+            if (_startupReadyLogged || !HSceneManager.isHScene || !Singleton<HSceneManager>.IsInstance())
+                return;
+
+            var hScene = Singleton<HSceneManager>.Instance.Hscene;
+            var info = hScene?.ctrlFlag?.nowAnimationInfo;
+            if (hScene == null || info == null || info.id < 0 ||
+                !PrimaryCharacterReady(hScene.GetFemales()) ||
+                !PrimaryCharacterReady(hScene.GetMales()))
+            {
+                return;
+            }
+
+            _startupReadyLogged = true;
+            Logger.LogInfo($"Direct-H scene ready after {LaunchElapsedMilliseconds():F0} ms from process request.");
         }
 
         private bool TryRandomizeInitialClothes()
@@ -387,15 +518,17 @@ namespace HS2DirectHLauncher
         {
             return Singleton<Game>.IsInstance() &&
                    Singleton<HSceneManager>.IsInstance() &&
-                   Singleton<Character>.IsInstance() &&
-                   !Scene.IsFadeNow;
+                   Singleton<Character>.IsInstance();
         }
 
         private bool AdvanceToCompatibleLaunchPoint()
         {
             string activeScene = UnitySceneManager.GetActiveScene().name;
             if (string.Equals(activeScene, "Title", StringComparison.Ordinal))
+            {
+                FinishStartupFade();
                 return true;
+            }
             if (!string.Equals(activeScene, "Logo", StringComparison.Ordinal))
                 return false;
             if (_bootstrapTakenOver)
@@ -406,21 +539,35 @@ namespace HS2DirectHLauncher
             if (logo == null || saveData == null)
                 return false;
 
-            // Keep LogoScene's required save-data guards, then skip its brand call,
-            // fixed wait, and the compatibility Title scene. Known H-UI consumers
-            // are guarded separately and HScene initializes its own resources.
+            var guardTimer = Stopwatch.StartNew();
+            // Keep LogoScene's save-data integrity guards, but skip its preset
+            // creation, brand bundle scan/audio, fixed wait, and Title scene.
             saveData.RoomListCharaExists();
             saveData.PlayerCoordinateExists();
             saveData.PlayerExists();
+            guardTimer.Stop();
             logo.StopAllCoroutines();
             logo.enabled = false;
+            FinishStartupFade();
             _bootstrapTakenOver = true;
-            Logger.LogInfo("Logo bootstrap complete; bypassing brand wait and compatibility Title.");
+            Logger.LogInfo($"Logo bootstrap taken over after {LaunchElapsedMilliseconds():F0} ms (save guards {guardTimer.ElapsedMilliseconds} ms); bypassing brand wait and Title.");
             return true;
+        }
+
+        private static void FinishStartupFade()
+        {
+            if (!Scene.IsFadeNow)
+                return;
+
+            SceneFadeCanvas fade = Scene.sceneFadeCanvas;
+            fade.isSkip = true;
+            fade.Cancel();
+            fade.Force(FadeCanvas.Fade.Out);
         }
 
         private void EnterHScene()
         {
+            var preparationTimer = Stopwatch.StartNew();
             var game = Singleton<Game>.Instance;
             var manager = Singleton<HSceneManager>.Instance;
             string femaleDir = ResolveDirectory(_femaleDirectory.Value);
@@ -469,7 +616,8 @@ namespace HS2DirectHLauncher
             manager.bFutanariSecond = false;
             manager.SecondSitori = false;
 
-            Logger.LogInfo($"Loading HScene immediately: map={mapId}, female1={Path.GetFileName(females[0])}, female2={Path.GetFileName(females[1])}, male1={Path.GetFileName(males[0])}, male2={Path.GetFileName(males[1])}");
+            preparationTimer.Stop();
+            Logger.LogInfo($"Loading HScene after {LaunchElapsedMilliseconds():F0} ms (selection/setup {preparationTimer.ElapsedMilliseconds} ms): map={mapId}, female1={Path.GetFileName(females[0])}, female2={Path.GetFileName(females[1])}, male1={Path.GetFileName(males[0])}, male2={Path.GetFileName(males[1])}");
             Scene.LoadReserve(new Scene.Data
             {
                 levelName = "HScene",

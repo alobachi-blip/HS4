@@ -31,6 +31,8 @@ HS2OrbitAndExciter/bin/
 HS2OrbitAndExciter/obj/
 HS2DirectHLauncher/bin/
 HS2DirectHLauncher/obj/
+HS2DirectHLeanProfile/bin/
+HS2DirectHLeanProfile/obj/
 # ilspycmd 自 BepInEx\plugins 反組譯之產物（僅供對照，勿提交）
 HS2OrbitAndExciter/decompiled_from_BepInEx_plugins/
 
