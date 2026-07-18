@@ -16,6 +16,35 @@ namespace HS2OrbitAndExciter
         private const KeyCode Modifier = KeyCode.LeftShift;
         private const KeyCode Modifier2 = KeyCode.LeftControl;
 
+        /// <summary>
+        /// Unambiguous vanilla camera keys that hand camera ownership back to the
+        /// player. Mouse buttons, wheel, and Q/W/E are deliberately excluded
+        /// because HScene also uses them for UI, pacing, and orbit focus.
+        /// </summary>
+        private static readonly KeyCode[] NativeCameraTakeoverKeys =
+        {
+            KeyCode.R,
+            KeyCode.Keypad5,
+            KeyCode.Slash,
+            KeyCode.Semicolon,
+            KeyCode.Home,
+            KeyCode.End,
+            KeyCode.RightArrow,
+            KeyCode.LeftArrow,
+            KeyCode.UpArrow,
+            KeyCode.DownArrow,
+            KeyCode.PageUp,
+            KeyCode.PageDown,
+            KeyCode.Period,
+            KeyCode.Backslash,
+            KeyCode.Keypad2,
+            KeyCode.Keypad8,
+            KeyCode.Keypad4,
+            KeyCode.Keypad6,
+            KeyCode.Equals,
+            KeyCode.RightBracket,
+        };
+
         /// <summary>While assist is on: true = block vanilla mouse/keyboard camera (NoCtrlCondition).</summary>
         private static readonly BaseCameraControl_Ver2.NoCtrlFunc NoCtrlOrbit = () => true;
         /// <summary>Assist off: false = allow vanilla mouse/keyboard camera.</summary>
@@ -256,6 +285,31 @@ namespace HS2OrbitAndExciter
             }
 
             TryManualHotkeys(hProbe);
+            TryYieldOrbitCameraToNativeInput(hProbe);
+        }
+
+        private static void TryYieldOrbitCameraToNativeInput(HScene? hScene)
+        {
+            if (hScene?.ctrlFlag == null
+                || !OrbitBehaviorHub.IsOrbitCameraSpinning()
+                || OrbitSettingsGUI.IsVisible
+                || hScene.ctrlFlag.inputForcus)
+            {
+                return;
+            }
+
+            foreach (KeyCode key in NativeCameraTakeoverKeys)
+            {
+                if (!Input.GetKey(key))
+                    continue;
+
+                OrbitBehaviorHub.SetOrbitCameraSpinning(false);
+                OrbitStateMachineLog.Event(
+                    "orbit",
+                    "native_camera_takeover",
+                    "{\"key\":\"" + key + "\"}");
+                return;
+            }
         }
 
         private void TryManualHotkeys(HScene? hScene)

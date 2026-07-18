@@ -379,6 +379,7 @@ namespace HS2OrbitAndExciter
             PatchSafe(harmony, typeof(Patches.OrbitSettingsSpriteInputPatch));
             PatchSafe(harmony, typeof(Patches.OrbitSettingsShortcutInputPatch));
             PatchSafe(harmony, typeof(Patches.OrbitSettingsCameraInputPatch));
+            PatchSafe(harmony, typeof(Patches.OrbitAmbientLightHotkeyModifierPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerEnterPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerStayPatch));
             PatchSafe(harmony, typeof(Patches.OrbitCameraVanishOnTriggerExitPatch));
