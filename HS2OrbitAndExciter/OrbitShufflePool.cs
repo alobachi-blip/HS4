@@ -12,7 +12,8 @@ namespace HS2OrbitAndExciter
             HashSet<string> used,
             string? excludePath,
             Func<string, float>? getWeight = null,
-            Func<string, bool>? includePath = null)
+            Func<string, bool>? includePath = null,
+            int maxIncludeChecks = int.MaxValue)
         {
             if (all == null || all.Count == 0)
                 return null;
@@ -23,8 +24,6 @@ namespace HS2OrbitAndExciter
                 if (string.IsNullOrEmpty(path))
                     continue;
                 if (excludePath != null && string.Equals(path, excludePath, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (includePath != null && !includePath(path))
                     continue;
                 candidates.Add(path);
             }
@@ -38,14 +37,63 @@ namespace HS2OrbitAndExciter
                     unused.Add(path);
             }
 
-            var pool = unused.Count > 0 ? unused : candidates;
-            if (unused.Count == 0)
-                used.Clear();
+            string? picked;
+            if (includePath == null)
+            {
+                var pool = unused.Count > 0 ? unused : candidates;
+                if (unused.Count == 0)
+                    used.Clear();
+                picked = WeightedPick(pool, getWeight);
+            }
+            else
+            {
+                int checksLeft = Math.Max(0, maxIncludeChecks);
+                if (unused.Count > 0)
+                {
+                    picked = WeightedPickMatching(unused, getWeight, includePath, ref checksLeft);
+                    if (picked == null && checksLeft > 0)
+                    {
+                        var usedCandidates = candidates.FindAll(path => used.Contains(path));
+                        picked = WeightedPickMatching(usedCandidates, getWeight, includePath, ref checksLeft);
+                        if (picked != null)
+                            used.Clear();
+                    }
+                }
+                else
+                {
+                    picked = WeightedPickMatching(candidates, getWeight, includePath, ref checksLeft);
+                    if (picked != null)
+                        used.Clear();
+                }
+            }
 
-            string? picked = WeightedPick(pool, getWeight);
             if (picked != null)
                 used.Add(picked);
             return picked;
+        }
+
+        /// <summary>
+        /// Evaluate an expensive include predicate in weighted-random order,
+        /// stopping after the caller's budget instead of scanning the full pool.
+        /// </summary>
+        private static string? WeightedPickMatching(
+            IReadOnlyList<string> pool,
+            Func<string, float>? getWeight,
+            Func<string, bool> includePath,
+            ref int checksLeft)
+        {
+            var remaining = new List<string>(pool);
+            while (remaining.Count > 0 && checksLeft > 0)
+            {
+                string? candidate = WeightedPick(remaining, getWeight);
+                if (candidate == null)
+                    return null;
+                remaining.Remove(candidate);
+                checksLeft--;
+                if (includePath(candidate))
+                    return candidate;
+            }
+            return null;
         }
 
         private static string? WeightedPick(IReadOnlyList<string> pool, Func<string, float>? getWeight)

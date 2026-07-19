@@ -642,6 +642,29 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("RuntimeSnapshots.Remove(controllerId)", scoped_restore)
         self.assertNotIn("RuntimeSnapshots.Clear()", scoped_restore)
 
+    def test_g_personality_filter_does_not_fully_load_every_character_card(self):
+        plugin_root = TOOLS.parent
+        director = (plugin_root / "OrbitManualDirector.cs").read_text(encoding="utf-8-sig")
+        shuffle = (plugin_root / "OrbitShufflePool.cs").read_text(encoding="utf-8-sig")
+        project = (plugin_root / "HS2OrbitAndExciter.csproj").read_text(encoding="utf-8-sig")
+
+        swap = director[director.index("internal static bool TrySwapFemale0") :]
+        swap = swap[: swap.index("internal static bool TrySwapCoordinate")]
+        self.assertIn("maxIncludeChecks: CharaPersonalityCheckBudget", swap)
+
+        reader = director[director.index("private static bool TryReadCharaPersonality") :]
+        reader = reader[: reader.index("private static void MergeNewUserDataFiles")]
+        self.assertNotIn("LoadCharaFile", reader)
+        self.assertIn("PngFile.GetPngSize(reader)", reader)
+        self.assertIn("header.SearchInfo(ChaFileParameter2.BlockName)", reader)
+        self.assertIn("DeserializeMessagePack<ChaFileParameter2>", reader)
+        self.assertIn('"MessagePack.MessagePackSerializer"', reader)
+        self.assertNotIn('Reference Include="Assembly-CSharp-firstpass"', project)
+
+        lazy_filter = shuffle[shuffle.index("private static string? WeightedPickMatching") :]
+        self.assertIn("checksLeft--", lazy_filter)
+        self.assertIn("includePath(candidate)", lazy_filter)
+
     def test_character_array_cache_waits_for_hscene_start_replacement(self):
         plugin_root = TOOLS.parent
         helpers = (plugin_root / "OrbitHelpers.cs").read_text(encoding="utf-8-sig")
