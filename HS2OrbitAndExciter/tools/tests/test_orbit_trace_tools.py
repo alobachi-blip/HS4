@@ -615,6 +615,33 @@ class TraceRegressionTests(unittest.TestCase):
             self.assertIn(f'OrbitOrgasmBustGrowth.TryRestoreForLifecycle("{reason}")', source)
             self.assertIn(f'PregnancyPlusAssist.TryRestoreForLifecycle("{reason}")', source)
 
+    def test_g_swap_restores_body_growth_before_reusing_character_controller(self):
+        plugin_root = TOOLS.parent
+        controller = (plugin_root / "OrbitController.cs").read_text(encoding="utf-8-sig")
+        director = (plugin_root / "OrbitManualDirector.cs").read_text(encoding="utf-8-sig")
+        assist = (plugin_root / "PregnancyPlusAssist.cs").read_text(encoding="utf-8-sig")
+
+        hotkey = controller[controller.index("if (Input.GetKeyDown(OrbitManualHotkeys.CharaKey))") :]
+        hotkey = hotkey[: hotkey.index("if (Input.GetKeyDown(OrbitManualHotkeys.SceneKey))")]
+        self.assertIn("lowerCurrentWeight: shift", hotkey)
+        self.assertIn('shift ? "Shift+G" : "G"', hotkey)
+
+        swap = director[director.index("private static IEnumerator SwapFemale0Routine") :]
+        swap = swap[: swap.index("private static IEnumerator SwapCoordinateRoutine")]
+        bust_restore = 'OrbitOrgasmBustGrowth.TryRestoreForLifecycle("g_character_swap")'
+        belly_restore = 'PregnancyPlusAssist.TryRestoreForCharacterSwap(cha, "g_character_swap")'
+        load = "cha.chaFile.LoadCharaFile(newPath, 1)"
+        self.assertIn(bust_restore, swap)
+        self.assertIn(belly_restore, swap)
+        self.assertLess(swap.index(bust_restore), swap.index(load))
+        self.assertLess(swap.index(belly_restore), swap.index(load))
+
+        scoped_restore = assist[assist.index("internal static bool TryRestoreForCharacterSwap") :]
+        scoped_restore = scoped_restore[: scoped_restore.index("internal static bool TryRestoreForLifecycle")]
+        self.assertIn("pair.Value.CharacterInstanceId == characterInstanceId", scoped_restore)
+        self.assertIn("RuntimeSnapshots.Remove(controllerId)", scoped_restore)
+        self.assertNotIn("RuntimeSnapshots.Clear()", scoped_restore)
+
     def test_character_array_cache_waits_for_hscene_start_replacement(self):
         plugin_root = TOOLS.parent
         helpers = (plugin_root / "OrbitHelpers.cs").read_text(encoding="utf-8-sig")
