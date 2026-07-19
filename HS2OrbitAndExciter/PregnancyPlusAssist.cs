@@ -39,12 +39,14 @@ namespace HS2OrbitAndExciter
         {
             internal BellyRuntimeSnapshot(
                 Component controller,
+                int characterInstanceId,
                 float inflationSize,
                 float inflationChange,
                 float targetSize,
                 int currentLevel)
             {
                 Controller = controller;
+                CharacterInstanceId = characterInstanceId;
                 InflationSize = inflationSize;
                 InflationChange = inflationChange;
                 TargetSize = targetSize;
@@ -52,6 +54,7 @@ namespace HS2OrbitAndExciter
             }
 
             internal Component Controller { get; }
+            internal int CharacterInstanceId { get; }
             internal float InflationSize { get; }
             internal float InflationChange { get; }
             internal float TargetSize { get; }
@@ -301,7 +304,7 @@ namespace HS2OrbitAndExciter
                     return false;
 
                 int next = current - 1;
-                return TryApplyDirectVisibleLevel(ctrl, next, maxLevel, "OrbitPoseDeflate", before);
+                return TryApplyDirectVisibleLevel(ctrl, cha, next, maxLevel, "OrbitPoseDeflate", before);
             }
             catch (Exception ex)
             {
@@ -354,7 +357,7 @@ namespace HS2OrbitAndExciter
                 if (steps == 0)
                     return false;
 
-                return TryApplyDirectVisibleLevel(ctrl, current + steps, maxLevel, "OrbitOrgasm", before);
+                return TryApplyDirectVisibleLevel(ctrl, cha, current + steps, maxLevel, "OrbitOrgasm", before);
             }
             catch (Exception ex)
             {
@@ -369,7 +372,7 @@ namespace HS2OrbitAndExciter
             if (ctrl == null)
                 return false;
 
-            if (!TryCaptureRuntimeBaseline(ctrl))
+            if (!TryCaptureRuntimeBaseline(ctrl, cha))
                 return false;
 
             bool ok = false;
@@ -499,6 +502,7 @@ namespace HS2OrbitAndExciter
         /// </summary>
         private static bool TryApplyDirectVisibleLevel(
             object controller,
+            ChaControl cha,
             int level,
             int maxLevel,
             string reason,
@@ -508,7 +512,7 @@ namespace HS2OrbitAndExciter
                 _inflationChange == null || _targetPregPlusSize == null || maxLevel <= 0)
                 return false;
 
-            if (!(controller is Component component) || !TryCaptureRuntimeBaseline(component))
+            if (!(controller is Component component) || !TryCaptureRuntimeBaseline(component, cha))
                 return false;
 
             try
@@ -531,7 +535,7 @@ namespace HS2OrbitAndExciter
             }
         }
 
-        private static bool TryCaptureRuntimeBaseline(Component controller)
+        private static bool TryCaptureRuntimeBaseline(Component controller, ChaControl cha)
         {
             int instanceId = controller.GetInstanceID();
             if (RuntimeSnapshots.ContainsKey(instanceId))
@@ -549,6 +553,7 @@ namespace HS2OrbitAndExciter
 
                 var snapshot = new BellyRuntimeSnapshot(
                     controller,
+                    cha.GetInstanceID(),
                     Convert.ToSingle(_inflationSize.GetValue(config)),
                     Convert.ToSingle(_inflationChange.GetValue(controller)),
                     Convert.ToSingle(_targetPregPlusSize.GetValue(controller, null)),
@@ -622,6 +627,38 @@ namespace HS2OrbitAndExciter
             }
         }
 
+        /// <summary>
+        /// Restore only the character whose ChaControl is about to be reused by
+        /// G swap. Other females in a multi-female scene keep their own session
+        /// growth and snapshots.
+        /// </summary>
+        internal static bool TryRestoreForCharacterSwap(ChaControl? cha, string reason)
+        {
+            if (cha == null || RuntimeSnapshots.Count == 0)
+                return false;
+
+            int characterInstanceId = cha.GetInstanceID();
+            var controllerIds = new List<int>();
+            foreach (var pair in RuntimeSnapshots)
+            {
+                if (pair.Value.CharacterInstanceId == characterInstanceId)
+                    controllerIds.Add(pair.Key);
+            }
+
+            bool any = false;
+            for (int i = 0; i < controllerIds.Count; i++)
+            {
+                int controllerId = controllerIds[i];
+                BellyRuntimeSnapshot snapshot = RuntimeSnapshots[controllerId];
+                // Remove first so a destroyed or otherwise broken controller
+                // cannot leave a stale baseline for the replacement card.
+                RuntimeSnapshots.Remove(controllerId);
+                if (TryRestoreSnapshot(snapshot, reason))
+                    any = true;
+            }
+            return any;
+        }
+
         /// <summary>Restore all Orbit-owned PregnancyPlus changes at H teardown.</summary>
         internal static bool TryRestoreForLifecycle(string reason)
         {
@@ -634,39 +671,46 @@ namespace HS2OrbitAndExciter
             for (int i = 0; i < snapshots.Count; i++)
             {
                 BellyRuntimeSnapshot snapshot = snapshots[i];
-                try
-                {
-                    Component controller = snapshot.Controller;
-                    object? config = _infConfig?.GetValue(controller);
-                    if (config != null && _inflationSize != null)
-                        _inflationSize.SetValue(config, snapshot.InflationSize);
-                    _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
-                    _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
-                    _inflationChange?.SetValue(controller, snapshot.InflationChange);
-
-                    // Rebuild the visible mesh at the original H-entry size.
-                    _meshInflateFloat?.Invoke(
-                        controller,
-                        new object?[] { snapshot.InflationSize, "OrbitLifecycleRestore", null });
-
-                    // MeshInflate owns inflationSize but not the HS2 runtime
-                    // counters; make those exact again after its synchronous setup.
-                    _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
-                    _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
-                    _inflationChange?.SetValue(controller, snapshot.InflationChange);
+                if (TryRestoreSnapshot(snapshot, reason))
                     any = true;
-                    HS2OrbitAndExciter.Log?.LogInfo(
-                        $"Orbit: belly lifecycle restore ({reason}) -> {snapshot.InflationSize:F2} " +
-                        $"(level {snapshot.CurrentLevel})");
-                }
-                catch (Exception ex)
-                {
-                    HS2OrbitAndExciter.Log?.LogWarning(
-                        $"Orbit: belly lifecycle restore ({reason}) failed: {ex.Message}");
-                }
             }
 
             return any;
+        }
+
+        private static bool TryRestoreSnapshot(BellyRuntimeSnapshot snapshot, string reason)
+        {
+            try
+            {
+                Component controller = snapshot.Controller;
+                object? config = _infConfig?.GetValue(controller);
+                if (config != null && _inflationSize != null)
+                    _inflationSize.SetValue(config, snapshot.InflationSize);
+                _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
+                _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
+                _inflationChange?.SetValue(controller, snapshot.InflationChange);
+
+                // Rebuild the visible mesh at the original H-entry size.
+                _meshInflateFloat?.Invoke(
+                    controller,
+                    new object?[] { snapshot.InflationSize, "OrbitLifecycleRestore", null });
+
+                // MeshInflate owns inflationSize but not the HS2 runtime
+                // counters; make those exact again after its synchronous setup.
+                _currentInflationLevel?.SetValue(controller, snapshot.CurrentLevel);
+                _targetPregPlusSize?.SetValue(controller, snapshot.TargetSize, null);
+                _inflationChange?.SetValue(controller, snapshot.InflationChange);
+                HS2OrbitAndExciter.Log?.LogInfo(
+                    $"Orbit: belly lifecycle restore ({reason}) -> {snapshot.InflationSize:F2} " +
+                    $"(level {snapshot.CurrentLevel})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning(
+                    $"Orbit: belly lifecycle restore ({reason}) failed: {ex.Message}");
+                return false;
+            }
         }
 
         private static int VisibleSizeToLevel(float size, int maxLevel)

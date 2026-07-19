@@ -365,6 +365,13 @@ namespace HS2OrbitAndExciter
         {
             _busy = true;
 
+            // G reuses the same ChaControl (and usually the same PregnancyPlus
+            // controller) for the next card. Restore and forget all temporary
+            // body growth before LoadCharaFile overwrites the old character;
+            // otherwise the old belly snapshot can be applied to the new card.
+            OrbitOrgasmBustGrowth.TryRestoreForLifecycle("g_character_swap");
+            PregnancyPlusAssist.TryRestoreForCharacterSwap(cha, "g_character_swap");
+
             if (!cha.chaFile.LoadCharaFile(newPath, 1))
             {
                 HS2OrbitAndExciter.Log?.LogWarning($"Orbit: G LoadCharaFile 失敗 {newPath}");
