@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using AIChara;
 using Illusion.Game;
 using Manager;
@@ -17,6 +19,7 @@ namespace HS2OrbitAndExciter
         private const float PreferredCharaWeight = 2.5f;
         private const float CharaReloadTimeoutSeconds = 15f;
         private const float MapReloadTimeoutSeconds = 30f;
+        private const int CharaPersonalityCheckBudget = 16;
 
         private static readonly HashSet<string> UsedCharas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> UsedCoordinates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -33,6 +36,9 @@ namespace HS2OrbitAndExciter
         private static List<string>? _cachedCoords;
         private static Dictionary<string, string>? _coordNameToPath;
         private static Dictionary<string, int>? _charaPersonalityByPath;
+        private static MethodInfo? _messagePackDeserializeBytes;
+        private static readonly HashSet<string> UnreadableCharaPaths =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> KnownCharaPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> KnownCoordPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _busy;
@@ -140,7 +146,8 @@ namespace HS2OrbitAndExciter
                 UsedCharas,
                 current,
                 GetCharaWeight,
-                path => TryGetKnownCharaPersonality(path, out int p) && p != currentPersonality);
+                path => TryGetKnownCharaPersonality(path, out int p) && p != currentPersonality,
+                maxIncludeChecks: CharaPersonalityCheckBudget);
             if (next == null)
             {
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: G 無不同性格女角");
@@ -578,6 +585,7 @@ namespace HS2OrbitAndExciter
             _cachedCoords = OrbitHelpers.ListUserDataPngFiles("coordinate/female/");
             _coordNameToPath = null;
             _charaPersonalityByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            UnreadableCharaPaths.Clear();
             KnownCharaPaths.Clear();
             KnownCoordPaths.Clear();
             foreach (string p in _cachedCharas)
@@ -600,9 +608,14 @@ namespace HS2OrbitAndExciter
             personality = 0;
             if (_charaPersonalityByPath != null && _charaPersonalityByPath.TryGetValue(path, out personality))
                 return true;
+            if (UnreadableCharaPaths.Contains(path))
+                return false;
 
             if (!TryReadCharaPersonality(path, out personality))
+            {
+                UnreadableCharaPaths.Add(path);
                 return false;
+            }
 
             _charaPersonalityByPath ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             _charaPersonalityByPath[path] = personality;
@@ -625,15 +638,96 @@ namespace HS2OrbitAndExciter
         private static bool TryReadCharaPersonality(string path, out int personality)
         {
             personality = 0;
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
                 return false;
 
-            var chaFile = new ChaFileControl();
-            if (!chaFile.LoadCharaFile(path, 1))
-                return false;
+            try
+            {
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite);
+                using var reader = new BinaryReader(stream);
 
-            personality = chaFile.parameter2.personality;
-            return true;
+                long pngSize = PngFile.GetPngSize(reader);
+                if (pngSize > 0)
+                    stream.Seek(pngSize, SeekOrigin.Current);
+                if (stream.Length - stream.Position < sizeof(int))
+                    return false;
+
+                reader.ReadInt32(); // product number
+                reader.ReadString(); // card marker
+                reader.ReadString(); // card version
+                reader.ReadInt32(); // language
+                reader.ReadString(); // user ID
+                reader.ReadString(); // data ID
+
+                int headerSize = reader.ReadInt32();
+                if (headerSize <= 0 || headerSize > stream.Length - stream.Position)
+                    return false;
+
+                BlockHeader? header = DeserializeMessagePack<BlockHeader>(reader.ReadBytes(headerSize));
+                if (header == null)
+                    return false;
+                reader.ReadInt64(); // total block-data size
+                long dataStart = stream.Position;
+                BlockHeader.Info info = header.SearchInfo(ChaFileParameter2.BlockName);
+                if (info == null)
+                {
+                    // Pre-HS2 cards have no Parameter2 block; a full game load
+                    // leaves ChaFileParameter2 at its default personality 0.
+                    personality = 0;
+                    return true;
+                }
+                if (info.pos < 0
+                    || info.size <= 0
+                    || info.size > int.MaxValue
+                    || info.pos > stream.Length - dataStart)
+                    return false;
+
+                long blockStart = dataStart + info.pos;
+                if (info.size > stream.Length - blockStart)
+                    return false;
+
+                stream.Seek(blockStart, SeekOrigin.Begin);
+                ChaFileParameter2? parameter = DeserializeMessagePack<ChaFileParameter2>(
+                    reader.ReadBytes((int)info.size));
+                if (parameter == null)
+                    return false;
+                personality = parameter.personality;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                HS2OrbitAndExciter.Log?.LogWarning(
+                    $"Orbit: G skip unreadable card {Path.GetFileName(path)}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static T? DeserializeMessagePack<T>(byte[] bytes) where T : class
+        {
+            if (_messagePackDeserializeBytes == null)
+            {
+                Type? serializer = HarmonyLib.AccessTools.TypeByName(
+                    "MessagePack.MessagePackSerializer");
+                _messagePackDeserializeBytes = serializer?
+                    .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(method =>
+                    {
+                        if (method.Name != "Deserialize" || !method.IsGenericMethodDefinition)
+                            return false;
+                        ParameterInfo[] parameters = method.GetParameters();
+                        return parameters.Length == 1 && parameters[0].ParameterType == typeof(byte[]);
+                    });
+            }
+
+            if (_messagePackDeserializeBytes == null)
+                return null;
+            return _messagePackDeserializeBytes
+                .MakeGenericMethod(typeof(T))
+                .Invoke(null, new object[] { bytes }) as T;
         }
 
         private static void MergeNewUserDataFiles()
