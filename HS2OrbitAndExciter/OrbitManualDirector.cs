@@ -34,7 +34,6 @@ namespace HS2OrbitAndExciter
 
         private static List<string>? _cachedCharas;
         private static List<string>? _cachedCoords;
-        private static Dictionary<string, string>? _coordNameToPath;
         private static Dictionary<string, int>? _charaPersonalityByPath;
         private static MethodInfo? _messagePackDeserializeBytes;
         private static readonly HashSet<string> UnreadableCharaPaths =
@@ -42,6 +41,7 @@ namespace HS2OrbitAndExciter
         private static readonly HashSet<string> KnownCharaPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> KnownCoordPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _busy;
+        private static string? _activeCoordinatePath;
         private static int _lastTrackedPoseId = -1;
         private static string? _activeBorrowedCameraName;
 
@@ -66,6 +66,11 @@ namespace HS2OrbitAndExciter
         {
             EnsureFileCacheInitialized();
             MergeNewUserDataFiles();
+            // The initial coordinate may come from the character card or H UI and
+            // has no reliable source path. Track only coordinates applied by this
+            // director; resolving the initial path used to deserialize every
+            // coordinate card synchronously when H was first pressed.
+            _activeCoordinatePath = null;
             ResetPoseCameraCycle();
             // §1 C1：換角不清本場已用；僅新 H 場清空
             OrbitPosePool.OnHSceneEntered();
@@ -168,10 +173,8 @@ namespace HS2OrbitAndExciter
                 return false;
 
             EnsureFileCacheInitialized();
-            EnsureCoordinateNameIndexInitialized();
             var paths = GetUserDataFemaleCoordinatePaths();
-            string? current = OrbitHelpers.GetCurrentCoordinatePath(cha, _coordNameToPath ?? new Dictionary<string, string>());
-            string? next = OrbitShufflePool.Pick(paths, UsedCoordinates, current);
+            string? next = OrbitShufflePool.Pick(paths, UsedCoordinates, _activeCoordinatePath);
             if (next == null)
             {
                 HS2OrbitAndExciter.Log?.LogInfo("Orbit: H 無可換衣");
@@ -462,6 +465,7 @@ namespace HS2OrbitAndExciter
             }
 
             cha.SetClothesStateAll(0);
+            _activeCoordinatePath = nextPath;
             HS2OrbitAndExciter.Log?.LogInfo($"Orbit: H 換衣 {System.IO.Path.GetFileName(nextPath)}");
 
             // Coordinate reload rebuilds body; wait a few frames so bones/parents exist.
@@ -583,7 +587,6 @@ namespace HS2OrbitAndExciter
                 return;
             _cachedCharas = OrbitHelpers.ListUserDataPngFiles("chara/female/");
             _cachedCoords = OrbitHelpers.ListUserDataPngFiles("coordinate/female/");
-            _coordNameToPath = null;
             _charaPersonalityByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             UnreadableCharaPaths.Clear();
             KnownCharaPaths.Clear();
@@ -594,13 +597,6 @@ namespace HS2OrbitAndExciter
                 KnownCoordPaths.Add(p);
             HS2OrbitAndExciter.Log?.LogInfo(
                 $"Orbit: 初掃女角 {_cachedCharas.Count}、coordinate {_cachedCoords.Count}");
-        }
-
-        private static void EnsureCoordinateNameIndexInitialized()
-        {
-            if (_coordNameToPath != null)
-                return;
-            _coordNameToPath = OrbitHelpers.BuildCoordinateNameIndex(_cachedCoords ?? new List<string>());
         }
 
         private static bool TryGetKnownCharaPersonality(string path, out int personality)
@@ -620,19 +616,6 @@ namespace HS2OrbitAndExciter
             _charaPersonalityByPath ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             _charaPersonalityByPath[path] = personality;
             return true;
-        }
-
-        private static int GetCharaPersonality(string path)
-        {
-            return TryGetKnownCharaPersonality(path, out int personality) ? personality : -1;
-        }
-
-        private static void IndexCharaPersonality(string path)
-        {
-            if (_charaPersonalityByPath == null)
-                return;
-            if (TryReadCharaPersonality(path, out int personality))
-                _charaPersonalityByPath[path] = personality;
         }
 
         private static bool TryReadCharaPersonality(string path, out int personality)
@@ -742,8 +725,6 @@ namespace HS2OrbitAndExciter
                 if (!KnownCoordPaths.Add(path))
                     continue;
                 _cachedCoords.Add(path);
-                if (_coordNameToPath != null)
-                    OrbitHelpers.TryIndexCoordinatePath(path, _coordNameToPath);
                 newCoords++;
             }
 

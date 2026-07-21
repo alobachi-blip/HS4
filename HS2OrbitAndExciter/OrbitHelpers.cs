@@ -361,11 +361,21 @@ namespace HS2OrbitAndExciter
 
         internal static void ResetSceneCaches()
         {
-            _boneCacheCharacters = null;
-            _boneCaches = Array.Empty<BoneCache?>();
+            ResetBoneCaches();
             _cachedCharacterHScene = null;
             _cachedFemales = null;
             _cachedMales = null;
+        }
+
+        /// <summary>
+        /// Coordinate and character reloads can replace descendants while keeping
+        /// the same ChaControl and body-root objects. Drop cached bone Transforms
+        /// before camera rebind so FindLoop resolves the rebuilt live skeleton.
+        /// </summary>
+        internal static void ResetBoneCaches()
+        {
+            _boneCacheCharacters = null;
+            _boneCaches = Array.Empty<BoneCache?>();
         }
 
         /// <summary>Collect all AnimationListInfo from lstAnimInfo (all categories).</summary>
@@ -479,42 +489,6 @@ namespace HS2OrbitAndExciter
             if (string.IsNullOrEmpty(name))
                 return null;
             return UserData.Path + "chara/female/" + name + ".png";
-        }
-
-        /// <summary>One-time index: coordinateName → full path (built when file list is cached).</summary>
-        public static Dictionary<string, string> BuildCoordinateNameIndex(IReadOnlyList<string> paths)
-        {
-            var index = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (paths == null)
-                return index;
-            foreach (string path in paths)
-                TryIndexCoordinatePath(path, index);
-            return index;
-        }
-
-        /// <summary>Add one coordinate file to name→path index (returns false if load failed).</summary>
-        public static bool TryIndexCoordinatePath(string path, Dictionary<string, string> nameToPath)
-        {
-            if (string.IsNullOrEmpty(path))
-                return false;
-            var coord = new ChaFileCoordinate();
-            if (!coord.LoadFile(path))
-                return false;
-            string name = coord.coordinateName;
-            if (string.IsNullOrEmpty(name))
-                return false;
-            nameToPath[name] = path;
-            return true;
-        }
-
-        public static string? GetCurrentCoordinatePath(ChaControl? cha, Dictionary<string, string> nameToPath)
-        {
-            if (cha?.nowCoordinate == null || nameToPath.Count == 0)
-                return null;
-            string currentName = cha.nowCoordinate.coordinateName;
-            if (string.IsNullOrEmpty(currentName))
-                return null;
-            return nameToPath.TryGetValue(currentName, out string? path) ? path : null;
         }
 
         /// <summary>Randomly advance wear state on 1..N active slots per character.</summary>

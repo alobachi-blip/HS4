@@ -91,7 +91,8 @@ namespace HS2OrbitAndExciter
         internal static Basis TryBuild(
             ChaControl[]? chaFemales,
             int focusIndex,
-            Vector3? previousFocusWorld)
+            Vector3? previousFocusWorld,
+            bool requireSelectedFocus = false)
         {
             if (chaFemales == null || chaFemales.Length == 0)
                 return default;
@@ -114,6 +115,8 @@ namespace HS2OrbitAndExciter
             var focus = OrbitHelpers.GetBonePosition(chaFemales, femaleIdx, bone);
             if (focus.HasValue)
                 focusWorld = focus.Value;
+            else if (requireSelectedFocus)
+                return default;
             else if (previousFocusWorld.HasValue)
                 focusWorld = previousFocusWorld.Value;
             else if (chest.HasValue)

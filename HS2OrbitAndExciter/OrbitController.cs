@@ -103,6 +103,21 @@ namespace HS2OrbitAndExciter
         /// <summary>上一幀相機 up（世界），用於視線接近鉛垂時短暫鎖定。</summary>
         private Vector3? _previousCameraUpWorld;
 
+        // A coordinate/card reload can report loadEnd before its replacement skeleton has
+        // reached the animation root. Do not point the camera at those transient bones:
+        // keep the existing body-root-local lock, observe the new bone without applying it,
+        // then commit one new body-root-local lock after several coherent samples.
+        private const float RebindMinSettleSeconds = 0.45f;
+        private const int RebindStableSamplesRequired = 6;
+        private const float RebindSampleStepTolerance = 0.18f;
+        private const float RebindSampleWindowTolerance = 0.40f;
+        private bool _stableRebindPending;
+        private float _stableRebindRequestedAt;
+        private int _stableRebindSampleCount;
+        private bool _stableRebindHasSample;
+        private Vector3 _stableRebindAnchorLocal;
+        private Vector3 _stableRebindLastLocal;
+
         private static float GetOrbitFeelAddPerSecond()
         {
             // 尊重使用者設定（含 0.001）；0＝不加（只靠遊戲／滑鼠）
@@ -237,6 +252,7 @@ namespace HS2OrbitAndExciter
                 int hId = hProbe.GetInstanceID();
                 if (hId != _manualDirectorHSceneId)
                 {
+                    CancelStableRebind();
                     _manualDirectorHSceneId = hId;
                     OrbitManualDirector.OnHSceneEntered(hProbe);
                 }
@@ -252,6 +268,7 @@ namespace HS2OrbitAndExciter
                 PregnancyPlusAssist.ResetInsideTracking();
                 if (_manualDirectorHSceneId != -1)
                 {
+                    CancelStableRebind();
                     OrbitHelpers.ResetSceneCaches();
                     OrbitOrgasmBustGrowth.TryRestoreForLifecycle("h_scene_exit");
                     PregnancyPlusAssist.TryRestoreForLifecycle("h_scene_exit");
@@ -436,6 +453,7 @@ namespace HS2OrbitAndExciter
         {
             if (!OrbitBehaviorHub.IsOrbitAssistActive())
             {
+                CancelStableRebind();
                 StoryboardPackageRecorder.NotifyOrbitToggled(false, this, null);
                 _hudSnapshotValid = false;
                 _requestViewReapplyNextFrame = false;
@@ -445,6 +463,7 @@ namespace HS2OrbitAndExciter
             var hScene = GetHScene();
             if (hScene == null)
             {
+                CancelStableRebind();
                 StoryboardPackageRecorder.NotifyOrbitToggled(false, this, null);
                 _hudSnapshotValid = false;
                 return;
@@ -464,6 +483,7 @@ namespace HS2OrbitAndExciter
                 ApplyOrbitFocusHotkeys(hScene, ctrl);
 
             OrbitPoseDirector.Tick(hScene, this, ctrl);
+            TickPendingStableRebind(hScene, ctrl);
 
             // If we started in preparation (Idle + speed 0): after 3 s set speed=1 to start motion; excitement only rises after that
             if (_waitingForPrepStart)
@@ -516,7 +536,7 @@ namespace HS2OrbitAndExciter
                 OrbitPoseDirector.NotifyExternalPoseChange(hScene);
 
             // After faintness toggle or other state change: reapply view once
-            if (_requestViewReapplyNextFrame && !userOwnsCamera)
+            if (_requestViewReapplyNextFrame && !userOwnsCamera && !_stableRebindPending)
             {
                 _requestViewReapplyNextFrame = false;
                 ApplyCurrentViewOption(hScene, ctrl);
@@ -825,7 +845,11 @@ namespace HS2OrbitAndExciter
             if (chaFemales == null || ctrl.transBase == null)
                 return;
             int focusIdx = BoneFocusIndex();
-            var basis = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            var basis = OrbitBodyAxis.TryBuild(
+                chaFemales,
+                focusIdx,
+                _lastValidFocusWorld,
+                requireSelectedFocus: true);
             if (!basis.Valid)
                 return;
 
@@ -839,11 +863,18 @@ namespace HS2OrbitAndExciter
         private bool TryGetOrbitBasis(ChaControl[] chaFemales, int focusIdx, out OrbitBodyAxis.Basis basis)
         {
             basis = default;
+            if (_stableRebindPending && !_lockedBasisValid)
+                return false;
             // The body root is stable across a pose change, but the selected head/chest/pelvis
             // bone is not: animations can move it several metres after NowChangeAnim clears.
-            // Keep the locked axes for a smooth orbit, while always aiming at the live selected
-            // bone.  Using _lockedFocusLocal here leaves TargetPos at the outgoing pose.
-            var live = OrbitBodyAxis.TryBuild(chaFemales, focusIdx, _lastValidFocusWorld);
+            // Resolve both focus and axes from the existing body-root-local lock. The live
+            // sample below is only a validity/fallback input and is never sent to TargetPos
+            // while that lock remains valid.
+            var live = OrbitBodyAxis.TryBuild(
+                chaFemales,
+                focusIdx,
+                _lastValidFocusWorld,
+                requireSelectedFocus: true);
             if (!_lockedBasisValid)
             {
                 if (!live.Valid)
@@ -881,8 +912,6 @@ namespace HS2OrbitAndExciter
             // passed every animation jiggle directly into TargetPos and made large
             // actions uncomfortable to watch.  Pose transitions still use
             // ApplyLiveBoneFocusOnly until their new basis is locked.
-            if (!live.Valid)
-                return true;
             return true;
         }
 
@@ -1424,7 +1453,11 @@ namespace HS2OrbitAndExciter
                 option = 1;
             _currentViewOption = option;
 
-            var basis = OrbitBodyAxis.TryBuild(chaFemales, option, _lastValidFocusWorld);
+            var basis = OrbitBodyAxis.TryBuild(
+                chaFemales,
+                option,
+                _lastValidFocusWorld,
+                requireSelectedFocus: true);
             if (basis.Valid && ctrl.transBase != null)
             {
                 string effectiveLockReason = _pendingLockReason ?? lockReason;
@@ -1505,37 +1538,149 @@ namespace HS2OrbitAndExciter
         /// <summary>Rebind camera after pose transition completes (called by <see cref="OrbitPoseDirector"/>).</summary>
         internal void InternalRebindAfterPoseChange(HScene hScene, CameraControl_Ver2 ctrl)
         {
+            // loadEnd/NowChangeAnim can finish while the replacement skeleton is still
+            // several metres away from its eventual animation root. Keep the existing
+            // root-local camera lock and only observe the new skeleton for now.
+            OrbitHelpers.ResetBoneCaches();
             var chaFemales = OrbitHelpers.GetChaFemales(hScene);
             int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
             if (_currentViewOption >= maxFocus)
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
-            InvalidateLockedBasis("pose_rebind");
-            ApplyCurrentViewOption(hScene, ctrl, "pose_rebind");
-            _startRelativeAzimuth = OrbitBodyAxis.RollAnyAzimuthDegrees();
+
+            _stableRebindPending = true;
+            _stableRebindRequestedAt = Time.unscaledTime;
+            ResetStableRebindSamples();
             _plannedAxisMode = null;
             _plannedStartAzimuth = null;
             _framingHavePrev = false;
             _previousCameraUpWorld = null;
-            if (chaFemales != null && TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
-            {
-                bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
-                if (storyboardSafeCamera)
-                    _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
-                Vector3 camFwd = ctrl.thisCamera != null
-                    ? ctrl.thisCamera.transform.forward
-                    : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-                Vector3 axis = storyboardSafeCamera
-                    ? OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld)
-                    : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
-                _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(
-                    basis, axis, camFwd);
-                _orbitAccumulatedDegrees = 0f;
-            }
             _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
+        }
+
+        private void TickPendingStableRebind(HScene hScene, CameraControl_Ver2 ctrl)
+        {
+            if (!_stableRebindPending)
+                return;
+
+            // A later transition supersedes every sample collected for the old one.
+            if (hScene.NowChangeAnim || OrbitPoseDirector.IsPoseChangeInFlight)
+            {
+                ResetStableRebindSamples();
+                return;
+            }
+
+            // Coordinate reloads can replace descendants below the same objBodyBone,
+            // so each observation must discover the currently attached skeleton.
+            OrbitHelpers.ResetBoneCaches();
+            var chaFemales = OrbitHelpers.GetChaFemales(hScene);
+            int maxFocus = OrbitHelpers.GetMaxFocusIndex(chaFemales);
+            if (maxFocus <= 0)
+            {
+                ResetStableRebindSamples();
+                return;
+            }
+            if (_currentViewOption < 0 || _currentViewOption >= maxFocus)
+                _currentViewOption = maxFocus > 1 ? 1 : 0;
+
+            int focusIdx = BoneFocusIndex();
+            var live = OrbitBodyAxis.TryBuild(
+                chaFemales,
+                focusIdx,
+                previousFocusWorld: null,
+                requireSelectedFocus: true);
+            var body = GetBodyRoot(chaFemales, FemaleIndexFromFocus(focusIdx));
+            if (!live.Valid || body == null)
+            {
+                ResetStableRebindSamples();
+                return;
+            }
+
+            Vector3 local = body.InverseTransformPoint(live.FocusWorld);
+            if (!_stableRebindHasSample
+                || Vector3.Distance(local, _stableRebindLastLocal) > RebindSampleStepTolerance
+                || Vector3.Distance(local, _stableRebindAnchorLocal) > RebindSampleWindowTolerance)
+            {
+                _stableRebindHasSample = true;
+                _stableRebindAnchorLocal = local;
+                _stableRebindLastLocal = local;
+                _stableRebindSampleCount = 1;
+            }
+            else
+            {
+                _stableRebindLastLocal = local;
+                _stableRebindSampleCount++;
+            }
+
+            float settleSeconds = Time.unscaledTime - _stableRebindRequestedAt;
+            if (settleSeconds < RebindMinSettleSeconds
+                || _stableRebindSampleCount < RebindStableSamplesRequired)
+                return;
+
+            CommitStableRebind(hScene, ctrl, chaFemales!, focusIdx, live, settleSeconds);
+        }
+
+        private void CommitStableRebind(
+            HScene hScene,
+            CameraControl_Ver2 ctrl,
+            ChaControl[] chaFemales,
+            int focusIdx,
+            OrbitBodyAxis.Basis live,
+            float settleSeconds)
+        {
+            if (ctrl.transBase == null)
+                return;
+
+            // This is the only camera write in the delayed path. TryLockBasis converts
+            // the observed bone to body-root local space; later frames never chase it.
+            InvalidateLockedBasis("pose_rebind_stable");
+            if (!TryLockBasis(chaFemales, focusIdx, live, "pose_rebind_stable"))
+                return;
+
+            _pendingLockReason = null;
+            _stableRebindPending = false;
+            _lastValidFocusWorld = live.FocusWorld;
+            ctrl.TargetPos = ctrl.transBase.InverseTransformPoint(live.FocusWorld);
+            SetDistanceForFocus(ctrl, chaFemales, focusIdx, _circleZoomMult);
+
+            bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
+            if (storyboardSafeCamera)
+                _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
+            Vector3 camFwd = ctrl.thisCamera != null
+                ? ctrl.thisCamera.transform.forward
+                : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
+            Vector3 axis = storyboardSafeCamera
+                ? OrbitFloorNormal.GetSkyward(hScene, live.FocusWorld)
+                : OrbitBodyAxis.SpinAxis(live, _orbitAxisMode);
+            _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(live, axis, camFwd);
+            _orbitAccumulatedDegrees = 0f;
+
+            OrbitStateMachineLog.Event(
+                "camera_rebind",
+                "stable_commit",
+                "{\"settleSeconds\":" + F3(settleSeconds)
+                + ",\"samples\":" + _stableRebindSampleCount
+                + ",\"focusIdx\":" + focusIdx
+                + "}");
+            ResetStableRebindSamples();
+        }
+
+        private void ResetStableRebindSamples()
+        {
+            _stableRebindHasSample = false;
+            _stableRebindSampleCount = 0;
+            _stableRebindAnchorLocal = default;
+            _stableRebindLastLocal = default;
+        }
+
+        private void CancelStableRebind()
+        {
+            _stableRebindPending = false;
+            ResetStableRebindSamples();
         }
 
         private void OnOrbitToggled(bool active)
         {
+            CancelStableRebind();
             if (!active)
             {
                 OrbitMapVanishAssist.ResetInjectedState();

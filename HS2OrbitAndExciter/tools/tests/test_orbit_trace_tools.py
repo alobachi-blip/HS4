@@ -162,7 +162,7 @@ class TraceRegressionTests(unittest.TestCase):
                     hits.append(f"{path.relative_to(plugin_root)}:{marker}")
         self.assertFalse(hits)
 
-    def test_apply_current_view_option_relocks_live_focus_basis(self):
+    def test_pose_rebind_waits_for_stable_bone_then_locks_root_local_once(self):
         source = (TOOLS.parent / "OrbitController.cs").read_text(encoding="utf-8-sig", errors="ignore")
         self.assertIn(
             'private void ApplyCurrentViewOption(HScene hScene, CameraControl_Ver2 ctrl, string lockReason = "apply_view")',
@@ -171,12 +171,37 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("string effectiveLockReason = _pendingLockReason ?? lockReason;", source)
         self.assertIn("InvalidateLockedBasis(effectiveLockReason);", source)
         self.assertIn("TryLockBasis(chaFemales, option, basis", source)
+        self.assertIn("requireSelectedFocus: true", source)
         self.assertIn('ApplyCurrentViewOption(hScene, ctrl, "borrowed_camera");', source)
-        self.assertIn('ApplyCurrentViewOption(hScene, ctrl, "pose_rebind");', source)
         self.assertIn("private void ApplyLiveBoneFocusOnly", source)
         self.assertIn("OrbitPoseDirector.IsPoseChangeInFlight", source)
         self.assertIn('ApplyLiveBoneFocusOnly(hScene, ctrl, "pose_transition");', source)
-        self.assertIn('InvalidateLockedBasis("pose_rebind");', source)
+        rebind = source[source.index("internal void InternalRebindAfterPoseChange") :]
+        rebind = rebind[: rebind.index("private void OnOrbitToggled")]
+        self.assertIn("OrbitHelpers.ResetBoneCaches();", rebind)
+        self.assertLess(
+            rebind.index("OrbitHelpers.ResetBoneCaches();"),
+            rebind.index("OrbitHelpers.GetChaFemales(hScene)"),
+        )
+        request = rebind[: rebind.index("private void TickPendingStableRebind")]
+        self.assertIn("_stableRebindPending = true;", request)
+        self.assertNotIn("ctrl.TargetPos", request)
+        self.assertNotIn("InvalidateLockedBasis", request)
+        sampler = rebind[
+            rebind.index("private void TickPendingStableRebind") :
+            rebind.index("private void CommitStableRebind")
+        ]
+        self.assertIn("RebindMinSettleSeconds", sampler)
+        self.assertIn("RebindStableSamplesRequired", sampler)
+        self.assertIn("body.InverseTransformPoint(live.FocusWorld)", sampler)
+        self.assertNotIn("ctrl.TargetPos", sampler)
+        commit = rebind[
+            rebind.index("private void CommitStableRebind") :
+            rebind.index("private void ResetStableRebindSamples")
+        ]
+        self.assertIn('TryLockBasis(chaFemales, focusIdx, live, "pose_rebind_stable")', commit)
+        self.assertIn("ctrl.TargetPos", commit)
+        self.assertLess(commit.index("TryLockBasis"), commit.index("ctrl.TargetPos"))
         self.assertIn("live.FocusWorld,", source)
         self.assertIn("The body root is stable across a pose change", source)
 
@@ -659,11 +684,30 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn("header.SearchInfo(ChaFileParameter2.BlockName)", reader)
         self.assertIn("DeserializeMessagePack<ChaFileParameter2>", reader)
         self.assertIn('"MessagePack.MessagePackSerializer"', reader)
+        self.assertNotIn("IndexCharaPersonality", director)
+        self.assertNotIn("GetCharaPersonality", director)
         self.assertNotIn('Reference Include="Assembly-CSharp-firstpass"', project)
 
         lazy_filter = shuffle[shuffle.index("private static string? WeightedPickMatching") :]
         self.assertIn("checksLeft--", lazy_filter)
         self.assertIn("includePath(candidate)", lazy_filter)
+
+    def test_h_coordinate_swap_does_not_deserialize_the_full_coordinate_pool(self):
+        plugin_root = TOOLS.parent
+        director = (plugin_root / "OrbitManualDirector.cs").read_text(encoding="utf-8-sig")
+        helpers = (plugin_root / "OrbitHelpers.cs").read_text(encoding="utf-8-sig")
+
+        swap = director[director.index("internal static bool TrySwapCoordinate") :]
+        swap = swap[: swap.index("internal static bool TrySwapScene")]
+        self.assertIn("_activeCoordinatePath", swap)
+        self.assertNotIn("EnsureCoordinateNameIndexInitialized", swap)
+        self.assertNotIn("BuildCoordinateNameIndex", helpers)
+        self.assertNotIn("TryIndexCoordinatePath", helpers)
+        self.assertNotIn("GetCurrentCoordinatePath", helpers)
+
+        apply_swap = director[director.index("private static IEnumerator SwapCoordinateRoutine") :]
+        apply_swap = apply_swap[: apply_swap.index("private static IEnumerator SwapSceneRoutine")]
+        self.assertIn("_activeCoordinatePath = nextPath;", apply_swap)
 
     def test_character_array_cache_waits_for_hscene_start_replacement(self):
         plugin_root = TOOLS.parent
