@@ -202,6 +202,8 @@ class TraceRegressionTests(unittest.TestCase):
         self.assertIn('TryLockBasis(chaFemales, focusIdx, live, "pose_rebind_stable")', commit)
         self.assertIn("ctrl.TargetPos", commit)
         self.assertLess(commit.index("TryLockBasis"), commit.index("ctrl.TargetPos"))
+        self.assertIn("RollAlternatingFrontBackAzimuth(ref _lastStartSide)", commit)
+        self.assertNotIn("AzimuthMatchingDirection", commit)
         self.assertIn("live.FocusWorld,", source)
         self.assertIn("The body root is stable across a pose change", source)
 

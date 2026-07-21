@@ -59,6 +59,8 @@ namespace HS2OrbitAndExciter
 
         /// <summary>本圈起始：相機相對當前繞軸的方位角（度）。</summary>
         private float _startRelativeAzimuth;
+        /// <summary>換姿／開協助用的正面／背面交替記憶；協助關閉時清空。</summary>
+        private OrbitBodyAxis.FaceSide? _lastStartSide;
         private OrbitBodyAxis.OrbitAxisMode _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.Torso;
         private int _orbitPhase;
         private float _orbitAccumulatedDegrees;
@@ -1645,13 +1647,7 @@ namespace HS2OrbitAndExciter
             bool storyboardSafeCamera = IsStoryboardSafeCameraEnabled();
             if (storyboardSafeCamera)
                 _orbitAxisMode = OrbitBodyAxis.OrbitAxisMode.WorldVertical;
-            Vector3 camFwd = ctrl.thisCamera != null
-                ? ctrl.thisCamera.transform.forward
-                : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-            Vector3 axis = storyboardSafeCamera
-                ? OrbitFloorNormal.GetSkyward(hScene, live.FocusWorld)
-                : OrbitBodyAxis.SpinAxis(live, _orbitAxisMode);
-            _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(live, axis, camFwd);
+            _startRelativeAzimuth = OrbitBodyAxis.RollAlternatingFrontBackAzimuth(ref _lastStartSide);
             _orbitAccumulatedDegrees = 0f;
 
             OrbitStateMachineLog.Event(
@@ -1683,6 +1679,7 @@ namespace HS2OrbitAndExciter
             CancelStableRebind();
             if (!active)
             {
+                _lastStartSide = null;
                 OrbitMapVanishAssist.ResetInjectedState();
                 OrbitOcclusion20Test.Reset();
             }
@@ -1727,19 +1724,8 @@ namespace HS2OrbitAndExciter
                 _currentViewOption = maxFocus > 1 ? 1 : 0;
                 ApplyCurrentViewOption(hScene, (CameraControl_Ver2)ctrl);
                 OrbitOcclusion20Test.Arm(hScene, (CameraControl_Ver2)ctrl, BoneFocusIndex());
-                // 初始軸＋傾斜；方位角對齊目前相機朝向
-                if (chaFemales != null && TryGetOrbitBasis(chaFemales, BoneFocusIndex(), out var basis))
-                {
-                    Vector3 camFwd = ctrl.thisCamera != null
-                        ? ctrl.thisCamera.transform.forward
-                        : Quaternion.Euler(ctrl.CameraAngle) * Vector3.forward;
-                    Vector3 axis = storyboardSafeCamera
-                        ? OrbitFloorNormal.GetSkyward(hScene, basis.FocusWorld)
-                        : OrbitBodyAxis.SpinAxis(basis, _orbitAxisMode);
-                    _startRelativeAzimuth = OrbitBodyAxis.AzimuthMatchingDirection(basis, axis, camFwd);
-                }
-                else
-                    _startRelativeAzimuth = 0f;
+                // 開協助視為第一段起點：正面／背面交替亂數（非對齊原版背拍）
+                _startRelativeAzimuth = OrbitBodyAxis.RollAlternatingFrontBackAzimuth(ref _lastStartSide);
                 _lastNowAnimationInfoRef = hScene.ctrlFlag?.nowAnimationInfo;
                 if (IsInPreparationState(hScene))
                 {
@@ -1755,6 +1741,7 @@ namespace HS2OrbitAndExciter
                 _wasOrbitCameraSpinning = false;
                 _waitingForPrepStart = false;
                 _prepFrozenElapsed = -1f;
+                _lastStartSide = null;
                 OrbitPoseDirector.Reset();
                 // false = 還原原版滑鼠／鍵盤調視角
                 ctrl.NoCtrlCondition = NoCtrlUser;

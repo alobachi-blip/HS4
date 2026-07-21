@@ -62,12 +62,53 @@ namespace HS2OrbitAndExciter
             return (OrbitAxisMode)mode;
         }
 
+        /// <summary>正面／背面半球（開協助、換姿交替用）。0°≈正面，180°≈背面。</summary>
+        internal enum FaceSide : byte
+        {
+            Front = 0,
+            Back = 1,
+        }
+
+        internal const float FaceHemisphereHalfWidthDegrees = 30f;
+
         /// <summary>任意起始方位角（非整數，0～360）。</summary>
         internal static float RollAnyAzimuthDegrees()
         {
             float a = UnityEngine.Random.Range(0f, 360f);
             a += UnityEngine.Random.Range(0.07f, 0.93f);
             return a % 360f;
+        }
+
+        /// <summary>正面半球亂數（約 330°～30°，帶小數）。</summary>
+        internal static float RollFrontHemisphereAzimuthDegrees()
+            => RollFaceSideAzimuthDegrees(FaceSide.Front);
+
+        /// <summary>背面半球亂數（約 150°～210°，帶小數）。</summary>
+        internal static float RollBackHemisphereAzimuthDegrees()
+            => RollFaceSideAzimuthDegrees(FaceSide.Back);
+
+        internal static float RollFaceSideAzimuthDegrees(FaceSide side)
+        {
+            float center = side == FaceSide.Front ? 0f : 180f;
+            float a = center + UnityEngine.Random.Range(-FaceHemisphereHalfWidthDegrees, FaceHemisphereHalfWidthDegrees);
+            a += UnityEngine.Random.Range(0.07f, 0.93f);
+            if (a < 0f)
+                a += 360f;
+            return a % 360f;
+        }
+
+        /// <summary>
+        /// 正面／背面交替起始方位角：第一次 50/50；之後必定與上次相反。
+        /// </summary>
+        internal static float RollAlternatingFrontBackAzimuth(ref FaceSide? lastSide)
+        {
+            FaceSide side;
+            if (!lastSide.HasValue)
+                side = UnityEngine.Random.value < 0.5f ? FaceSide.Front : FaceSide.Back;
+            else
+                side = lastSide.Value == FaceSide.Front ? FaceSide.Back : FaceSide.Front;
+            lastSide = side;
+            return RollFaceSideAzimuthDegrees(side);
         }
 
         /// <summary>亂數相對角改變量（舊路徑備用）。</summary>
